@@ -1,0 +1,5718 @@
+{
+  "920087": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "920403": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "600108": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "600313": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "600354": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "600359": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "600371": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "600540": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "600598": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "601118": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "000998": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "002041": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "002772": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "300189": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "300511": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "300970": {
+    "industry_code": "hangye_ZA01",
+    "industry_name": "农业"
+  },
+  "000592": {
+    "industry_code": "hangye_ZA02",
+    "industry_name": "林业"
+  },
+  "002200": {
+    "industry_code": "hangye_ZA02",
+    "industry_name": "林业"
+  },
+  "002679": {
+    "industry_code": "hangye_ZA02",
+    "industry_name": "林业"
+  },
+  "920786": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "600975": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "603477": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "603717": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "605296": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "000735": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "001201": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "002124": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "002157": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "002234": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "002299": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "002321": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "002458": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "002714": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "002982": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "300106": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "300313": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "300498": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "300761": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "300967": {
+    "industry_code": "hangye_ZA03",
+    "industry_name": "畜牧业"
+  },
+  "600097": {
+    "industry_code": "hangye_ZA04",
+    "industry_name": "渔业"
+  },
+  "600257": {
+    "industry_code": "hangye_ZA04",
+    "industry_name": "渔业"
+  },
+  "600467": {
+    "industry_code": "hangye_ZA04",
+    "industry_name": "渔业"
+  },
+  "000798": {
+    "industry_code": "hangye_ZA04",
+    "industry_name": "渔业"
+  },
+  "002069": {
+    "industry_code": "hangye_ZA04",
+    "industry_name": "渔业"
+  },
+  "002086": {
+    "industry_code": "hangye_ZA04",
+    "industry_name": "渔业"
+  },
+  "002696": {
+    "industry_code": "hangye_ZA04",
+    "industry_name": "渔业"
+  },
+  "200992": {
+    "industry_code": "hangye_ZA04",
+    "industry_name": "渔业"
+  },
+  "000713": {
+    "industry_code": "hangye_ZA05",
+    "industry_name": "农、林、牧、渔服务业"
+  },
+  "300087": {
+    "industry_code": "hangye_ZA05",
+    "industry_name": "农、林、牧、渔服务业"
+  },
+  "600121": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600123": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600188": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600348": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600395": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600397": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600403": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600508": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600546": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600758": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600925": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600971": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600985": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "601001": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "601088": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "601101": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "601225": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "601666": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "601699": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "601898": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "601918": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "900948": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "000552": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "000937": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "000983": {
+    "industry_code": "hangye_ZB06",
+    "industry_name": "煤炭开采和洗选业"
+  },
+  "600028": {
+    "industry_code": "hangye_ZB07",
+    "industry_name": "石油和天然气开采业"
+  },
+  "600256": {
+    "industry_code": "hangye_ZB07",
+    "industry_name": "石油和天然气开采业"
+  },
+  "600759": {
+    "industry_code": "hangye_ZB07",
+    "industry_name": "石油和天然气开采业"
+  },
+  "600777": {
+    "industry_code": "hangye_ZB07",
+    "industry_name": "石油和天然气开采业"
+  },
+  "600938": {
+    "industry_code": "hangye_ZB07",
+    "industry_name": "石油和天然气开采业"
+  },
+  "601857": {
+    "industry_code": "hangye_ZB07",
+    "industry_name": "石油和天然气开采业"
+  },
+  "000968": {
+    "industry_code": "hangye_ZB07",
+    "industry_name": "石油和天然气开采业"
+  },
+  "300483": {
+    "industry_code": "hangye_ZB07",
+    "industry_name": "石油和天然气开采业"
+  },
+  "600382": {
+    "industry_code": "hangye_ZB08",
+    "industry_name": "黑色金属矿采选业"
+  },
+  "601121": {
+    "industry_code": "hangye_ZB08",
+    "industry_name": "黑色金属矿采选业"
+  },
+  "601969": {
+    "industry_code": "hangye_ZB08",
+    "industry_name": "黑色金属矿采选业"
+  },
+  "000655": {
+    "industry_code": "hangye_ZB08",
+    "industry_name": "黑色金属矿采选业"
+  },
+  "000762": {
+    "industry_code": "hangye_ZB08",
+    "industry_name": "黑色金属矿采选业"
+  },
+  "000923": {
+    "industry_code": "hangye_ZB08",
+    "industry_name": "黑色金属矿采选业"
+  },
+  "001203": {
+    "industry_code": "hangye_ZB08",
+    "industry_name": "黑色金属矿采选业"
+  },
+  "600259": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "600301": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "600338": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "600489": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "600497": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "600547": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "600711": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "600988": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "601020": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "601069": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "601168": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "601899": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "601958": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "603132": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "603993": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "000426": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "000506": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "000603": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "000688": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "000758": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "000975": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "001280": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "001337": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "002155": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "002192": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "002978": {
+    "industry_code": "hangye_ZB09",
+    "industry_name": "有色金属矿采选业"
+  },
+  "603505": {
+    "industry_code": "hangye_ZB10",
+    "industry_name": "非金属矿采选业"
+  },
+  "605086": {
+    "industry_code": "hangye_ZB10",
+    "industry_name": "非金属矿采选业"
+  },
+  "920019": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "920088": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "600583": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "600871": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "600968": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "601808": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "603619": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "603727": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "603979": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "002207": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "002554": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "002683": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "002828": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "300084": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "300164": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "300191": {
+    "industry_code": "hangye_ZB11",
+    "industry_name": "开采辅助活动"
+  },
+  "920275": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "920371": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "920419": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "920826": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "600127": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "600191": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "600251": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "600737": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "600883": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "600965": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "601952": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603057": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603151": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603182": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603231": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603336": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603345": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603363": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603517": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603536": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603609": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "603668": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "605077": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "605089": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "605567": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "000505": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "000523": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "000529": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "000639": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "000702": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "000876": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "000895": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "000911": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "000972": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "001313": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "001366": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002100": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002286": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002311": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002330": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002385": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002515": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002548": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002557": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002567": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002582": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002695": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002702": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002726": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002746": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002840": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002852": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002891": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "002991": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "003000": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "003030": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "200505": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "300094": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "300138": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "300175": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "300268": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "300673": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "300999": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "301116": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "301498": {
+    "industry_code": "hangye_ZC13",
+    "industry_name": "农副食品加工业"
+  },
+  "920273": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "920422": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "920429": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "920726": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "920970": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600073": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600186": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600298": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600299": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600305": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600381": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600419": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600429": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600597": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600784": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600866": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600872": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600873": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600882": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600887": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "600929": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603020": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603027": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603043": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603079": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603102": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603170": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603235": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603237": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603262": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603288": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603299": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603317": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603696": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603697": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603739": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603755": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603866": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "603886": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "605016": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "605179": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "605300": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "605338": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "605339": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "688089": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "000716": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "001215": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "001219": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "001318": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002053": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002216": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002329": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002481": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002495": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002507": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002570": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002597": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002626": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002650": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002661": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002719": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002732": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002820": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002847": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002910": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002946": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "002956": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "300146": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "300765": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "300791": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "300829": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "300858": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "300898": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "300908": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "300915": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "300973": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "301156": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "301206": {
+    "industry_code": "hangye_ZC14",
+    "industry_name": "食品制造业"
+  },
+  "920023": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600059": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600084": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600132": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600189": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600197": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600199": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600238": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600300": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600365": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600519": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600543": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600559": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600573": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600600": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600616": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600696": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600702": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600779": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600809": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "600962": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "601579": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "603156": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "603198": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "603369": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "603589": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "603711": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "603779": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "603919": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "605198": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "605337": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "605388": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "605499": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000568": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000596": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000729": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000752": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000799": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000848": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000858": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000860": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000869": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000929": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "000995": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "001338": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "002304": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "002461": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "002568": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "002646": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "200596": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "200869": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "300997": {
+    "industry_code": "hangye_ZC15",
+    "industry_name": "酒、饮料和精制茶制造业"
+  },
+  "920262": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "920394": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "600156": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "600232": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "600448": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "600493": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "600626": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "600630": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "600987": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "601339": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "601599": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "603055": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "603073": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "603130": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "603238": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "603307": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "603365": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "603558": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "603665": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "603889": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "605003": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "605055": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "605080": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "605155": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "605180": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "605189": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "000726": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "000850": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "000955": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "002042": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "002083": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "002144": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "002193": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "002293": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "002327": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "002394": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "002397": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "002516": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "003041": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "200726": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "300163": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "300577": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "300658": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "300819": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "300877": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "300888": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "300918": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "300952": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "300993": {
+    "industry_code": "hangye_ZC17",
+    "industry_name": "纺织业"
+  },
+  "600107": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "600137": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "600177": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "600398": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "600400": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "601566": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "601718": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "603196": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "603511": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "603518": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "603587": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "603808": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "603839": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "603877": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "603908": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "605138": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "001209": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "001234": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002003": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002029": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002154": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002269": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002404": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002486": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002563": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002569": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002612": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002634": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002656": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002687": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002762": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002763": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002832": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "002875": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "003016": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "300005": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "300840": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "301066": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "301276": {
+    "industry_code": "hangye_ZC18",
+    "industry_name": "纺织服装、服饰业"
+  },
+  "600439": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "600735": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "603001": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "603116": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "603557": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "603608": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "603958": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "605068": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "001390": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "002494": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "002674": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "300591": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "300979": {
+    "industry_code": "hangye_ZC19",
+    "industry_name": "皮革、毛皮、羽毛及其制品和制鞋业"
+  },
+  "600076": {
+    "industry_code": "hangye_ZC20",
+    "industry_name": "木材加工和木、竹、藤、棕、草制品业"
+  },
+  "600265": {
+    "industry_code": "hangye_ZC20",
+    "industry_name": "木材加工和木、竹、藤、棕、草制品业"
+  },
+  "601996": {
+    "industry_code": "hangye_ZC20",
+    "industry_name": "木材加工和木、竹、藤、棕、草制品业"
+  },
+  "603226": {
+    "industry_code": "hangye_ZC20",
+    "industry_name": "木材加工和木、竹、藤、棕、草制品业"
+  },
+  "000910": {
+    "industry_code": "hangye_ZC20",
+    "industry_name": "木材加工和木、竹、藤、棕、草制品业"
+  },
+  "001211": {
+    "industry_code": "hangye_ZC20",
+    "industry_name": "木材加工和木、竹、藤、棕、草制品业"
+  },
+  "002043": {
+    "industry_code": "hangye_ZC20",
+    "industry_name": "木材加工和木、竹、藤、棕、草制品业"
+  },
+  "002631": {
+    "industry_code": "hangye_ZC20",
+    "industry_name": "木材加工和木、竹、藤、棕、草制品业"
+  },
+  "301227": {
+    "industry_code": "hangye_ZC20",
+    "industry_name": "木材加工和木、竹、藤、棕、草制品业"
+  },
+  "920132": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "920445": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "920765": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603008": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603180": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603208": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603216": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603313": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603326": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603389": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603600": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603610": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603661": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603709": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603801": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603816": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603818": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603833": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "603898": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "000663": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "001238": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "001323": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "002489": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "002572": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "002853": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "300616": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "300729": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "300749": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "301061": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "301113": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "301336": {
+    "industry_code": "hangye_ZC21",
+    "industry_name": "家具制造业"
+  },
+  "920392": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "600103": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "600235": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "600308": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "600356": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "600433": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "600567": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "600793": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "600963": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "600966": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "603022": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "603091": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "603165": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "603284": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "603607": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "603687": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "603733": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "603863": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "605007": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "605009": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "605377": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "605500": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "000488": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "000815": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "001206": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002012": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002067": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002078": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002228": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002247": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002303": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002511": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002521": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002565": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002799": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "002831": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "003006": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "200488": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "300883": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "301009": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "301062": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "301223": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "301296": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "301355": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "301469": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "301501": {
+    "industry_code": "hangye_ZC22",
+    "industry_name": "造纸和纸制品业"
+  },
+  "920075": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "920121": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "601515": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "603058": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "603429": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "603499": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "000812": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "001279": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "002117": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "002191": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "002229": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "002599": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "002836": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "002951": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "003003": {
+    "industry_code": "hangye_ZC23",
+    "industry_name": "印刷和记录媒介复制业"
+  },
+  "603272": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "603899": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "605099": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "605299": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "000017": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "001222": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "001300": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002103": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002292": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002301": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002348": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002574": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002575": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002678": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002721": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002731": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002862": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "002899": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "200017": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "300329": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "300640": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "300651": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "300703": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "300756": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "301011": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "301287": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "301335": {
+    "industry_code": "hangye_ZC24",
+    "industry_name": "文教、工美、体育和娱乐用品制造业"
+  },
+  "600408": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "600506": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "600688": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "600724": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "600740": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "600792": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "600997": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "601011": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "601015": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "603113": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "603798": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "000059": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "000637": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "000698": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "000723": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "000819": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "002778": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "300839": {
+    "industry_code": "hangye_ZC25",
+    "industry_name": "石油加工、炼焦和核燃料加工业"
+  },
+  "920015": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920016": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920033": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920123": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920159": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920261": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920304": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920402": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920471": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920489": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920519": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920527": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920819": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920832": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920866": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920957": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920974": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600075": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600078": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600096": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600135": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600141": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600160": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600165": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600223": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600230": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600249": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600273": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600309": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600315": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600319": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600328": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600352": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600367": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600370": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600378": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600389": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600409": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600423": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600426": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600470": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600486": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600500": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600596": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600610": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600618": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600623": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600691": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600714": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600722": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600727": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600731": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600746": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600800": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600844": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600935": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600955": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "600989": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "601026": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "601065": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "601208": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "601216": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "601568": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "601678": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603004": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603010": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603026": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603041": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603062": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603065": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603067": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603077": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603078": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603086": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603110": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603120": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603125": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603155": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603172": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603181": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603188": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603192": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603193": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603213": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603217": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603227": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603255": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603260": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603276": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603281": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603285": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603310": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603330": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603360": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603378": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603379": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603382": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603395": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603585": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "603599": {
+    "industry_code": "hangye_ZC26",
+    "industry_name": "化学原料和化学制品制造业"
+  },
+  "920009": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920017": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920047": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920050": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920230": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920266": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920344": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920367": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920433": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920478": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920547": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920566": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920575": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920656": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920729": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920735": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920946": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920982": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600062": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600079": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600080": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600085": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600129": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600161": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600195": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600196": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600201": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600211": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600216": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600222": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600227": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600252": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600267": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600276": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600285": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600329": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600332": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600351": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600380": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600420": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600422": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600436": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600479": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600488": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600513": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600518": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600521": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600530": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600535": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600557": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600566": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600572": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600594": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600613": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600624": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600664": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600671": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600750": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600771": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600789": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600812": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600851": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600867": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "600993": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "601089": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603087": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603139": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603168": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603207": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603222": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603229": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603351": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603367": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603387": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603392": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603439": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603456": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603520": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603538": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603566": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603567": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603590": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603658": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603669": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603676": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603707": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603718": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603811": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603858": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603880": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603896": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603976": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "603998": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "605116": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "605177": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "605199": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "605507": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "688062": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "688068": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "688075": {
+    "industry_code": "hangye_ZC27",
+    "industry_name": "医药制造业"
+  },
+  "920077": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "600063": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "600346": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "600527": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "600810": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "600889": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "601113": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "601233": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "603225": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "603332": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "603406": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "688065": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "688203": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "688295": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "688722": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "000420": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "000677": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "000703": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "000782": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "000936": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "000949": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "002064": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "002172": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "002206": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "002254": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "002427": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "002493": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "002998": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "300699": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "300777": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "300876": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "301057": {
+    "industry_code": "hangye_ZC28",
+    "industry_name": "化学纤维制造业"
+  },
+  "920020": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920056": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920066": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920089": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920098": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920118": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920163": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920195": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920204": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920225": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920247": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920274": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920469": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920642": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920665": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920694": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920834": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920871": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "600143": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "600182": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "600210": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "600458": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "600469": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "601058": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "601163": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "601500": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "601966": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603033": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603049": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603051": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603150": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603212": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603221": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603266": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603408": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603580": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603615": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603655": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603657": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603726": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603806": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603856": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603991": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "603992": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "605255": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "605488": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "688026": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "688219": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "688299": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "688323": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "688386": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "688560": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "688669": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "688680": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "000589": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "000599": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "000619": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "000659": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "000859": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "000887": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "000973": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "001233": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "001325": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "001356": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "001368": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "001378": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002014": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002108": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002224": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002243": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002263": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002324": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002372": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002381": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002395": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002420": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002522": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002585": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002641": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002676": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002694": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002735": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002768": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002790": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002812": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002825": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002838": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002886": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "002984": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "003011": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "003018": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "300169": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "300180": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "300198": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "300218": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "300221": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "300230": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "300305": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "300320": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "300321": {
+    "industry_code": "hangye_ZC29",
+    "industry_name": "橡胶和塑料制品业"
+  },
+  "920076": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920149": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920175": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920179": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920185": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920438": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920580": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920675": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920719": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920725": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920792": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "920807": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600172": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600176": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600207": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600293": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600326": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600366": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600425": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600449": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600516": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600529": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600585": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600586": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600660": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600668": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600678": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600783": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600801": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600802": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600819": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600876": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600881": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "601112": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "601636": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "601865": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "601992": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603021": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603119": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603256": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603268": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603385": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603578": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603601": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603612": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603616": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603663": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603688": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603725": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603826": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "603838": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "605006": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "605122": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "688077": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "688119": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "688300": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "688398": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "688598": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "688733": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "900918": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "000012": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "000401": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "000672": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "000695": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "000786": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "000789": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "000795": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "000877": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "000935": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "001212": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "001216": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "001269": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "001296": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "001301": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "001322": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "001359": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "001386": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002066": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002080": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002088": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002162": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002201": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002205": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002225": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002233": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002271": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002302": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002392": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002457": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002571": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002596": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002623": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002671": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002742": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002785": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002798": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "002918": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "003012": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "003037": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "200012": {
+    "industry_code": "hangye_ZC30",
+    "industry_name": "非金属矿物制品业"
+  },
+  "600010": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600019": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600022": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600117": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600126": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600231": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600282": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600295": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600307": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600399": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600507": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600569": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600581": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600782": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "600808": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "601003": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "601005": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "603191": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "603878": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "603995": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "688190": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "900936": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "000708": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "000709": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "000717": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "000761": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "000825": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "000898": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "000932": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "000959": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "002075": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "002110": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "200761": {
+    "industry_code": "hangye_ZC31",
+    "industry_name": "黑色金属冶炼和压延加工业"
+  },
+  "920068": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "920576": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600110": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600111": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600206": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600219": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600255": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600281": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600331": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600361": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600362": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600392": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600456": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600459": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600490": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600531": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600549": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600595": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600768": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "600961": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "601137": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "601212": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "601388": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "601600": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "601609": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "601677": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "601702": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "603271": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "603399": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "603527": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "603799": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "603876": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "603978": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "605208": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "688102": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "688122": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "688231": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "688257": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "688750": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000060": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000612": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000629": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000630": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000633": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000657": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000737": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000751": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000807": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000831": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000878": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000933": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000960": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "000962": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002114": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002128": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002149": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002160": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002167": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002171": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002182": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002203": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002237": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002240": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002295": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002333": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002378": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002379": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002428": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002460": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002466": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002501": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002532": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002540": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002578": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002667": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002716": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002824": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002842": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "002988": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "003038": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "300034": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "300057": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "300337": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "300489": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "300618": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "300697": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "300855": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "300963": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "301219": {
+    "industry_code": "hangye_ZC32",
+    "industry_name": "有色金属冶炼和压延加工业"
+  },
+  "920007": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "920057": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "920505": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "920510": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "920634": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "920693": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "920699": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "920720": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "920751": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "600114": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "600477": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "600496": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "600558": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "600615": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "600992": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "601096": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "601686": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "601700": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "601968": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603040": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603112": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603278": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603339": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603348": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603577": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603626": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603629": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603848": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603937": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603969": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "603985": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "605123": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "605158": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "605268": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "605376": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "688059": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "688186": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "688308": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "688355": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "688379": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "688456": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "688786": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "000039": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "000055": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "000778": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "000890": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "000969": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "001221": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "001226": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "001239": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002026": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002032": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002084": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002132": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002135": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002150": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002297": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002318": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002342": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002374": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002403": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002443": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002444": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002445": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002478": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002487": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002514": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002541": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002547": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002564": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002615": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002652": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002701": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002722": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002743": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002752": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002760": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002787": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002791": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002843": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002846": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002850": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002921": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002965": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002969": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "002976": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "003043": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "200055": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300328": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300345": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300488": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300828": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300881": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300885": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300946": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300953": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300985": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300986": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "300988": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "301004": {
+    "industry_code": "hangye_ZC33",
+    "industry_name": "金属制品业"
+  },
+  "920002": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920082": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920119": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920169": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920223": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920245": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920270": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920378": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920418": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920455": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920570": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920578": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920579": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920608": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920662": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920679": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920689": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920808": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920810": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920833": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920839": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920855": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920870": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920896": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920943": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600067": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600218": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600243": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600421": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600444": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600592": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600619": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600835": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600841": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600875": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "600894": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "601002": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "601177": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "601615": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "601727": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "601882": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "601956": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603011": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603082": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603090": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603092": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603131": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603173": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603187": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603194": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603201": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603218": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603248": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603269": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603270": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603277": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603279": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603298": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603315": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603320": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603321": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603325": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603356": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603391": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603400": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603611": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603617": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603667": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603699": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603757": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603915": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "603966": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "605060": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "605100": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "605259": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "605286": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "605389": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688017": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688090": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688092": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688165": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688211": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688218": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688251": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688255": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688305": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688333": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688360": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688409": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688433": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688448": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688455": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688557": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688558": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688577": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688605": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688648": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688660": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688678": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "688697": {
+    "industry_code": "hangye_ZC34",
+    "industry_name": "通用设备制造业"
+  },
+  "920000": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920022": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920086": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920106": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920146": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920168": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920187": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920221": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920271": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920436": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920454": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920533": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920663": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920690": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920837": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920906": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "920978": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600006": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600066": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600081": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600104": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600148": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600166": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600178": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600303": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600375": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600418": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600480": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600501": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600523": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600609": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600686": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600698": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600699": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600733": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600741": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600742": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600933": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "600960": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "601127": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "601238": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "601279": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "601633": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "601689": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "601717": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "601777": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "601799": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603006": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603009": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603013": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603035": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603037": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603048": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603085": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603089": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603107": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603121": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603158": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603161": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603166": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603178": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603179": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603190": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603197": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603202": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603210": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603211": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603239": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603286": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603305": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603306": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603319": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603335": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603352": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603358": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603376": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603409": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603418": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603586": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603596": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603730": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603758": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603767": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603768": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603786": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603788": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603809": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603922": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603926": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603949": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603950": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603982": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "603997": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "605005": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "605018": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "605088": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "605128": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "605133": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "605151": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  },
+  "605228": {
+    "industry_code": "hangye_ZC36",
+    "industry_name": "汽车制造业"
+  }
+}
