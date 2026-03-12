@@ -267,7 +267,8 @@ export default function TerrainMesh({
         uniforms={uniforms}
         transparent
         side={THREE.DoubleSide}
-        extensions={{ derivatives: true }}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        extensions={{ derivatives: true } as any}
       />
     </mesh>
   );

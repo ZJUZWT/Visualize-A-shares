@@ -19,6 +19,7 @@ export default function Sidebar() {
     isLoading,
     error,
     lastUpdateTime,
+    isStaticMode,
     zMetric,
     showLabels,
     showGrid,
@@ -69,33 +70,54 @@ export default function Sidebar() {
 
       {/* ─── 操作按钮 ─────────────────────── */}
       <div className="glass-panel px-5 py-4">
-        <button
-          onClick={fetchTerrain}
-          disabled={isLoading}
-          className="btn-primary w-full"
-        >
-          {isLoading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-              </svg>
-              计算中...
-            </span>
-          ) : terrainData ? (
-            "🔄 重新计算地形"
-          ) : (
-            "🏔️ 生成 3D 地形"
-          )}
-        </button>
+        {isStaticMode ? (
+          <>
+            {terrainData && (
+              <div className="text-[11px] text-[var(--text-tertiary)] bg-[var(--accent-light)] rounded-lg px-3 py-2 text-center">
+                📸 展示模式 · 数据快照
+              </div>
+            )}
+            {isLoading && (
+              <div className="flex items-center justify-center gap-2 text-sm text-[var(--text-secondary)]">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                加载数据中...
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <button
+              onClick={fetchTerrain}
+              disabled={isLoading}
+              className="btn-primary w-full"
+            >
+              {isLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  计算中...
+                </span>
+              ) : terrainData ? (
+                "🔄 重新计算地形"
+              ) : (
+                "🏔️ 生成 3D 地形"
+              )}
+            </button>
 
-        {terrainData && (
-          <button
-            onClick={refreshTerrain}
-            className="btn-secondary w-full mt-2"
-          >
-            ⚡ 快速刷新行情
-          </button>
+            {terrainData && (
+              <button
+                onClick={refreshTerrain}
+                className="btn-secondary w-full mt-2"
+              >
+                ⚡ 快速刷新行情
+              </button>
+            )}
+          </>
         )}
 
         {error && (
@@ -183,7 +205,8 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* ─── 聚类权重 ─────────────────────── */}
+      {/* ─── 聚类权重（仅动态模式）─────────── */}
+      {!isStaticMode && (
       <div className="glass-panel px-5 py-4">
         <SectionTitle>聚类权重</SectionTitle>
         
@@ -258,6 +281,7 @@ export default function Sidebar() {
           {isLoading ? "计算中..." : "🏔️ 重新计算地形"}
         </button>
       </div>
+      )}
 
       {/* ─── 显示选项 ─────────────────────── */}
       <div className="glass-panel px-5 py-4">

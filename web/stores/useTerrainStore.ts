@@ -1,14 +1,20 @@
 /**
- * 地形状态管理 v2.0 (Zustand)
+ * 地形状态管理 v3.0 (Zustand)
  *
- * v2.0 新增：
+ * v3.0 新增：
+ * - 静态快照模式（GitHub Pages 部署时自动加载预计算数据）
  * - 多指标网格缓存（切换指标零延迟）
  * - 影响半径滑块控制
- * - 浅色主题状态
  */
 
 import { create } from "zustand";
 import type { TerrainData, StockPoint, ZMetric } from "@/types/terrain";
+
+/** 获取资源的 base path（兼容 GitHub Pages 子路径部署） */
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
+
+/** 是否为静态部署模式（无后端 API） */
+const IS_STATIC = process.env.NEXT_PUBLIC_STATIC_MODE === "true";
 
 interface TerrainState {
   // ─── 数据 ────────────────────────────
@@ -16,6 +22,7 @@ interface TerrainState {
   isLoading: boolean;
   error: string | null;
   lastUpdateTime: Date | null;
+  isStaticMode: boolean;
 
   // ─── 交互状态 ────────────────────────
   selectedStock: StockPoint | null;
@@ -55,6 +62,7 @@ interface TerrainState {
   toggleContours: () => void;
   fetchTerrain: () => Promise<void>;
   refreshTerrain: () => Promise<void>;
+  loadSnapshot: () => Promise<void>;
   
   // v2.0: 本地切换指标（零延迟）
   switchMetricLocal: (metric: ZMetric) => void;
@@ -66,6 +74,7 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   isLoading: false,
   error: null,
   lastUpdateTime: null,
+  isStaticMode: IS_STATIC,
 
   selectedStock: null,
   hoveredStock: null,
@@ -140,8 +149,35 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
     });
   },
 
-  // 全量计算
+  // 加载静态快照（GitHub Pages 模式）
+  loadSnapshot: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const url = `${BASE_PATH}/terrain_snapshot.json`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`加载快照失败: HTTP ${res.status}`);
+      const data: TerrainData = await res.json();
+      set({
+        terrainData: data,
+        isLoading: false,
+        lastUpdateTime: new Date(),
+        isStaticMode: true,
+      });
+    } catch (e) {
+      set({
+        error: e instanceof Error ? e.message : "加载快照失败",
+        isLoading: false,
+      });
+    }
+  },
+
+  // 全量计算（需要后端 API）
   fetchTerrain: async () => {
+    // 静态模式下加载快照
+    if (IS_STATIC) {
+      return get().loadSnapshot();
+    }
+
     set({ isLoading: true, error: null });
     try {
       const {
@@ -183,8 +219,10 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
     }
   },
 
-  // 快速刷新 Z 轴
+  // 快速刷新 Z 轴（需要后端 API）
   refreshTerrain: async () => {
+    if (IS_STATIC) return; // 静态模式不支持刷新
+    
     const { zMetric } = get();
     try {
       const res = await fetch(

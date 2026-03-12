@@ -1,14 +1,18 @@
 "use client";
 
 /**
- * StockTerrain v2.0 主页面
+ * StockTerrain v3.0 主页面
  *
- * 清爽简约风格
+ * 支持两种模式:
+ * - 动态模式: 连接后端 API 实时计算
+ * - 静态模式: 加载预计算快照（GitHub Pages）
  */
 
+import { useEffect } from "react";
 import dynamic from "next/dynamic";
 import Sidebar from "@/components/ui/Sidebar";
 import TopBar from "@/components/ui/TopBar";
+import { useTerrainStore } from "@/stores/useTerrainStore";
 
 const TerrainScene = dynamic(
   () => import("@/components/canvas/TerrainScene"),
@@ -19,6 +23,14 @@ const TerrainScene = dynamic(
 );
 
 export default function Home() {
+  const { isStaticMode, terrainData, loadSnapshot } = useTerrainStore();
+
+  // 静态模式下自动加载快照
+  useEffect(() => {
+    if (isStaticMode && !terrainData) {
+      loadSnapshot();
+    }
+  }, [isStaticMode, terrainData, loadSnapshot]);
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-[#EEF2F7]">
       {/* Layer 0: 3D 场景 */}
