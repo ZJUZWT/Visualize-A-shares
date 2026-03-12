@@ -26,7 +26,8 @@ interface TerrainMeshProps {
     zmin: number; zmax: number;
   };
   heightScale?: number;
-  xyScale?: number;
+  xScale?: number;
+  yScale?: number;
   showContours?: boolean;
 }
 
@@ -35,7 +36,8 @@ export default function TerrainMesh({
   resolution,
   bounds,
   heightScale = 3.0,
-  xyScale = 1.5,
+  xScale = 1.5,
+  yScale = 1.5,
   showContours = true,
 }: TerrainMeshProps) {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -53,8 +55,8 @@ export default function TerrainMesh({
     if (!heightData || heightData.length === 0) return null;
 
     const res = resolution;
-    const xExtent = (bounds.xmax - bounds.xmin || 20) * xyScale;
-    const zExtent = (bounds.ymax - bounds.ymin || 20) * xyScale;
+    const xExtent = (bounds.xmax - bounds.xmin || 20) * xScale;
+    const zExtent = (bounds.ymax - bounds.ymin || 20) * yScale;
     const xCenter = (bounds.xmin + bounds.xmax) / 2;
     const zCenter = (bounds.ymin + bounds.ymax) / 2;
 
@@ -71,9 +73,9 @@ export default function TerrainMesh({
         const u = ix / (res - 1);
         const v = iy / (res - 1);
 
-        // XZ 对齐后端 UMAP 坐标空间 × xyScale
-        const worldX = (bounds.xmin + u * (bounds.xmax - bounds.xmin)) * xyScale;
-        const worldZ = (bounds.ymin + v * (bounds.ymax - bounds.ymin)) * xyScale;
+        // XZ 对齐后端 UMAP 坐标空间 × xScale/yScale
+        const worldX = (bounds.xmin + u * (bounds.xmax - bounds.xmin)) * xScale;
+        const worldZ = (bounds.ymin + v * (bounds.ymax - bounds.ymin)) * yScale;
 
         // 归一化高度 [0,1]
         const rawZ = heightData[idx] ?? 0;
@@ -95,7 +97,7 @@ export default function TerrainMesh({
       }
     }
 
-    // 构建索引
+    // 构建索引 (CCW 缠绕 — Three.js 默认正面)
     const indices: number[] = [];
     for (let iy = 0; iy < res - 1; iy++) {
       for (let ix = 0; ix < res - 1; ix++) {
@@ -103,8 +105,9 @@ export default function TerrainMesh({
         const b = a + 1;
         const c = a + res;
         const d = c + 1;
-        indices.push(a, c, b);
-        indices.push(b, c, d);
+        // CCW: 从上方(+Y)看为逆时针
+        indices.push(a, b, c);
+        indices.push(b, d, c);
       }
     }
 
@@ -116,7 +119,7 @@ export default function TerrainMesh({
     geo.setIndex(indices);
 
     return geo;
-  }, [heightData, resolution, bounds, xyScale, zMin, zRange, zeroLevel]);
+  }, [heightData, resolution, bounds, xScale, yScale, zMin, zRange, zeroLevel]);
 
   // ─── 顶点着色器 ─────────────────────────────────────
   const vertexShader = useMemo(() => /* glsl */ `
@@ -198,6 +201,8 @@ export default function TerrainMesh({
       vec3 dx = dFdx(vWorldPos);
       vec3 dz = dFdy(vWorldPos);
       vec3 N = normalize(cross(dx, dz));
+      // 确保法线指向观察者（双面渲染时背面法线需要翻转）
+      if (!gl_FrontFacing) N = -N;
 
       vec3 lightDir = normalize(vec3(0.3, 1.0, 0.5));
       float NdotL = max(dot(N, lightDir), 0.0);
