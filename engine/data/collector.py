@@ -173,8 +173,8 @@ class DataCollector:
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
 
-        # 限制最多 2000 只，减少请求量
-        target_codes = stock_codes[:2000]
+        # 限制最多 500 只（减少请求量，避免超时）
+        target_codes = stock_codes[:500]
 
         logger.info(
             f"📅 批量拉取 {len(target_codes)} 只股票历史日线 "
@@ -205,7 +205,7 @@ class DataCollector:
             return None
 
         # 降低并发到 3 线程，分批处理防限流
-        BATCH_SIZE = 100
+        BATCH_SIZE = 50
         MAX_WORKERS = 3
 
         for batch_start in range(0, len(target_codes), BATCH_SIZE):
@@ -237,8 +237,8 @@ class DataCollector:
             if done < len(target_codes):
                 time.sleep(0.5)
 
-            # 如果已经拉到足够数据（>500只成功），可以提前停止
-            if success >= 500 and failed > success * 2:
+            # 如果已经拉到足够数据（>200只成功），可以提前停止
+            if success >= 200 and failed > success * 2:
                 logger.warning("失败率过高，提前停止拉取")
                 break
 
