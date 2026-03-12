@@ -312,9 +312,9 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
     try {
       const { zMetric } = get();
       
-      // 90 秒超时（远程拉取历史数据可能较慢）
+      // 180 秒超时（首次拉取全市场历史数据可能需要 2-3 分钟）
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 90000);
+      const timeout = setTimeout(() => controller.abort(), 180000);
       
       const res = await fetch("/api/v1/terrain/history", {
         method: "POST",

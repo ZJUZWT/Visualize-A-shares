@@ -201,11 +201,13 @@ async def get_terrain_history(req: HistoryRequest = HistoryRequest()):
     
     策略：
     1. 优先从 DuckDB 本地每日快照查询（毫秒级）
-    2. 如果本地数据不足，则远程拉取（限制 500 只、45 秒超时）
+    2. 如果本地数据不足 N 天，则全量远程拉取（20 线程并发）
+    3. 远程拉取的数据会持久化到 DuckDB，下次秒出
     
     性能优化：
-    - 批量构建所有帧的 z_dict 后一起传给插值引擎，共享空间索引
-    - 远程拉取加超时保护，防止无限等待
+    - 全市场并行拉取（20 线程 × 批次100只）
+    - 拉取后存入 DuckDB，后续请求无需重复拉取
+    - 批量插值：所有帧共享一次 compute_terrain_multi 调用
     """
     pipeline = get_pipeline()
     if pipeline._last_embedding is None or pipeline._last_meta_df is None:
@@ -230,49 +232,49 @@ async def get_terrain_history(req: HistoryRequest = HistoryRequest()):
 
         # ─── 策略 1: 尝试从 DuckDB 读取本地每日快照 ─────
         local_snapshots = await asyncio.to_thread(store.get_snapshot_daily_range, req.days)
-        logger.info(f"📅 本地快照: {len(local_snapshots)} 天")
+        logger.info(f"📅 本地快照: {len(local_snapshots)} 天 (需要 {req.days} 天)")
 
-        # ─── 策略 2: 本地数据不足，远程批量拉取（带超时保护）──
-        if len(local_snapshots) < 2:
-            logger.info("📅 本地历史快照不足 2 天，尝试远程拉取...")
+        # ─── 策略 2: 本地数据不足，全量远程拉取 ──────────
+        if len(local_snapshots) < req.days:
+            needed = req.days - len(local_snapshots)
+            logger.info(
+                f"📅 本地快照不足 {req.days} 天（缺 {needed} 天），"
+                f"全量远程拉取 {len(stock_codes)} 只股票..."
+            )
             try:
-                # 限制拉取股票数量为 500 只，避免超时
-                limited_codes = stock_codes[:500]
-                history_by_date = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        collector.get_market_history,
-                        limited_codes,
-                        days=req.days,
-                        z_metric=req.z_metric,
-                    ),
-                    timeout=45.0,  # 45 秒超时
+                history_by_date = await asyncio.to_thread(
+                    collector.get_market_history,
+                    stock_codes,
+                    days=req.days,
+                    z_metric=req.z_metric,
                 )
                 if history_by_date:
-                    local_snapshots = history_by_date
-                    logger.info(f"📅 远程拉取成功: {len(history_by_date)} 天")
-            except asyncio.TimeoutError:
-                logger.warning("📅 远程拉取超时(45s)，使用已有本地数据")
-                if not local_snapshots:
-                    raise HTTPException(
-                        status_code=503,
-                        detail="历史数据不足且远程拉取超时。请先多次「生成3D地形」以积累本地数据（每天至少一次）。"
+                    # 持久化到 DuckDB，下次请求秒出
+                    await asyncio.to_thread(
+                        store.save_history_as_snapshots,
+                        history_by_date,
                     )
+                    # 合并远程数据（远程数据覆盖本地同日期的数据）
+                    for date_str, day_df in history_by_date.items():
+                        if date_str not in local_snapshots or local_snapshots[date_str].empty:
+                            local_snapshots[date_str] = day_df
+                    logger.info(f"📅 远程拉取成功并已持久化: {len(history_by_date)} 天")
             except Exception as e:
                 logger.warning(f"远程拉取失败: {e}")
                 if not local_snapshots:
                     raise HTTPException(
                         status_code=503,
-                        detail="历史数据不足且远程拉取失败。请先多次「生成3D地形」以积累本地数据（每天至少一次）。"
+                        detail="历史数据不足且远程拉取失败。请稍后重试。"
                     )
+                # 有部分本地数据，继续用
 
         if not local_snapshots:
             raise HTTPException(
                 status_code=503,
-                detail="无可用历史数据。请先「生成3D地形」几次（每天至少一次），本地会自动积累快照数据。"
+                detail="无可用历史数据。请先「生成3D地形」以积累本地数据。"
             )
 
         # ─── 逐日生成地形帧 ──────────────────────────────
-        # 先预处理所有天的 z_map，然后批量插值
         sorted_dates = sorted(local_snapshots.keys())
         date_z_maps: list[tuple[str, dict[str, float]]] = []
 
@@ -297,16 +299,15 @@ async def get_terrain_history(req: HistoryRequest = HistoryRequest()):
         if not date_z_maps:
             raise HTTPException(
                 status_code=503,
-                detail="无有效历史帧。请先多次「生成3D地形」以积累本地数据。"
+                detail="无有效历史帧。请先「生成3D地形」以积累本地数据。"
             )
 
-        # 批量构建所有帧的 z_dict（一次性传给插值引擎，共享空间索引和带宽计算）
+        # 批量构建所有帧的 z_dict（一次性传给插值引擎）
         all_z_dict: dict[str, np.ndarray] = {}
         for date_str, z_map in date_z_maps:
             z_values = np.zeros(len(pipeline._last_meta_df))
             for i, code in enumerate(stock_codes):
                 z_values[i] = z_map.get(code, 0.0)
-            # 用日期作为 key 区分不同帧
             all_z_dict[date_str] = z_values
 
         # 一次性计算所有帧的地形（共享 KDTree + 自适应带宽）
