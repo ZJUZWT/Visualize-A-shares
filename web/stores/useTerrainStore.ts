@@ -36,12 +36,27 @@ interface TerrainState {
   radiusScale: number;
   heightScale: number;
 
+  // v6.0: XY 轴缩放控制
+  xyScale: number;      // 整体 XY 缩放
+  xScaleRatio: number;  // X 轴比例因子 (相对于 xyScale)
+  yScaleRatio: number;  // Y 轴比例因子 (相对于 xyScale)
+
   // v3.0: 聚类权重
   weightEmbedding: number;
   weightIndustry: number;
   weightNumeric: number;
   pcaTargetDim: number;
   embeddingPcaDim: number;
+
+  // v5.0: 球体拍平
+  flattenBalls: boolean;
+
+  // v5.0: 历史回放
+  playbackFrames: PlaybackFrame[] | null;
+  playbackIndex: number;
+  isPlaying: boolean;
+  playbackSpeed: number; // 秒/帧
+  playbackLoading: boolean;
 
   // ─── Actions ─────────────────────────
   setTerrainData: (data: TerrainData) => void;
@@ -52,6 +67,9 @@ interface TerrainState {
   setZMetric: (metric: ZMetric) => void;
   setRadiusScale: (scale: number) => void;
   setHeightScale: (scale: number) => void;
+  setXYScale: (scale: number) => void;
+  setXScaleRatio: (ratio: number) => void;
+  setYScaleRatio: (ratio: number) => void;
   setWeightEmbedding: (v: number) => void;
   setWeightIndustry: (v: number) => void;
   setWeightNumeric: (v: number) => void;
@@ -60,12 +78,28 @@ interface TerrainState {
   toggleLabels: () => void;
   toggleGrid: () => void;
   toggleContours: () => void;
+  toggleFlattenBalls: () => void;
   fetchTerrain: () => Promise<void>;
   refreshTerrain: () => Promise<void>;
   loadSnapshot: () => Promise<void>;
   
   // v2.0: 本地切换指标（零延迟）
   switchMetricLocal: (metric: ZMetric) => void;
+
+  // v5.0: 历史回放
+  fetchHistory: (days?: number) => Promise<void>;
+  setPlaybackIndex: (index: number) => void;
+  togglePlayback: () => void;
+  setPlaybackSpeed: (speed: number) => void;
+  stopPlayback: () => void;
+}
+
+/** 历史回放帧 */
+export interface PlaybackFrame {
+  date: string;
+  terrain_grid: number[];
+  bounds: { xmin: number; xmax: number; ymin: number; ymax: number; zmin: number; zmax: number };
+  stock_z_values: Record<string, number>; // code -> z value
 }
 
 export const useTerrainStore = create<TerrainState>((set, get) => ({
@@ -85,12 +119,27 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   radiusScale: 2.0,
   heightScale: 8.0,
 
-  // v3.0: 聚类权重默认值
-  weightEmbedding: 1.5,
-  weightIndustry: 0.8,
-  weightNumeric: 1.0,
+  // v6.0: XY 轴缩放
+  xyScale: 1.5,
+  xScaleRatio: 1.0,
+  yScaleRatio: 1.0,
+
+  // v4.0: 聚类权重默认值（产业链拓扑）
+  weightEmbedding: 2.0,
+  weightIndustry: 0.0,
+  weightNumeric: 0.5,
   pcaTargetDim: 50,
-  embeddingPcaDim: 32,
+  embeddingPcaDim: 50,
+
+  // v5.0: 球体拍平
+  flattenBalls: false,
+
+  // v5.0: 历史回放
+  playbackFrames: null,
+  playbackIndex: 0,
+  isPlaying: false,
+  playbackSpeed: 2.0,
+  playbackLoading: false,
 
   // ─── Actions ─────────────────────────
   setTerrainData: (data) =>
@@ -104,6 +153,9 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   setZMetric: (metric) => set({ zMetric: metric }),
   setRadiusScale: (scale) => set({ radiusScale: scale }),
   setHeightScale: (scale) => set({ heightScale: scale }),
+  setXYScale: (scale) => set({ xyScale: scale }),
+  setXScaleRatio: (ratio) => set({ xScaleRatio: ratio }),
+  setYScaleRatio: (ratio) => set({ yScaleRatio: ratio }),
   setWeightEmbedding: (v) => set({ weightEmbedding: v }),
   setWeightIndustry: (v) => set({ weightIndustry: v }),
   setWeightNumeric: (v) => set({ weightNumeric: v }),
@@ -113,6 +165,7 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   toggleLabels: () => set((s) => ({ showLabels: !s.showLabels })),
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
   toggleContours: () => set((s) => ({ showContours: !s.showContours })),
+  toggleFlattenBalls: () => set((s) => ({ flattenBalls: !s.flattenBalls })),
 
   // v2.0: 本地切换指标（从缓存的 grids 中切换，零延迟）
   switchMetricLocal: (metric: ZMetric) => {
@@ -235,4 +288,70 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
       console.error("刷新失败:", e);
     }
   },
+
+  // v5.0: 获取历史数据帧（支持超时）
+  fetchHistory: async (days = 7) => {
+    if (IS_STATIC) return;
+    set({ playbackLoading: true, error: null });
+    try {
+      const { zMetric } = get();
+      
+      // 60 秒超时
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+      
+      const res = await fetch("/api/v1/terrain/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days, z_metric: zMetric }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      
+      if (!res.ok) {
+        const errBody = await res.text();
+        // 解析后端的错误信息
+        let detail = `HTTP ${res.status}`;
+        try {
+          const errJson = JSON.parse(errBody);
+          detail = errJson.detail || detail;
+        } catch {
+          detail = errBody || detail;
+        }
+        throw new Error(detail);
+      }
+      const data = await res.json();
+      
+      if (!data.frames || data.frames.length === 0) {
+        throw new Error("无可用历史帧数据");
+      }
+      
+      set({
+        playbackFrames: data.frames,
+        playbackIndex: data.frames.length - 1,
+        playbackLoading: false,
+        isPlaying: false,
+      });
+    } catch (e) {
+      const msg = e instanceof Error 
+        ? (e.name === "AbortError" ? "请求超时，请稍后重试" : e.message) 
+        : "获取历史数据失败";
+      set({
+        error: msg,
+        playbackLoading: false,
+      });
+    }
+  },
+
+  setPlaybackIndex: (index) => set({ playbackIndex: index }),
+
+  togglePlayback: () => set((s) => ({ isPlaying: !s.isPlaying })),
+
+  setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
+
+  stopPlayback: () => set({
+    isPlaying: false,
+    playbackFrames: null,
+    playbackIndex: 0,
+  }),
 }));

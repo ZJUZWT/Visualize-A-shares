@@ -1,12 +1,11 @@
 "use client";
 
 /**
- * StockNodes v2.0 — 股票节点批量渲染
+ * StockNodes v3.0 — 股票节点批量渲染
  *
- * v2.0 更新：
- * - 浅色主题适配
- * - 清爽标签卡片样式
- * - 柔和颜色编码
+ * v3.0 更新：
+ * - 球体拍平动画（flattenBalls 开关 + lerp 过渡）
+ * - 历史回放帧间插值（playback frames）
  */
 
 import { useRef, useMemo, useEffect, useCallback } from "react";
@@ -19,7 +18,8 @@ import { useTerrainStore } from "@/stores/useTerrainStore";
 interface StockNodesProps {
   stocks: StockPoint[];
   heightScale?: number;
-  xyScale?: number;
+  xScale?: number;
+  yScale?: number;
   showLabels?: boolean;
   bounds?: {
     xmin: number; xmax: number;
@@ -30,16 +30,18 @@ interface StockNodesProps {
 
 const tempMatrix = new THREE.Matrix4();
 const tempColor = new THREE.Color();
+const LERP_SPEED = 0.06;
 
 export default function StockNodes({
   stocks,
   heightScale = 3.0,
-  xyScale = 1.5,
+  xScale = 1.5,
+  yScale = 1.5,
   showLabels = true,
   bounds,
 }: StockNodesProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
-  const { selectedStock, hoveredStock, setSelectedStock, setHoveredStock } =
+  const { selectedStock, hoveredStock, setSelectedStock, setHoveredStock, flattenBalls, playbackFrames, playbackIndex } =
     useTerrainStore();
 
   const count = stocks.length;
@@ -48,25 +50,70 @@ export default function StockNodes({
   const zMin = bounds?.zmin ?? 0;
   const zMax = bounds?.zmax ?? 1;
 
+  // 存储每个球体的当前动画 Y 值
+  const animatedY = useRef<Float32Array>(new Float32Array(0));
+  // 存储每个球体的目标 Y 值
+  const targetY = useRef<Float32Array>(new Float32Array(0));
+
+  // 计算目标 Y（考虑拍平和回放帧）
+  const computeTargetY = useCallback(() => {
+    if (count === 0) return;
+    
+    if (targetY.current.length !== count) {
+      targetY.current = new Float32Array(count);
+    }
+
+    const zRange = zMax - zMin || 1;
+    const zeroLevel = (0 - zMin) / zRange;
+
+    // 回放模式：从回放帧获取 z 值
+    const currentFrame = playbackFrames?.[playbackIndex];
+
+    for (let i = 0; i < count; i++) {
+      const stock = stocks[i];
+
+      if (flattenBalls) {
+        targetY.current[i] = 0.15;
+      } else {
+        let zVal = stock.z;
+        // 回放模式下使用帧数据的 z 值
+        if (currentFrame?.stock_z_values) {
+          const frameZ = currentFrame.stock_z_values[stock.code];
+          if (frameZ !== undefined) zVal = frameZ;
+        }
+        const normalized = (zVal - zMin) / zRange;
+        targetY.current[i] = (normalized - zeroLevel) * heightScale + 0.15;
+      }
+    }
+  }, [stocks, count, flattenBalls, zMin, zMax, heightScale, playbackFrames, playbackIndex]);
+
+  // 初始化位置和颜色
   useEffect(() => {
     if (!meshRef.current || count === 0) return;
 
     const mesh = meshRef.current;
     const zRange = zMax - zMin || 1;
-    // 数据中 0 值在 [0,1] 归一化空间的位置 → 海面零线
     const zeroLevel = (0 - zMin) / zRange;
+
+    // 初始化动画 Y 数组
+    if (animatedY.current.length !== count) {
+      animatedY.current = new Float32Array(count);
+    }
+    if (targetY.current.length !== count) {
+      targetY.current = new Float32Array(count);
+    }
 
     for (let i = 0; i < count; i++) {
       const stock = stocks[i];
 
-      // XZ 坐标乘以 xyScale，与 TerrainMesh 对齐
-      const x = stock.x * xyScale;
-      const z_pos = stock.y * xyScale;
+      const x = stock.x * xScale;
+      const z_pos = stock.y * yScale;
 
-      // Y 坐标：与 TerrainMesh 顶点着色器一致
-      // shader: Y = (aHeight - zeroLevel) * heightScale
       const normalized = (stock.z - zMin) / zRange;
-      const y = (normalized - zeroLevel) * heightScale + 0.15; // +0.15 浮在地形上方
+      const y = flattenBalls ? 0.15 : (normalized - zeroLevel) * heightScale + 0.15;
+      
+      animatedY.current[i] = y;
+      targetY.current[i] = y;
 
       const scale = 0.08;
       tempMatrix.makeScale(scale, scale, scale);
@@ -76,10 +123,8 @@ export default function StockNodes({
       // 模块C: 球体着色始终用涨跌幅 z_pct_chg
       const pctChg = (stock as any).z_pct_chg ?? stock.z;
       if (pctChg > 5) {
-        // 大涨：深红
         tempColor.setRGB(0.85, 0.12, 0.12);
       } else if (pctChg > 0.3) {
-        // 涨：浅红 → 鲜红
         const t = Math.min(pctChg / 5, 1);
         tempColor.lerpColors(
           new THREE.Color(0.95, 0.55, 0.45),
@@ -87,10 +132,8 @@ export default function StockNodes({
           t
         );
       } else if (pctChg < -5) {
-        // 大跌：深绿
         tempColor.setRGB(0.05, 0.50, 0.28);
       } else if (pctChg < -0.3) {
-        // 跌：浅绿 → 鲜绿
         const t = Math.min(Math.abs(pctChg) / 5, 1);
         tempColor.lerpColors(
           new THREE.Color(0.50, 0.85, 0.55),
@@ -98,7 +141,6 @@ export default function StockNodes({
           t
         );
       } else {
-        // 平盘：半透明灰蓝（用较低饱和度表示）
         tempColor.setRGB(0.75, 0.78, 0.84);
       }
 
@@ -108,6 +150,41 @@ export default function StockNodes({
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }, [stocks, count, heightScale, zMin, zMax]);
+
+  // 每帧更新：拍平动画 + 回放插值
+  useFrame(() => {
+    if (!meshRef.current || count === 0) return;
+
+    computeTargetY();
+
+    const mesh = meshRef.current;
+    let needsUpdate = false;
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scl = new THREE.Vector3();
+
+    for (let i = 0; i < count; i++) {
+      const target = targetY.current[i];
+      const current = animatedY.current[i];
+      const diff = Math.abs(target - current);
+
+      if (diff > 0.001) {
+        const newY = THREE.MathUtils.lerp(current, target, LERP_SPEED);
+        animatedY.current[i] = newY;
+
+        mesh.getMatrixAt(i, tempMatrix);
+        tempMatrix.decompose(pos, quat, scl);
+        pos.y = newY;
+        tempMatrix.compose(pos, quat, scl);
+        mesh.setMatrixAt(i, tempMatrix);
+        needsUpdate = true;
+      }
+    }
+
+    if (needsUpdate) {
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  });
 
   const handleClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
@@ -155,12 +232,12 @@ export default function StockNodes({
 
       {/* Hover 标签 */}
       {hoveredStock && showLabels && (
-        <HoverLabel stock={hoveredStock} heightScale={heightScale} xyScale={xyScale} bounds={bounds} />
+        <HoverLabel stock={hoveredStock} heightScale={heightScale} xScale={xScale} yScale={yScale} bounds={bounds} flattenBalls={flattenBalls} />
       )}
 
       {/* 选中标签 */}
       {selectedStock && (
-        <SelectedLabel stock={selectedStock} heightScale={heightScale} xyScale={xyScale} bounds={bounds} />
+        <SelectedLabel stock={selectedStock} heightScale={heightScale} xScale={xScale} yScale={yScale} bounds={bounds} flattenBalls={flattenBalls} />
       )}
     </>
   );
@@ -171,23 +248,27 @@ export default function StockNodes({
 function HoverLabel({
   stock,
   heightScale,
-  xyScale = 1.5,
+  xScale = 1.5,
+  yScale = 1.5,
   bounds,
+  flattenBalls = false,
 }: {
   stock: StockPoint;
   heightScale: number;
-  xyScale?: number;
+  xScale?: number;
+  yScale?: number;
   bounds?: { zmin: number; zmax: number };
+  flattenBalls?: boolean;
 }) {
   const zMin = bounds?.zmin ?? 0;
   const zMax = bounds?.zmax ?? 1;
   const zRange = zMax - zMin || 1;
   const zeroLevel = (0 - zMin) / zRange;
   const normalized = (stock.z - zMin) / zRange;
-  const y = (normalized - zeroLevel) * heightScale + 0.5;
+  const y = flattenBalls ? 0.5 : (normalized - zeroLevel) * heightScale + 0.5;
 
   return (
-    <Billboard position={[stock.x * xyScale, y, stock.y * xyScale]} follow={true}>
+    <Billboard position={[stock.x * xScale, y, stock.y * yScale]} follow={true}>
       <Html center distanceFactor={15} style={{ pointerEvents: "none" }}>
         <div
           style={{
@@ -242,23 +323,27 @@ function HoverLabel({
 function SelectedLabel({
   stock,
   heightScale,
-  xyScale = 1.5,
+  xScale = 1.5,
+  yScale = 1.5,
   bounds,
+  flattenBalls = false,
 }: {
   stock: StockPoint;
   heightScale: number;
-  xyScale?: number;
+  xScale?: number;
+  yScale?: number;
   bounds?: { zmin: number; zmax: number };
+  flattenBalls?: boolean;
 }) {
   const zMin = bounds?.zmin ?? 0;
   const zMax = bounds?.zmax ?? 1;
   const zRange = zMax - zMin || 1;
   const zeroLevel = (0 - zMin) / zRange;
   const normalized = (stock.z - zMin) / zRange;
-  const y = (normalized - zeroLevel) * heightScale + 0.8;
+  const y = flattenBalls ? 0.8 : (normalized - zeroLevel) * heightScale + 0.8;
 
   return (
-    <Billboard position={[stock.x * xyScale, y, stock.y * xyScale]} follow={true}>
+    <Billboard position={[stock.x * xScale, y, stock.y * yScale]} follow={true}>
       <Html center distanceFactor={12}>
         <div
           style={{
