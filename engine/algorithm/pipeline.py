@@ -1,12 +1,12 @@
 """
 算法编排流水线 v2.0
 
-将特征工程 → 聚类 → 降维 → Wendland核密度插值 串联为统一的 pipeline
+将特征工程 → 聚类 → 降维 → 高斯核密度插值 串联为统一的 pipeline
 一键生成前端所需的全部 3D 地形数据
 
 v2.0 新增:
 - 多指标一次性预计算（Z轴切换零延迟）
-- Wendland C2 核密度地形（替代 RBF）
+- 高斯核密度地形（替代 RBF）
 - 支持 radius_scale 前端滑块控制
 """
 
@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 from loguru import logger
+from scipy.spatial import cKDTree
 
 from .features import FeatureEngineer
 from .clustering import ClusterEngine
@@ -60,7 +61,7 @@ class AlgorithmPipeline:
     算法总编排器 v2.0
     
     流水线：
-    snapshot → 特征提取 → HDBSCAN聚类 → UMAP降维 → Wendland核密度插值(多指标) → TerrainResult
+    snapshot → 特征提取 → HDBSCAN聚类 → UMAP降维 → 高斯核密度插值(多指标) → TerrainResult
     """
 
     def __init__(self):
@@ -74,6 +75,60 @@ class AlgorithmPipeline:
         self._last_meta_df: pd.DataFrame | None = None
         self._last_embedding: np.ndarray | None = None
         self._last_snapshot: pd.DataFrame | None = None
+        # v3.1: 缓存上次使用的聚类参数，用于判断是否需要重做 UMAP
+        self._last_params: dict | None = None
+        self._last_codes_set: set[str] | None = None
+
+    @staticmethod
+    def _compute_related_stocks(
+        stocks_list: list[dict],
+        labels: np.ndarray,
+        embedding_2d: np.ndarray,
+        top_k: int = 10,
+    ) -> None:
+        """
+        为每只股票就地附加同簇中最近的 top_k 只关联股票
+        直接修改 stocks_list 中的 dict
+        """
+        t0 = time.time()
+
+        # 按簇分组索引
+        cluster_map: dict[int, list[int]] = {}
+        for i, label in enumerate(labels):
+            label_int = int(label)
+            if label_int == -1:
+                continue
+            cluster_map.setdefault(label_int, []).append(i)
+
+        for label, indices in cluster_map.items():
+            if len(indices) <= 1:
+                continue
+
+            # 在簇内构建 KDTree
+            idx_arr = np.array(indices)
+            cluster_coords = embedding_2d[idx_arr]
+            tree = cKDTree(cluster_coords)
+
+            k = min(top_k + 1, len(indices))
+            # 批量查询所有簇内点
+            distances, local_neighbors = tree.query(cluster_coords, k=k)
+
+            for local_idx, global_idx in enumerate(indices):
+                neighbors = []
+                for j in range(1, k):  # 跳过自身 (index 0)
+                    ln = local_neighbors[local_idx][j]
+                    gi = indices[ln]
+                    s = stocks_list[gi]
+                    neighbors.append({
+                        "code": s["code"],
+                        "name": s["name"],
+                        "industry": s.get("industry", ""),
+                        "pct_chg": s.get("z_pct_chg", 0.0),
+                    })
+                stocks_list[global_idx]["related_stocks"] = neighbors
+
+        elapsed_ms = (time.time() - t0) * 1000
+        logger.info(f"  关联股票计算完成: {elapsed_ms:.0f}ms")
 
     def compute_full(
         self,
@@ -89,50 +144,96 @@ class AlgorithmPipeline:
         embedding_pca_dim: int | None = None,
     ) -> TerrainResult:
         """
-        全量计算流水线 (v3.0)
+        全量计算流水线 (v3.1)
         
         - 一次性计算所有 Z 轴指标的地形网格
-        - 使用 Wendland C2 核密度场
+        - 使用高斯核密度场
         - 支持运行时聚类权重调节
+        - v3.1: 参数不变时复用 UMAP 布局，保持地形稳定
         """
         t0 = time.time()
         logger.info("=" * 60)
-        logger.info("🏔️  算法流水线 v3.0 启动 — 全量计算")
+        logger.info("🏔️  算法流水线 v3.1 启动")
         logger.info("=" * 60)
 
-        # ─── Step 1: 特征提取 ─────────────────────────
-        logger.info("📊 Step 1/4: 特征提取...")
-        meta_df, X, feature_names = self.feature_eng.build_feature_matrix(
-            snapshot_df, feature_cols,
-            weight_embedding=weight_embedding,
-            weight_industry=weight_industry,
-            weight_numeric=weight_numeric,
-            pca_target_dim=pca_target_dim,
-            embedding_pca_dim=embedding_pca_dim,
-        )
+        # ─── 检查是否可以复用上次的 UMAP 布局 ─────────
+        current_params = {
+            "weight_embedding": weight_embedding,
+            "weight_industry": weight_industry,
+            "weight_numeric": weight_numeric,
+            "pca_target_dim": pca_target_dim,
+            "embedding_pca_dim": embedding_pca_dim,
+        }
 
-        if X.size == 0:
-            logger.error("特征矩阵为空，流水线终止")
-            return TerrainResult()
+        # 计算当前股票集
+        current_codes = set(snapshot_df["code"].astype(str).tolist()) if "code" in snapshot_df.columns else set()
 
-        # ─── Step 2: HDBSCAN 聚类 ─────────────────────
-        logger.info("🔬 Step 2/4: HDBSCAN 聚类...")
-        labels = self.cluster_eng.fit(X)
-        cluster_summaries = self.cluster_eng.get_cluster_summary(
-            meta_df, X, feature_names
-        )
+        can_reuse_layout = False
+        if (
+            self._last_embedding is not None
+            and self._last_meta_df is not None
+            and self._last_params is not None
+            and self._last_codes_set is not None
+        ):
+            # 检查参数是否相同
+            params_same = (self._last_params == current_params)
+            
+            # 检查股票集重叠率
+            if current_codes and self._last_codes_set:
+                overlap = len(current_codes & self._last_codes_set)
+                total = max(len(current_codes), len(self._last_codes_set))
+                overlap_rate = overlap / total if total > 0 else 0
+            else:
+                overlap_rate = 0
 
-        # 计算聚类中心嵌入（用于后续新闻匹配）
-        self.feature_eng.compute_cluster_centers(
-            labels, meta_df["code"].tolist()
-        )
+            if params_same and overlap_rate > 0.95:
+                can_reuse_layout = True
+                logger.info(
+                    f"♻️  检测到参数不变且股票集重叠率 {overlap_rate:.1%}，复用上次 UMAP 布局"
+                )
 
-        # ─── Step 3: UMAP 降维 ───────────────────────
-        logger.info("🗺️  Step 3/4: UMAP 2D 降维...")
-        embedding = self.projection_eng.fit_transform(X)
+        if can_reuse_layout:
+            # ─── 快速路径：复用布局，只刷新 Z 轴 ──────
+            meta_df = self._last_meta_df
+            embedding = self._last_embedding
+            labels = self.cluster_eng.labels
+            cluster_summaries = self._last_result.clusters if self._last_result else []
+        else:
+            # ─── 完整路径：重新计算特征 + 聚类 + UMAP ──
+
+            # Step 1: 特征提取
+            logger.info("📊 Step 1/4: 特征提取...")
+            meta_df, X, feature_names = self.feature_eng.build_feature_matrix(
+                snapshot_df, feature_cols,
+                weight_embedding=weight_embedding,
+                weight_industry=weight_industry,
+                weight_numeric=weight_numeric,
+                pca_target_dim=pca_target_dim,
+                embedding_pca_dim=embedding_pca_dim,
+            )
+
+            if X.size == 0:
+                logger.error("特征矩阵为空，流水线终止")
+                return TerrainResult()
+
+            # Step 2: HDBSCAN 聚类
+            logger.info("🔬 Step 2/4: HDBSCAN 聚类...")
+            labels = self.cluster_eng.fit(X)
+            cluster_summaries = self.cluster_eng.get_cluster_summary(
+                meta_df, X, feature_names
+            )
+
+            # 计算聚类中心嵌入
+            self.feature_eng.compute_cluster_centers(
+                labels, meta_df["code"].tolist()
+            )
+
+            # Step 3: UMAP 降维
+            logger.info("🗺️  Step 3/4: UMAP 2D 降维...")
+            embedding = self.projection_eng.fit_transform(X)
 
         # ─── Step 4: 多指标 Wendland 核密度插值 ────────
-        logger.info("🏔️  Step 4/4: Wendland C2 核密度地形 (多指标批量)...")
+        logger.info("🏔️  Step 4/4: 高斯核密度地形 (多指标批量)...")
         
         # 构建多指标 Z 值字典
         z_dict = {}
@@ -158,7 +259,6 @@ class AlgorithmPipeline:
         elapsed = (time.time() - t0) * 1000
 
         # 构建股票点列表（前端用）
-        # 用 active metric 的 z 值
         active_z = z_dict.get(z_column, z_dict.get("pct_chg", np.zeros(len(meta_df))))
         
         # 获取公司概况（如果有预计算数据）
@@ -213,6 +313,9 @@ class AlgorithmPipeline:
         active_bounds["zmin"] = metric_bounds["zmin"]
         active_bounds["zmax"] = metric_bounds["zmax"]
 
+        # ─── 计算同簇关联股票 ──────────────────────────
+        self._compute_related_stocks(stocks_list, labels, embedding, top_k=10)
+
         result = TerrainResult(
             stocks=stocks_list,
             clusters=cluster_summaries,
@@ -232,9 +335,12 @@ class AlgorithmPipeline:
         self._last_meta_df = meta_df
         self._last_embedding = embedding
         self._last_snapshot = snapshot_df
+        self._last_params = current_params
+        self._last_codes_set = current_codes
 
+        mode_str = "复用布局" if can_reuse_layout else "全量计算"
         logger.info(
-            f"✅ 流水线完成: {result.stock_count} 只股票, "
+            f"✅ 流水线完成 ({mode_str}): {result.stock_count} 只股票, "
             f"{result.cluster_count} 个簇, "
             f"{len(Z_METRICS)} 个指标 × {result.terrain_resolution}² 网格 | "
             f"耗时 {elapsed:.0f}ms"

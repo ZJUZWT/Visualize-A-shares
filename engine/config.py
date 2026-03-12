@@ -30,38 +30,38 @@ class DataSourceConfig(BaseModel):
 
 # ─── 算法配置 ───────────────────────────────────────────
 class UMAPConfig(BaseModel):
-    n_neighbors: int = 30
-    min_dist: float = 0.3
+    n_neighbors: int = 25          # 降低: 更关注局部板块结构
+    min_dist: float = 0.08         # 大幅降低: 让相似股票紧密聚拢，板块间留出间隔
     n_components: int = 2
-    metric: str = "euclidean"
+    metric: str = "cosine"         # 改用余弦距离: 更适合归一化BGE嵌入
     random_state: int = 42
     n_epochs: int = 500
 
 
 class HDBSCANConfig(BaseModel):
-    min_cluster_size: int = 20
-    min_samples: int = 10
+    min_cluster_size: int = 15     # 降低: 允许发现更小的子板块
+    min_samples: int = 5           # 降低: 对稀疏板块更敏感
     metric: str = "euclidean"
-    cluster_selection_method: str = "eom"  # Excess of Mass
+    cluster_selection_method: str = "leaf"  # leaf: 产生更多细粒度簇（vs eom 合并大簇）
 
 
 class FeatureFusionConfig(BaseModel):
     """三层特征融合配置"""
     enabled: bool = True  # 是否启用融合（需要预计算数据）
-    weight_industry: float = 3.0   # 行业 one-hot 权重
+    weight_industry: float = 0.0   # 行业 one-hot 权重（v4.0: 去掉）
     weight_embedding: float = 2.0  # BGE 语义嵌入权重
-    weight_numeric: float = 1.0    # 数值特征权重
+    weight_numeric: float = 0.5    # 数值特征权重
     pca_target_dim: int = 50       # PCA 降维目标
 
 
 class InterpolationConfig(BaseModel):
-    method: str = "wendland_c2"
-    grid_resolution: int = 128
+    method: str = "gaussian_kde"
+    grid_resolution: int = 512
     bounds_padding: float = 0.1
     radius_scale: float = 2.0        # 影响半径缩放因子
     k_neighbors: int = 5             # 自适应半径用的 K 近邻数
-    min_radius: float = 0.3          # 最小影响半径
-    max_radius: float = 5.0          # 最大影响半径
+    min_radius: float = 0.1          # 最小高斯带宽 σ
+    max_radius: float = 5.0          # 最大高斯带宽 σ
 
 
 # ─── 服务配置 ───────────────────────────────────────────

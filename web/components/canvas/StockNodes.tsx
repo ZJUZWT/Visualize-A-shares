@@ -32,6 +32,22 @@ const tempMatrix = new THREE.Matrix4();
 const tempColor = new THREE.Color();
 const LERP_SPEED = 0.06;
 
+/**
+ * 用股票自身的 z 值（涨跌幅等）计算球体 Y 高度
+ * 找到所有 stocks 中 z 的 min/max 做归一化，以 0 为基准面
+ */
+function computeStockY(
+  stockZ: number,
+  stockZMin: number,
+  stockZMax: number,
+  heightScale: number,
+): number {
+  const range = stockZMax - stockZMin || 1;
+  const zeroLevel = (0 - stockZMin) / range;
+  const normalized = (stockZ - stockZMin) / range;
+  return (normalized - zeroLevel) * heightScale + 0.15;
+}
+
 export default function StockNodes({
   stocks,
   heightScale = 3.0,
@@ -41,21 +57,28 @@ export default function StockNodes({
   bounds,
 }: StockNodesProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
-  const { selectedStock, hoveredStock, setSelectedStock, setHoveredStock, flattenBalls, playbackFrames, playbackIndex } =
+  const { selectedStock, hoveredStock, setSelectedStock, setHoveredStock, flattenBalls, showDropLines, playbackFrames, playbackIndex } =
     useTerrainStore();
 
   const count = stocks.length;
 
-  // 从 bounds 获取 z 轴范围（用于与地形着色器一致的归一化）
-  const zMin = bounds?.zmin ?? 0;
-  const zMax = bounds?.zmax ?? 1;
+  // 用股票自身 z 值的 min/max 做归一化（不是地形 bounds）
+  const { stockZMin, stockZMax } = useMemo(() => {
+    if (count === 0) return { stockZMin: 0, stockZMax: 1 };
+    let mn = Infinity, mx = -Infinity;
+    for (const s of stocks) {
+      if (s.z < mn) mn = s.z;
+      if (s.z > mx) mx = s.z;
+    }
+    return { stockZMin: mn, stockZMax: mx };
+  }, [stocks, count]);
 
   // 存储每个球体的当前动画 Y 值
   const animatedY = useRef<Float32Array>(new Float32Array(0));
   // 存储每个球体的目标 Y 值
   const targetY = useRef<Float32Array>(new Float32Array(0));
 
-  // 计算目标 Y（考虑拍平和回放帧）
+  // 计算目标 Y — 直接用 stock.z
   const computeTargetY = useCallback(() => {
     if (count === 0) return;
     
@@ -63,10 +86,7 @@ export default function StockNodes({
       targetY.current = new Float32Array(count);
     }
 
-    const zRange = zMax - zMin || 1;
-    const zeroLevel = (0 - zMin) / zRange;
-
-    // 回放模式：从回放帧获取 z 值
+    // 回放模式：可能覆盖 z 值
     const currentFrame = playbackFrames?.[playbackIndex];
 
     for (let i = 0; i < count; i++) {
@@ -76,24 +96,20 @@ export default function StockNodes({
         targetY.current[i] = 0.15;
       } else {
         let zVal = stock.z;
-        // 回放模式下使用帧数据的 z 值
         if (currentFrame?.stock_z_values) {
           const frameZ = currentFrame.stock_z_values[stock.code];
           if (frameZ !== undefined) zVal = frameZ;
         }
-        const normalized = (zVal - zMin) / zRange;
-        targetY.current[i] = (normalized - zeroLevel) * heightScale + 0.15;
+        targetY.current[i] = computeStockY(zVal, stockZMin, stockZMax, heightScale);
       }
     }
-  }, [stocks, count, flattenBalls, zMin, zMax, heightScale, playbackFrames, playbackIndex]);
+  }, [stocks, count, flattenBalls, stockZMin, stockZMax, heightScale, playbackFrames, playbackIndex]);
 
   // 初始化位置和颜色
   useEffect(() => {
     if (!meshRef.current || count === 0) return;
 
     const mesh = meshRef.current;
-    const zRange = zMax - zMin || 1;
-    const zeroLevel = (0 - zMin) / zRange;
 
     // 初始化动画 Y 数组
     if (animatedY.current.length !== count) {
@@ -109,8 +125,7 @@ export default function StockNodes({
       const x = stock.x * xScale;
       const z_pos = stock.y * yScale;
 
-      const normalized = (stock.z - zMin) / zRange;
-      const y = flattenBalls ? 0.15 : (normalized - zeroLevel) * heightScale + 0.15;
+      const y = flattenBalls ? 0.15 : computeStockY(stock.z, stockZMin, stockZMax, heightScale);
       
       animatedY.current[i] = y;
       targetY.current[i] = y;
@@ -149,7 +164,7 @@ export default function StockNodes({
 
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [stocks, count, heightScale, zMin, zMax]);
+  }, [stocks, count, heightScale, stockZMin, stockZMax, flattenBalls]);
 
   // 每帧更新：拍平动画 + 回放插值
   useFrame(() => {
@@ -212,6 +227,49 @@ export default function StockNodes({
     document.body.style.cursor = "default";
   }, [setHoveredStock]);
 
+  // 垂线几何体 — 每个球体到 Y=0 的线段
+  const dropLinesGeo = useMemo(() => {
+    if (!showDropLines || count === 0) return null;
+    const positions: number[] = [];
+    const colors: number[] = [];
+    const tmpClr = new THREE.Color();
+
+    for (let i = 0; i < count; i++) {
+      const stock = stocks[i];
+      const x = stock.x * xScale;
+      const z_pos = stock.y * yScale;
+      const y = flattenBalls ? 0.15 : computeStockY(stock.z, stockZMin, stockZMax, heightScale);
+
+      // 球体颜色（与球体着色逻辑一致）
+      const pctChg = (stock as any).z_pct_chg ?? stock.z;
+      if (pctChg > 5) {
+        tmpClr.setRGB(0.85, 0.12, 0.12);
+      } else if (pctChg > 0.3) {
+        const t = Math.min(pctChg / 5, 1);
+        tmpClr.lerpColors(new THREE.Color(0.95, 0.55, 0.45), new THREE.Color(0.90, 0.20, 0.18), t);
+      } else if (pctChg < -5) {
+        tmpClr.setRGB(0.05, 0.50, 0.28);
+      } else if (pctChg < -0.3) {
+        const t = Math.min(Math.abs(pctChg) / 5, 1);
+        tmpClr.lerpColors(new THREE.Color(0.50, 0.85, 0.55), new THREE.Color(0.10, 0.65, 0.38), t);
+      } else {
+        tmpClr.setRGB(0.75, 0.78, 0.84);
+      }
+
+      // 线段：从球体位置到 Y=0
+      positions.push(x, y, z_pos); // 球体位置
+      positions.push(x, 0, z_pos); // Y=0 地面
+
+      colors.push(tmpClr.r, tmpClr.g, tmpClr.b);
+      colors.push(tmpClr.r, tmpClr.g, tmpClr.b);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    return geo;
+  }, [stocks, count, xScale, yScale, heightScale, stockZMin, stockZMax, flattenBalls, showDropLines]);
+
   if (count === 0) return null;
 
   return (
@@ -230,14 +288,21 @@ export default function StockNodes({
         />
       </instancedMesh>
 
+      {/* 垂线：球体到 Y=0 */}
+      {showDropLines && dropLinesGeo && (
+        <lineSegments geometry={dropLinesGeo}>
+          <lineBasicMaterial vertexColors transparent opacity={0.5} />
+        </lineSegments>
+      )}
+
       {/* Hover 标签 */}
       {hoveredStock && showLabels && (
-        <HoverLabel stock={hoveredStock} heightScale={heightScale} xScale={xScale} yScale={yScale} bounds={bounds} flattenBalls={flattenBalls} />
+        <HoverLabel stock={hoveredStock} heightScale={heightScale} xScale={xScale} yScale={yScale} stocks={stocks} flattenBalls={flattenBalls} />
       )}
 
       {/* 选中标签 */}
       {selectedStock && (
-        <SelectedLabel stock={selectedStock} heightScale={heightScale} xScale={xScale} yScale={yScale} bounds={bounds} flattenBalls={flattenBalls} />
+        <SelectedLabel stock={selectedStock} heightScale={heightScale} xScale={xScale} yScale={yScale} stocks={stocks} flattenBalls={flattenBalls} />
       )}
     </>
   );
@@ -250,22 +315,26 @@ function HoverLabel({
   heightScale,
   xScale = 1.5,
   yScale = 1.5,
-  bounds,
+  stocks,
   flattenBalls = false,
 }: {
   stock: StockPoint;
   heightScale: number;
   xScale?: number;
   yScale?: number;
-  bounds?: { zmin: number; zmax: number };
+  stocks: StockPoint[];
   flattenBalls?: boolean;
 }) {
-  const zMin = bounds?.zmin ?? 0;
-  const zMax = bounds?.zmax ?? 1;
-  const zRange = zMax - zMin || 1;
-  const zeroLevel = (0 - zMin) / zRange;
-  const normalized = (stock.z - zMin) / zRange;
-  const y = flattenBalls ? 0.5 : (normalized - zeroLevel) * heightScale + 0.5;
+  const { stockZMin, stockZMax } = useMemo(() => {
+    let mn = Infinity, mx = -Infinity;
+    for (const s of stocks) {
+      if (s.z < mn) mn = s.z;
+      if (s.z > mx) mx = s.z;
+    }
+    return { stockZMin: mn, stockZMax: mx };
+  }, [stocks]);
+
+  const y = flattenBalls ? 0.5 : computeStockY(stock.z, stockZMin, stockZMax, heightScale) + 0.35;
 
   return (
     <Billboard position={[stock.x * xScale, y, stock.y * yScale]} follow={true}>
@@ -325,22 +394,26 @@ function SelectedLabel({
   heightScale,
   xScale = 1.5,
   yScale = 1.5,
-  bounds,
+  stocks,
   flattenBalls = false,
 }: {
   stock: StockPoint;
   heightScale: number;
   xScale?: number;
   yScale?: number;
-  bounds?: { zmin: number; zmax: number };
+  stocks: StockPoint[];
   flattenBalls?: boolean;
 }) {
-  const zMin = bounds?.zmin ?? 0;
-  const zMax = bounds?.zmax ?? 1;
-  const zRange = zMax - zMin || 1;
-  const zeroLevel = (0 - zMin) / zRange;
-  const normalized = (stock.z - zMin) / zRange;
-  const y = flattenBalls ? 0.8 : (normalized - zeroLevel) * heightScale + 0.8;
+  const { stockZMin, stockZMax } = useMemo(() => {
+    let mn = Infinity, mx = -Infinity;
+    for (const s of stocks) {
+      if (s.z < mn) mn = s.z;
+      if (s.z > mx) mx = s.z;
+    }
+    return { stockZMin: mn, stockZMax: mx };
+  }, [stocks]);
+
+  const y = flattenBalls ? 0.8 : computeStockY(stock.z, stockZMin, stockZMax, heightScale) + 0.65;
 
   return (
     <Billboard position={[stock.x * xScale, y, stock.y * yScale]} follow={true}>

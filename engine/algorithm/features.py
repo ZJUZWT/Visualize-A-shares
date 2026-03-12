@@ -53,11 +53,11 @@ COMPUTED_FEATURES = [
 ALL_FEATURES = SNAPSHOT_FEATURES + COMPUTED_FEATURES
 
 
-# ─── 三层融合权重（v3.0 调整版）─────────────────────
-WEIGHT_INDUSTRY = 0.8   # 行业 one-hot 权重（降低，作为软提示）
-WEIGHT_EMBEDDING = 1.5  # BGE 语义嵌入权重
-WEIGHT_NUMERIC = 1.0    # 数值特征权重
-EMBEDDING_PCA_DIM = 32  # 嵌入先降到此维度（解决维度不平衡）
+# ─── 三层融合权重（v4.0 调整版）─────────────────────
+WEIGHT_INDUSTRY = 0.0   # 行业 one-hot 权重（v4.0: 去掉，产业链信号已在嵌入中）
+WEIGHT_EMBEDDING = 2.0  # BGE 语义嵌入权重（产业链拓扑主导）
+WEIGHT_NUMERIC = 0.5    # 数值特征权重（降低，避免财务数据干扰板块分布）
+EMBEDDING_PCA_DIM = 50  # 嵌入先降到此维度（增加以保留更多语义信息）
 PCA_TARGET_DIM = 50     # 最终 PCA 降维目标维度
 
 
