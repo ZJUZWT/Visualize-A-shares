@@ -63,6 +63,9 @@ interface TerrainState {
   isPlaying: boolean;
   playbackSpeed: number; // 秒/帧
   playbackLoading: boolean;
+  
+  // v5.1: SSE 拉取进度
+  fetchProgress: FetchProgress | null;
 
   // ─── Actions ─────────────────────────
   setTerrainData: (data: TerrainData) => void;
@@ -110,6 +113,17 @@ export interface PlaybackFrame {
   stock_z_values: Record<string, number>; // code -> z value
 }
 
+/** SSE 拉取进度 */
+export interface FetchProgress {
+  phase: "checking" | "fetching" | "computing";
+  message: string;
+  done: number;
+  total: number;
+  success: number;
+  failed: number;
+  elapsed?: number;
+}
+
 export const useTerrainStore = create<TerrainState>((set, get) => ({
   // ─── 初始状态 ────────────────────────
   terrainData: null,
@@ -154,6 +168,7 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   isPlaying: false,
   playbackSpeed: 2.0,
   playbackLoading: false,
+  fetchProgress: null,
 
   // ─── Actions ─────────────────────────
   setTerrainData: (data) =>
@@ -305,28 +320,21 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
     }
   },
 
-  // v5.0: 获取历史数据帧（支持超时）
+  // v5.1: 获取历史数据帧（SSE 流式进度推送，无超时限制）
   fetchHistory: async (days = 7) => {
     if (IS_STATIC) return;
-    set({ playbackLoading: true, error: null });
+    set({ playbackLoading: true, error: null, fetchProgress: null });
     try {
       const { zMetric } = get();
-      
-      // 180 秒超时（首次拉取全市场历史数据可能需要 2-3 分钟）
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 180000);
-      
+
       const res = await fetch("/api/v1/terrain/history", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ days, z_metric: zMetric }),
-        signal: controller.signal,
       });
-      clearTimeout(timeout);
-      
+
       if (!res.ok) {
         const errBody = await res.text();
-        // 解析后端的错误信息
         let detail = `HTTP ${res.status}`;
         try {
           const errJson = JSON.parse(errBody);
@@ -336,25 +344,81 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
         }
         throw new Error(detail);
       }
-      const data = await res.json();
-      
-      if (!data.frames || data.frames.length === 0) {
-        throw new Error("无可用历史帧数据");
+
+      // SSE 流式读取
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("浏览器不支持流式读取");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // 解析 SSE 事件（格式: "event: xxx\ndata: {...}\n\n"）
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || ""; // 最后一段可能不完整
+
+        for (const eventBlock of events) {
+          if (!eventBlock.trim()) continue;
+
+          const lines = eventBlock.split("\n");
+          let eventType = "";
+          let eventData = "";
+
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              eventData = line.slice(6);
+            }
+          }
+
+          if (!eventType || !eventData) continue;
+
+          try {
+            const parsed = JSON.parse(eventData);
+
+            if (eventType === "progress") {
+              set({ fetchProgress: parsed });
+            } else if (eventType === "complete") {
+              if (!parsed.frames || parsed.frames.length === 0) {
+                throw new Error("无可用历史帧数据");
+              }
+              set({
+                playbackFrames: parsed.frames,
+                playbackIndex: parsed.frames.length - 1,
+                playbackLoading: false,
+                isPlaying: false,
+                fetchProgress: null,
+              });
+              return; // 成功完成
+            } else if (eventType === "error") {
+              throw new Error(parsed.message || "历史回放失败");
+            }
+          } catch (parseErr) {
+            // JSON 解析失败，可能是不完整的数据
+            if (eventType === "error" || eventType === "complete") {
+              throw parseErr;
+            }
+          }
+        }
       }
-      
-      set({
-        playbackFrames: data.frames,
-        playbackIndex: data.frames.length - 1,
-        playbackLoading: false,
-        isPlaying: false,
-      });
+
+      // 如果流结束但没收到 complete 事件
+      const { playbackFrames } = get();
+      if (!playbackFrames) {
+        throw new Error("数据流异常中断");
+      }
     } catch (e) {
-      const msg = e instanceof Error 
-        ? (e.name === "AbortError" ? "请求超时，请稍后重试" : e.message) 
-        : "获取历史数据失败";
+      const msg = e instanceof Error ? e.message : "获取历史数据失败";
       set({
         error: msg,
         playbackLoading: false,
+        fetchProgress: null,
       });
     }
   },

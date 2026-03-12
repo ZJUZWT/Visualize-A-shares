@@ -141,25 +141,23 @@ class DataCollector:
     def available_sources(self) -> list[str]:
         return [s.name for s in self._sources]
 
-    def get_market_history(
+    def get_market_history_streaming(
         self,
         stock_codes: list[str],
         days: int = 7,
-        z_metric: str = "pct_chg",
+        on_progress: Optional["callable"] = None,
+        on_batch_done: Optional["callable"] = None,
     ) -> dict[str, pd.DataFrame]:
         """
-        批量获取全市场历史日线 — 用于历史回放
+        流式批量获取全市场历史日线 — 用于历史回放
 
-        v3.0 改进:
-        - 全量拉取所有有效股票（不再限制 500 只）
-        - 提高并发到 20 线程（东方财富接口实测可承受）
-        - 批次大小 100，批间延迟 0.3 秒
-        - 拉取完成后返回按日期分组的 DataFrame
+        v4.0：无超时限制，全量拉取所有股票，通过回调推送进度。
 
         Args:
-            stock_codes: 需要查询的股票代码列表
+            stock_codes: 需要查询的股票代码列表（全量）
             days: 回溯天数
-            z_metric: 关注的指标
+            on_progress: 进度回调 (done, total, success, failed, elapsed)
+            on_batch_done: 每批完成回调 (batch_records: list[dict])，用于边拉边存
 
         Returns:
             { date_str: DataFrame(code, pct_chg, ...) }  按日期分组
@@ -167,13 +165,11 @@ class DataCollector:
         import datetime
 
         t0 = time.time()
-        # 多拉 5 天余量（考虑节假日、周末）
         end_date = datetime.date.today()
         start_date = end_date - datetime.timedelta(days=days + 10)
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
 
-        # 全量拉取所有有效股票
         target_codes = stock_codes
 
         logger.info(
@@ -181,7 +177,7 @@ class DataCollector:
             f"({start_str} ~ {end_str})..."
         )
 
-        # 找一个支持历史数据的源（优先 AKShare，响应更快）
+        # 找一个支持历史数据的源（优先 AKShare）
         hist_source = None
         for source in self._sources:
             if source.name == "akshare":
@@ -209,13 +205,13 @@ class DataCollector:
                 pass
             return None
 
-        # 高并发拉取：20 线程、每批 100 只
         BATCH_SIZE = 100
         MAX_WORKERS = 20
 
         for batch_start in range(0, len(target_codes), BATCH_SIZE):
             batch_codes = target_codes[batch_start:batch_start + BATCH_SIZE]
-            
+            batch_records: list[dict] = []
+
             with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                 futures = {
                     executor.submit(fetch_one, code): code
@@ -227,6 +223,7 @@ class DataCollector:
                         if result is not None:
                             for _, row in result.iterrows():
                                 record = row.to_dict()
+                                batch_records.append(record)
                                 all_records.append(record)
                             success += 1
                         else:
@@ -234,24 +231,39 @@ class DataCollector:
                     except Exception:
                         failed += 1
 
-            # 进度日志
             done = batch_start + len(batch_codes)
-            logger.info(f"  历史数据进度: {done}/{len(target_codes)} (成功{success}/失败{failed})")
+            elapsed = time.time() - t0
+            logger.info(
+                f"  历史数据进度: {done}/{len(target_codes)} "
+                f"(成功{success}/失败{failed}) {elapsed:.1f}s"
+            )
 
-            # 批次间短暂延迟，防限流
+            # 回调：进度
+            if on_progress:
+                try:
+                    on_progress(done, len(target_codes), success, failed, elapsed)
+                except Exception:
+                    pass
+
+            # 回调：每批数据，用于边拉边存 DuckDB
+            if on_batch_done and batch_records:
+                try:
+                    on_batch_done(batch_records)
+                except Exception as e:
+                    logger.warning(f"批次回调失败: {e}")
+
+            # 批次间短暂延迟
             if done < len(target_codes):
-                time.sleep(0.3)
+                time.sleep(0.2)
 
         if not all_records:
             raise RuntimeError("批量历史数据拉取失败：无有效数据")
 
         big_df = pd.DataFrame(all_records)
-        
-        # 确保 date 列是字符串
+
         if "date" in big_df.columns:
             big_df["date"] = big_df["date"].astype(str)
 
-        # 按日期分组，取最近 days 个交易日
         dates = sorted(big_df["date"].unique())
         recent_dates = dates[-days:] if len(dates) > days else dates
 
