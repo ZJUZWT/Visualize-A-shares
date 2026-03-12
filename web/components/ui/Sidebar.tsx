@@ -284,6 +284,7 @@ function RightPanel() {
     isPlaying,
     playbackSpeed,
     playbackLoading,
+    fetchProgress,
     setWeightEmbedding,
     setWeightIndustry,
     setWeightNumeric,
@@ -408,15 +409,53 @@ function RightPanel() {
                 {playbackLoading ? (
                   <span className="flex items-center justify-center gap-2">
                     <Spinner />
-                    正在拉取历史数据…
+                    {fetchProgress?.phase === "fetching" ? "拉取中..." : 
+                     fetchProgress?.phase === "computing" ? "计算中..." : "准备中..."}
                   </span>
                 ) : (
                   "📅 加载历史回放"
                 )}
               </button>
-              <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5 text-center">
-                首次加载需拉取全市场数据，约 1-3 分钟
-              </div>
+              
+              {/* 实时进度显示 */}
+              {playbackLoading && fetchProgress ? (
+                <div className="mt-2 space-y-1.5">
+                  {/* 进度条 */}
+                  {fetchProgress.total > 0 && (
+                    <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-[var(--accent)] h-full rounded-full transition-all duration-300 ease-out"
+                        style={{
+                          width: `${Math.min(100, (fetchProgress.done / fetchProgress.total) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                  {/* 进度文字 */}
+                  <div className="text-[10px] text-[var(--text-tertiary)] text-center">
+                    {fetchProgress.message}
+                  </div>
+                  {/* 详细信息 */}
+                  {fetchProgress.phase === "fetching" && fetchProgress.total > 0 && (
+                    <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] font-mono">
+                      <span>{fetchProgress.done}/{fetchProgress.total}</span>
+                      <span>
+                        {fetchProgress.elapsed ? `${fetchProgress.elapsed}s` : ""}
+                        {fetchProgress.done > 0 && fetchProgress.elapsed
+                          ? ` · 预计${Math.round(
+                              ((fetchProgress.total - fetchProgress.done) / fetchProgress.done) *
+                                fetchProgress.elapsed
+                            )}s`
+                          : ""}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : !playbackLoading ? (
+                <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5 text-center">
+                  首次加载需拉取全市场数据
+                </div>
+              ) : null}
             </>
           ) : (
             <>
