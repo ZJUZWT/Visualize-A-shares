@@ -409,7 +409,7 @@ def _compute_tfidf_embeddings(
 
 def compute_embeddings(
     profiles: dict[str, dict],
-) -> tuple[list[str], np.ndarray]:
+) -> tuple[list[str], np.ndarray, str]:
     """
     Step 3: 用公司经营范围计算语义嵌入
 
@@ -499,7 +499,7 @@ def compute_embeddings(
     file_size_mb = output_path.stat().st_size / 1024 / 1024
     logger.info(f"💾 已保存: {output_path} ({file_size_mb:.1f} MB)")
 
-    return valid_codes, embeddings
+    return valid_codes, embeddings, model_name_used
 
 
 # ═══════════════════════════════════════════════════════
@@ -572,14 +572,14 @@ def main():
         return
 
     # Step 3: 语义嵌入
-    valid_codes, embeddings = compute_embeddings(profiles)
+    valid_codes, embeddings, actual_model_name = compute_embeddings(profiles)
 
     # 保存元信息
     total_elapsed = time.time() - t_total
     save_metadata(
         n_stocks=len(valid_codes),
         embedding_dim=embeddings.shape[1],
-        model_name=BGE_MODEL_NAME,
+        model_name=actual_model_name,
         elapsed_seconds=total_elapsed,
         profiles=profiles,
     )

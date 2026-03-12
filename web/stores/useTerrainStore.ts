@@ -29,6 +29,13 @@ interface TerrainState {
   radiusScale: number;
   heightScale: number;
 
+  // v3.0: 聚类权重
+  weightEmbedding: number;
+  weightIndustry: number;
+  weightNumeric: number;
+  pcaTargetDim: number;
+  embeddingPcaDim: number;
+
   // ─── Actions ─────────────────────────
   setTerrainData: (data: TerrainData) => void;
   setLoading: (loading: boolean) => void;
@@ -38,6 +45,11 @@ interface TerrainState {
   setZMetric: (metric: ZMetric) => void;
   setRadiusScale: (scale: number) => void;
   setHeightScale: (scale: number) => void;
+  setWeightEmbedding: (v: number) => void;
+  setWeightIndustry: (v: number) => void;
+  setWeightNumeric: (v: number) => void;
+  setPcaTargetDim: (v: number) => void;
+  setEmbeddingPcaDim: (v: number) => void;
   toggleLabels: () => void;
   toggleGrid: () => void;
   toggleContours: () => void;
@@ -64,6 +76,13 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   radiusScale: 2.0,
   heightScale: 8.0,
 
+  // v3.0: 聚类权重默认值
+  weightEmbedding: 1.5,
+  weightIndustry: 0.8,
+  weightNumeric: 1.0,
+  pcaTargetDim: 50,
+  embeddingPcaDim: 32,
+
   // ─── Actions ─────────────────────────
   setTerrainData: (data) =>
     set({ terrainData: data, lastUpdateTime: new Date(), error: null }),
@@ -76,6 +95,11 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   setZMetric: (metric) => set({ zMetric: metric }),
   setRadiusScale: (scale) => set({ radiusScale: scale }),
   setHeightScale: (scale) => set({ heightScale: scale }),
+  setWeightEmbedding: (v) => set({ weightEmbedding: v }),
+  setWeightIndustry: (v) => set({ weightIndustry: v }),
+  setWeightNumeric: (v) => set({ weightNumeric: v }),
+  setPcaTargetDim: (v) => set({ pcaTargetDim: v }),
+  setEmbeddingPcaDim: (v) => set({ embeddingPcaDim: v }),
 
   toggleLabels: () => set((s) => ({ showLabels: !s.showLabels })),
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
@@ -120,7 +144,11 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   fetchTerrain: async () => {
     set({ isLoading: true, error: null });
     try {
-      const { zMetric, radiusScale } = get();
+      const {
+        zMetric, radiusScale,
+        weightEmbedding, weightIndustry, weightNumeric,
+        pcaTargetDim, embeddingPcaDim,
+      } = get();
       const res = await fetch("/api/v1/terrain/compute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -128,6 +156,11 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
           z_metric: zMetric,
           resolution: 128,
           radius_scale: radiusScale,
+          weight_embedding: weightEmbedding,
+          weight_industry: weightIndustry,
+          weight_numeric: weightNumeric,
+          pca_target_dim: pcaTargetDim,
+          embedding_pca_dim: embeddingPcaDim,
         }),
       });
 

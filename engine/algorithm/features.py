@@ -346,11 +346,17 @@ class FeatureEngineer:
         self,
         snapshot_df: pd.DataFrame,
         feature_cols: list[str] | None = None,
+        weight_embedding: float | None = None,
+        weight_industry: float | None = None,
+        weight_numeric: float | None = None,
+        pca_target_dim: int | None = None,
+        embedding_pca_dim: int | None = None,
     ) -> tuple[pd.DataFrame, np.ndarray, list[str]]:
         """
         构建标准化特征矩阵
 
         v3.0: BGE 嵌入 + 数值特征两层融合 + PCA 降维
+        支持运行时权重调节
         fallback: 纯数值特征
 
         Returns:
@@ -393,7 +399,12 @@ class FeatureEngineer:
         # ─── 两层特征融合 ─────────────────────────────
         if self._precomputed.available:
             X_final, feature_names = self._fuse_features(
-                codes, X_numeric_scaled, feature_cols
+                codes, X_numeric_scaled, feature_cols,
+                weight_embedding=weight_embedding,
+                weight_industry=weight_industry,
+                weight_numeric=weight_numeric,
+                pca_target_dim=pca_target_dim,
+                embedding_pca_dim=embedding_pca_dim,
             )
         else:
             X_final = X_numeric_scaled
@@ -415,64 +426,81 @@ class FeatureEngineer:
         codes: list[str],
         X_numeric_scaled: np.ndarray,
         numeric_feature_names: list[str],
+        weight_embedding: float | None = None,
+        weight_industry: float | None = None,
+        weight_numeric: float | None = None,
+        pca_target_dim: int | None = None,
+        embedding_pca_dim: int | None = None,
     ) -> tuple[np.ndarray, list[str]]:
         """
-        三层特征融合 v3.0
+        三层特征融合 v3.0 — 支持运行时动态权重
 
-        Layer 1: BGE 嵌入 768d → PCA 32d → 标准化 × 1.5
-        Layer 2: 行业 one-hot × 0.8（从 profiles 动态构建，作为软提示）
-        Layer 3: 数值特征 × 1.0
-        → concat → PCA → 50 维（如果总维度 > 50）
+        Layer 1: BGE 嵌入 768d → PCA → 标准化 × weight_embedding
+        Layer 2: 行业 one-hot × weight_industry
+        Layer 3: 数值特征 × weight_numeric
+        → concat → PCA → pca_target_dim 维
         """
-        logger.info("🔗 执行三层特征融合 v3.0...")
+        # 使用传入的权重，未传入则用全局默认值
+        w_emb = weight_embedding if weight_embedding is not None else WEIGHT_EMBEDDING
+        w_ind = weight_industry if weight_industry is not None else WEIGHT_INDUSTRY
+        w_num = weight_numeric if weight_numeric is not None else WEIGHT_NUMERIC
+        target_dim = pca_target_dim if pca_target_dim is not None else PCA_TARGET_DIM
+        emb_dim = embedding_pca_dim if embedding_pca_dim is not None else EMBEDDING_PCA_DIM
+
+        logger.info(
+            f"🔗 执行三层特征融合 v3.0 "
+            f"(嵌入={w_emb}, 行业={w_ind}, 数值={w_num}, "
+            f"PCA={target_dim}, 嵌入PCA={emb_dim})..."
+        )
 
         layers = []
         feature_names = []
 
         # Layer 1: BGE 嵌入 → 先降维
         X_embedding = self._precomputed.get_embeddings_for_codes(codes)
-        if X_embedding is not None:
-            emb_pca_dim = min(
-                EMBEDDING_PCA_DIM, X_embedding.shape[1], X_embedding.shape[0] - 1
+        if X_embedding is not None and w_emb > 0:
+            actual_emb_dim = min(
+                emb_dim, X_embedding.shape[1], X_embedding.shape[0] - 1
             )
-            emb_pca = PCA(n_components=emb_pca_dim, random_state=42)
+            emb_pca = PCA(n_components=actual_emb_dim, random_state=42)
             X_emb_reduced = emb_pca.fit_transform(X_embedding)
             emb_var = sum(emb_pca.explained_variance_ratio_) * 100
 
             emb_scaler = StandardScaler()
             X_emb_scaled = emb_scaler.fit_transform(X_emb_reduced)
-            X_emb_weighted = X_emb_scaled * WEIGHT_EMBEDDING
+            X_emb_weighted = X_emb_scaled * w_emb
 
             layers.append(X_emb_weighted)
             feature_names.extend(
-                [f"emb_{i}" for i in range(emb_pca_dim)]
+                [f"emb_{i}" for i in range(actual_emb_dim)]
             )
             logger.info(
                 f"  Layer 1 — 语义嵌入: {X_embedding.shape[1]}d "
-                f"→ PCA {emb_pca_dim}d (方差 {emb_var:.1f}%) "
-                f"× {WEIGHT_EMBEDDING}"
+                f"→ PCA {actual_emb_dim}d (方差 {emb_var:.1f}%) "
+                f"× {w_emb}"
             )
 
         # Layer 2: 行业 one-hot（从 profiles 动态构建）
-        X_industry = self._precomputed.get_industry_onehot_for_codes(codes)
-        if X_industry is not None:
-            X_industry_weighted = X_industry * WEIGHT_INDUSTRY
-            layers.append(X_industry_weighted)
-            feature_names.extend(
-                [f"ind_{name}" for name in self._precomputed.industry_names]
-            )
-            logger.info(
-                f"  Layer 2 — 行业 one-hot: {X_industry.shape[1]} 维 × {WEIGHT_INDUSTRY}"
-            )
+        if w_ind > 0:
+            X_industry = self._precomputed.get_industry_onehot_for_codes(codes)
+            if X_industry is not None:
+                X_industry_weighted = X_industry * w_ind
+                layers.append(X_industry_weighted)
+                feature_names.extend(
+                    [f"ind_{name}" for name in self._precomputed.industry_names]
+                )
+                logger.info(
+                    f"  Layer 2 — 行业 one-hot: {X_industry.shape[1]} 维 × {w_ind}"
+                )
 
         # Layer 3: 数值特征
-        X_numeric_weighted = X_numeric_scaled * WEIGHT_NUMERIC
+        X_numeric_weighted = X_numeric_scaled * w_num
         layers.append(X_numeric_weighted)
         feature_names.extend(
             [f"num_{name}" for name in numeric_feature_names]
         )
         logger.info(
-            f"  Layer 3 — 数值特征: {X_numeric_scaled.shape[1]} 维 × {WEIGHT_NUMERIC}"
+            f"  Layer 3 — 数值特征: {X_numeric_scaled.shape[1]} 维 × {w_num}"
         )
 
         # 拼接
@@ -480,13 +508,13 @@ class FeatureEngineer:
         logger.info(f"  融合后总维度: {X_concat.shape[1]}")
 
         # 最终 PCA 降维
-        if X_concat.shape[1] > PCA_TARGET_DIM:
-            target_dim = min(
-                PCA_TARGET_DIM, X_concat.shape[1], X_concat.shape[0] - 1
+        if X_concat.shape[1] > target_dim:
+            actual_target = min(
+                target_dim, X_concat.shape[1], X_concat.shape[0] - 1
             )
-            logger.info(f"  最终 PCA: {X_concat.shape[1]} → {target_dim}")
+            logger.info(f"  最终 PCA: {X_concat.shape[1]} → {actual_target}")
 
-            self._pca = PCA(n_components=target_dim, random_state=42)
+            self._pca = PCA(n_components=actual_target, random_state=42)
             X_final = self._pca.fit_transform(X_concat)
 
             explained_var = sum(self._pca.explained_variance_ratio_) * 100

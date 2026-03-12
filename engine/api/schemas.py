@@ -89,7 +89,7 @@ class HealthResponse(BaseModel):
 
 
 class ComputeRequest(BaseModel):
-    """计算请求 v2.0"""
+    """计算请求 v3.0 — 支持聚类权重调节"""
 
     z_metric: str = Field("pct_chg", description="Z 轴指标: pct_chg, turnover_rate, volume 等")
     features: list[str] | None = Field(
@@ -97,6 +97,13 @@ class ComputeRequest(BaseModel):
     )
     resolution: int = Field(128, ge=32, le=256, description="地形网格分辨率")
     radius_scale: float = Field(2.0, ge=0.5, le=8.0, description="影响半径缩放因子")
+
+    # v3.0: 聚类权重参数
+    weight_embedding: float = Field(1.5, ge=0.0, le=3.0, description="嵌入权重")
+    weight_industry: float = Field(0.8, ge=0.0, le=2.0, description="行业权重")
+    weight_numeric: float = Field(1.0, ge=0.0, le=3.0, description="数值权重")
+    pca_target_dim: int = Field(50, ge=10, le=100, description="PCA 维度")
+    embedding_pca_dim: int = Field(32, ge=8, le=64, description="嵌入 PCA 维度")
 
 
 class StockSearchResult(BaseModel):

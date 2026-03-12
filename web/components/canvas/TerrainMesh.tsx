@@ -1,13 +1,16 @@
 "use client";
 
 /**
- * TerrainMesh v2.0 — 3D 地形曲面渲染组件
+ * TerrainMesh v3.0 — 3D 地形曲面渲染组件
  *
- * v2.0 更新：
- * - 清爽简约配色（薄荷→天蓝→薰衣草渐变）
- * - 卡通着色风格（阶梯色带）
- * - 柔和光照，无 PBR 真实感
- * - 海面以下不渲染（alpha=0）
+ * v3.0 修复：
+ * - 使用自建 BufferGeometry 替代 planeGeometry + rotation
+ *   直接在 XZ 平面上构建网格，Y 轴为高度
+ *   避免旋转导致的坐标翻转问题
+ * - 高度零点 = 数据中 0 值对应的归一化位置
+ *   海面始终在 Y=0
+ * - 红涨绿跌颜色渐变 + 中间透明
+ * - XY 使用 xyScale 放大
  */
 
 import { useRef, useMemo, useEffect } from "react";
@@ -23,194 +26,226 @@ interface TerrainMeshProps {
     zmin: number; zmax: number;
   };
   heightScale?: number;
+  xyScale?: number;
   showContours?: boolean;
 }
-
-// ─── 顶点着色器 ──────────────────────────────────────
-const vertexShader = /* glsl */ `
-  uniform sampler2D uHeightMap;
-  uniform float uHeightScale;
-  uniform float uAnimProgress;
-
-  varying float vHeight;
-  varying float vRawHeight;
-  varying vec2 vUv;
-  varying vec3 vNormal;
-  varying vec3 vWorldPos;
-
-  void main() {
-    vUv = uv;
-    
-    float height = texture2D(uHeightMap, uv).r;
-    vRawHeight = height;
-    vHeight = height;
-    
-    vec3 displaced = position;
-    // 将归一化高度 [0,1] 映射为有符号偏移 [-1, 1]
-    // 这样跌的（低值）会低于海面，涨的（高值）会高于海面
-    float signedHeight = (height - 0.5) * 2.0;
-    float animatedHeight = signedHeight * uHeightScale * uAnimProgress;
-    displaced.z = animatedHeight;
-    
-    // 法线计算
-    float eps = 1.0 / 128.0;
-    float hL = texture2D(uHeightMap, uv - vec2(eps, 0.0)).r * uHeightScale;
-    float hR = texture2D(uHeightMap, uv + vec2(eps, 0.0)).r * uHeightScale;
-    float hD = texture2D(uHeightMap, uv - vec2(0.0, eps)).r * uHeightScale;
-    float hU = texture2D(uHeightMap, uv + vec2(0.0, eps)).r * uHeightScale;
-    vNormal = normalize(vec3(hL - hR, hD - hU, 2.0));
-    
-    vWorldPos = displaced;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
-  }
-`;
-
-// ─── 片段着色器 — 高饱和度 + 强对比度 ─────────────────
-const fragmentShader = /* glsl */ `
-  uniform float uZMin;
-  uniform float uZMax;
-  uniform float uShowContours;
-  uniform float uTime;
-
-  varying float vHeight;
-  varying float vRawHeight;
-  varying vec2 vUv;
-  varying vec3 vNormal;
-  varying vec3 vWorldPos;
-
-  // 高饱和度配色 — 绿(跌)→白(平)→红(涨)
-  vec3 colorDeepGreen = vec3(0.05, 0.55, 0.30);   // 深绿 (大跌)
-  vec3 colorGreen     = vec3(0.10, 0.72, 0.42);   // 鲜绿 (跌)
-  vec3 colorLightGreen= vec3(0.55, 0.85, 0.60);   // 浅绿 (小跌)
-  vec3 colorNeutral   = vec3(0.92, 0.93, 0.95);   // 极浅灰白 (平)
-  vec3 colorLightRed  = vec3(0.95, 0.60, 0.50);   // 浅红 (小涨)
-  vec3 colorRed       = vec3(0.90, 0.25, 0.20);   // 鲜红 (涨)
-  vec3 colorHot       = vec3(0.75, 0.10, 0.10);   // 深红 (涨停)
-
-  void main() {
-    float range = uZMax - uZMin;
-    float t = range > 0.001 ? (vHeight - uZMin) / range : 0.5;
-    t = clamp(t, 0.0, 1.0);
-    
-    // 使用 pow 拉伸对比度 — 让中间区域变窄，两端更明显
-    // 先映射到 [-1, 1] 然后用 sign-preserving pow
-    float centered = t * 2.0 - 1.0; // [-1, 1]
-    float stretched = sign(centered) * pow(abs(centered), 0.7); // 增强两端
-    t = (stretched + 1.0) * 0.5; // 回到 [0, 1]
-    
-    // 七段式高饱和度配色
-    vec3 color;
-    if (t < 0.12) {
-      color = mix(colorDeepGreen, colorGreen, t / 0.12);
-    } else if (t < 0.30) {
-      color = mix(colorGreen, colorLightGreen, (t - 0.12) / 0.18);
-    } else if (t < 0.45) {
-      color = mix(colorLightGreen, colorNeutral, (t - 0.30) / 0.15);
-    } else if (t < 0.55) {
-      color = colorNeutral;
-    } else if (t < 0.70) {
-      color = mix(colorNeutral, colorLightRed, (t - 0.55) / 0.15);
-    } else if (t < 0.88) {
-      color = mix(colorLightRed, colorRed, (t - 0.70) / 0.18);
-    } else {
-      color = mix(colorRed, colorHot, (t - 0.88) / 0.12);
-    }
-    
-    // 光照 — 柔和漫反射 + 微弱高光
-    vec3 lightDir = normalize(vec3(0.3, 0.5, 1.0));
-    float NdotL = max(dot(vNormal, lightDir), 0.0);
-    // 柔和阶梯（4级）
-    float toonShade = floor(NdotL * 4.0 + 0.5) / 4.0;
-    float diffuse = mix(NdotL, toonShade, 0.3) * 0.3 + 0.70;
-    color *= diffuse;
-    
-    // 等高线 — 更明显
-    if (uShowContours > 0.5) {
-      float contourFreq = 10.0;
-      float contour = fract(vRawHeight * contourFreq);
-      float line = smoothstep(0.0, 0.03, contour) * smoothstep(0.06, 0.03, contour);
-      color = mix(color, vec3(1.0), line * 0.15);
-    }
-    
-    // 海面以下区域（rawHeight 接近 0）→ 透明
-    float absHeight = abs(vRawHeight);
-    float seaMask = smoothstep(0.0, 0.03, absHeight);
-    
-    // 边缘渐隐
-    float edgeDist = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));
-    float edgeFade = smoothstep(0.0, 0.04, edgeDist);
-    
-    float alpha = 0.95 * edgeFade * seaMask;
-    
-    gl_FragColor = vec4(color, alpha);
-  }
-`;
 
 export default function TerrainMesh({
   heightData,
   resolution,
   bounds,
   heightScale = 3.0,
+  xyScale = 1.5,
   showContours = true,
 }: TerrainMeshProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const materialRef = useRef<THREE.ShaderMaterial>(null);
   const animProgress = useRef(0);
 
-  // 创建高度图纹理
-  const heightTexture = useMemo(() => {
+  const zMin = bounds.zmin;
+  const zMax = bounds.zmax;
+  const zRange = zMax - zMin || 1;
+  // 数据中 0 值在 [0,1] 归一化空间的位置 → 这就是海面零线
+  const zeroLevel = (0 - zMin) / zRange;
+
+  // ─── 自建 XZ 平面 BufferGeometry，Y 轴为高度 ────────
+  const geometry = useMemo(() => {
     if (!heightData || heightData.length === 0) return null;
 
-    const size = resolution;
-    const data = new Float32Array(size * size);
+    const res = resolution;
+    const xExtent = (bounds.xmax - bounds.xmin || 20) * xyScale;
+    const zExtent = (bounds.ymax - bounds.ymin || 20) * xyScale;
+    const xCenter = (bounds.xmin + bounds.xmax) / 2;
+    const zCenter = (bounds.ymin + bounds.ymax) / 2;
 
-    const zMin = bounds.zmin;
-    const zMax = bounds.zmax;
-    const range = zMax - zMin || 1;
+    const vertCount = res * res;
+    const positions = new Float32Array(vertCount * 3);
+    const uvs = new Float32Array(vertCount * 2);
+    const normals = new Float32Array(vertCount * 3);
+    // 存归一化高度到自定义属性
+    const heightAttr = new Float32Array(vertCount);
 
-    for (let i = 0; i < Math.min(heightData.length, size * size); i++) {
-      data[i] = (heightData[i] - zMin) / range;
+    for (let iy = 0; iy < res; iy++) {
+      for (let ix = 0; ix < res; ix++) {
+        const idx = iy * res + ix;
+        const u = ix / (res - 1);
+        const v = iy / (res - 1);
+
+        // XZ 对齐后端 UMAP 坐标空间 × xyScale
+        const worldX = (bounds.xmin + u * (bounds.xmax - bounds.xmin)) * xyScale;
+        const worldZ = (bounds.ymin + v * (bounds.ymax - bounds.ymin)) * xyScale;
+
+        // 归一化高度 [0,1]
+        const rawZ = heightData[idx] ?? 0;
+        const h = Math.max(0, Math.min(1, (rawZ - zMin) / zRange));
+        heightAttr[idx] = h;
+
+        // Y = 0 代表海面 → (h - zeroLevel) * heightScale
+        // 动画在 shader 中做
+        positions[idx * 3] = worldX;
+        positions[idx * 3 + 1] = 0; // shader 会覆盖
+        positions[idx * 3 + 2] = worldZ;
+
+        uvs[idx * 2] = u;
+        uvs[idx * 2 + 1] = v;
+
+        normals[idx * 3] = 0;
+        normals[idx * 3 + 1] = 1;
+        normals[idx * 3 + 2] = 0;
+      }
     }
 
-    const texture = new THREE.DataTexture(
-      data,
-      size,
-      size,
-      THREE.RedFormat,
-      THREE.FloatType
-    );
-    texture.needsUpdate = true;
-    texture.magFilter = THREE.LinearFilter;
-    texture.minFilter = THREE.LinearFilter;
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
+    // 构建索引
+    const indices: number[] = [];
+    for (let iy = 0; iy < res - 1; iy++) {
+      for (let ix = 0; ix < res - 1; ix++) {
+        const a = iy * res + ix;
+        const b = a + 1;
+        const c = a + res;
+        const d = c + 1;
+        indices.push(a, c, b);
+        indices.push(b, c, d);
+      }
+    }
 
-    return texture;
-  }, [heightData, resolution, bounds]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+    geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+    geo.setAttribute("aHeight", new THREE.BufferAttribute(heightAttr, 1));
+    geo.setIndex(indices);
+
+    return geo;
+  }, [heightData, resolution, bounds, xyScale, zMin, zRange, zeroLevel]);
+
+  // ─── 顶点着色器 ─────────────────────────────────────
+  const vertexShader = useMemo(() => /* glsl */ `
+    attribute float aHeight;
+    uniform float uHeightScale;
+    uniform float uAnimProgress;
+    uniform float uZeroLevel;
+
+    varying float vHeight;
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+
+    void main() {
+      vUv = uv;
+      vHeight = aHeight;
+
+      vec3 displaced = position;
+      // Y = (aHeight - zeroLevel) * heightScale * animProgress
+      // 当 aHeight == zeroLevel → Y = 0 → 海面
+      float animatedY = (aHeight - uZeroLevel) * uHeightScale * uAnimProgress;
+      displaced.y = animatedY;
+
+      vWorldPos = displaced;
+
+      // 法线（近似 — 用 dFdx/dFdy 不行，手动用相邻差分）
+      vNormal = normal; // 会在 fragment 中做近似
+
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+    }
+  `, []);
+
+  // ─── 片段着色器 — 红涨绿跌 + 中间透明 ─────────────────
+  const fragmentShader = useMemo(() => /* glsl */ `
+    uniform float uZeroLevel;
+    uniform float uShowContours;
+    uniform float uTime;
+
+    varying float vHeight;
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+
+    void main() {
+      // centered: >0 = 涨 (高于海面), <0 = 跌 (低于海面)
+      float diff = vHeight - uZeroLevel;
+      // 归一化到 [-1, 1]，按涨跌最大幅度
+      float maxRange = max(1.0 - uZeroLevel, uZeroLevel);
+      maxRange = max(maxRange, 0.001);
+      float centered = clamp(diff / maxRange, -1.0, 1.0);
+
+      // 涨跌颜色：涨→红，跌→绿
+      vec3 deepRed   = vec3(0.75, 0.08, 0.08);
+      vec3 brightRed = vec3(0.92, 0.22, 0.18);
+      vec3 lightRed  = vec3(0.95, 0.55, 0.45);
+      vec3 deepGreen = vec3(0.04, 0.50, 0.28);
+      vec3 green     = vec3(0.10, 0.70, 0.40);
+      vec3 lightGreen= vec3(0.50, 0.85, 0.55);
+
+      vec3 color;
+      float absCentered = abs(centered);
+
+      if (centered > 0.0) {
+        if (absCentered < 0.4) {
+          color = mix(lightRed, brightRed, absCentered / 0.4);
+        } else {
+          color = mix(brightRed, deepRed, (absCentered - 0.4) / 0.6);
+        }
+      } else {
+        if (absCentered < 0.4) {
+          color = mix(lightGreen, green, absCentered / 0.4);
+        } else {
+          color = mix(green, deepGreen, (absCentered - 0.4) / 0.6);
+        }
+      }
+
+      // 柔和光照
+      // 用屏幕空间导数近似法线
+      vec3 dx = dFdx(vWorldPos);
+      vec3 dz = dFdy(vWorldPos);
+      vec3 N = normalize(cross(dx, dz));
+
+      vec3 lightDir = normalize(vec3(0.3, 1.0, 0.5));
+      float NdotL = max(dot(N, lightDir), 0.0);
+      float toonShade = floor(NdotL * 4.0 + 0.5) / 4.0;
+      float diffuse = mix(NdotL, toonShade, 0.3) * 0.3 + 0.70;
+      color *= diffuse;
+
+      // 等高线
+      if (uShowContours > 0.5) {
+        float contourFreq = 10.0;
+        float contour = fract(vHeight * contourFreq);
+        float line = smoothstep(0.0, 0.03, contour) * smoothstep(0.06, 0.03, contour);
+        color = mix(color, vec3(1.0), line * 0.15);
+      }
+
+      // 透明度: |centered| 越小 → 越透明
+      float alphaByChange = smoothstep(0.0, 0.15, absCentered);
+      alphaByChange = mix(0.06, 0.95, alphaByChange);
+
+      // 边缘渐隐
+      float edgeDist = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));
+      float edgeFade = smoothstep(0.0, 0.04, edgeDist);
+
+      float alpha = alphaByChange * edgeFade;
+
+      gl_FragColor = vec4(color, alpha);
+    }
+  `, []);
 
   const uniforms = useMemo(
     () => ({
-      uHeightMap: { value: heightTexture },
       uHeightScale: { value: heightScale },
       uTime: { value: 0 },
       uAnimProgress: { value: 0 },
-      uZMin: { value: bounds.zmin },
-      uZMax: { value: bounds.zmax },
+      uZeroLevel: { value: zeroLevel },
       uShowContours: { value: showContours ? 1.0 : 0.0 },
     }),
     []
   );
 
   useEffect(() => {
-    if (materialRef.current && heightTexture) {
-      materialRef.current.uniforms.uHeightMap.value = heightTexture;
-      materialRef.current.uniforms.uZMin.value = bounds.zmin;
-      materialRef.current.uniforms.uZMax.value = bounds.zmax;
+    if (materialRef.current) {
       materialRef.current.uniforms.uHeightScale.value = heightScale;
+      materialRef.current.uniforms.uZeroLevel.value = zeroLevel;
       materialRef.current.uniforms.uShowContours.value = showContours ? 1.0 : 0.0;
       animProgress.current = 0;
     }
-  }, [heightTexture, bounds, heightScale, showContours]);
+  }, [heightData, bounds, heightScale, showContours, zeroLevel]);
 
   useFrame((_, delta) => {
     if (materialRef.current) {
@@ -221,18 +256,10 @@ export default function TerrainMesh({
     }
   });
 
-  if (!heightTexture) return null;
-
-  const width = bounds.xmax - bounds.xmin || 20;
-  const height = bounds.ymax - bounds.ymin || 20;
+  if (!geometry) return null;
 
   return (
-    <mesh
-      ref={meshRef}
-      rotation={[-Math.PI / 2, 0, 0]}
-      position={[0, -1, 0]}
-    >
-      <planeGeometry args={[width, height, resolution - 1, resolution - 1]} />
+    <mesh ref={meshRef} geometry={geometry}>
       <shaderMaterial
         ref={materialRef}
         vertexShader={vertexShader}
@@ -240,6 +267,7 @@ export default function TerrainMesh({
         uniforms={uniforms}
         transparent
         side={THREE.DoubleSide}
+        extensions={{ derivatives: true }}
       />
     </mesh>
   );

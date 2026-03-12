@@ -82,7 +82,7 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
         # 2. 保存快照到 DuckDB
         await asyncio.to_thread(store.save_snapshot, snapshot)
 
-        # 3. 执行算法流水线 (v2.0: 多指标 + Wendland)
+        # 3. 执行算法流水线 (v3.0: 多指标 + Wendland + 动态权重)
         result = await asyncio.to_thread(
             pipeline.compute_full,
             snapshot,
@@ -90,6 +90,11 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
             feature_cols=req.features,
             grid_resolution=req.resolution,
             radius_scale=req.radius_scale,
+            weight_embedding=req.weight_embedding,
+            weight_industry=req.weight_industry,
+            weight_numeric=req.weight_numeric,
+            pca_target_dim=req.pca_target_dim,
+            embedding_pca_dim=req.embedding_pca_dim,
         )
 
         # 4. 返回地形数据 (v2.0: 包含所有指标网格)

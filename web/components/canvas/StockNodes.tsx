@@ -19,7 +19,13 @@ import { useTerrainStore } from "@/stores/useTerrainStore";
 interface StockNodesProps {
   stocks: StockPoint[];
   heightScale?: number;
+  xyScale?: number;
   showLabels?: boolean;
+  bounds?: {
+    xmin: number; xmax: number;
+    ymin: number; ymax: number;
+    zmin: number; zmax: number;
+  };
 }
 
 const tempMatrix = new THREE.Matrix4();
@@ -28,7 +34,9 @@ const tempColor = new THREE.Color();
 export default function StockNodes({
   stocks,
   heightScale = 3.0,
+  xyScale = 1.5,
   showLabels = true,
+  bounds,
 }: StockNodesProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const { selectedStock, hoveredStock, setSelectedStock, setHoveredStock } =
@@ -36,52 +44,62 @@ export default function StockNodes({
 
   const count = stocks.length;
 
+  // 从 bounds 获取 z 轴范围（用于与地形着色器一致的归一化）
+  const zMin = bounds?.zmin ?? 0;
+  const zMax = bounds?.zmax ?? 1;
+
   useEffect(() => {
     if (!meshRef.current || count === 0) return;
 
     const mesh = meshRef.current;
+    const zRange = zMax - zMin || 1;
+    // 数据中 0 值在 [0,1] 归一化空间的位置 → 海面零线
+    const zeroLevel = (0 - zMin) / zRange;
 
     for (let i = 0; i < count; i++) {
       const stock = stocks[i];
 
-      const x = stock.x;
-      const z_pos = stock.y;
-      // 与 TerrainMesh shader 一致: signedHeight = (normalized - 0.5) * 2.0 * heightScale
-      // 但节点直接用原始 z 值来定位（在海面 y=-1 的基础上偏移）
-      const y = stock.z * (heightScale / 10) - 1 + 0.15;
+      // XZ 坐标乘以 xyScale，与 TerrainMesh 对齐
+      const x = stock.x * xyScale;
+      const z_pos = stock.y * xyScale;
+
+      // Y 坐标：与 TerrainMesh 顶点着色器一致
+      // shader: Y = (aHeight - zeroLevel) * heightScale
+      const normalized = (stock.z - zMin) / zRange;
+      const y = (normalized - zeroLevel) * heightScale + 0.15; // +0.15 浮在地形上方
 
       const scale = 0.08;
       tempMatrix.makeScale(scale, scale, scale);
       tempMatrix.setPosition(x, y, z_pos);
       mesh.setMatrixAt(i, tempMatrix);
 
-      // v2.0: 清爽配色
-      const pctChg = stock.z;
+      // 模块C: 球体着色始终用涨跌幅 z_pct_chg
+      const pctChg = (stock as any).z_pct_chg ?? stock.z;
       if (pctChg > 5) {
         // 大涨：深红
-        tempColor.setRGB(0.90, 0.28, 0.28);
-      } else if (pctChg > 0.5) {
-        // 小涨：暖珊瑚
+        tempColor.setRGB(0.85, 0.12, 0.12);
+      } else if (pctChg > 0.3) {
+        // 涨：浅红 → 鲜红
         const t = Math.min(pctChg / 5, 1);
         tempColor.lerpColors(
-          new THREE.Color(0.95, 0.65, 0.50),
-          new THREE.Color(0.90, 0.35, 0.35),
+          new THREE.Color(0.95, 0.55, 0.45),
+          new THREE.Color(0.90, 0.20, 0.18),
           t
         );
       } else if (pctChg < -5) {
         // 大跌：深绿
-        tempColor.setRGB(0.15, 0.60, 0.40);
-      } else if (pctChg < -0.5) {
-        // 小跌：薄荷绿
+        tempColor.setRGB(0.05, 0.50, 0.28);
+      } else if (pctChg < -0.3) {
+        // 跌：浅绿 → 鲜绿
         const t = Math.min(Math.abs(pctChg) / 5, 1);
         tempColor.lerpColors(
-          new THREE.Color(0.45, 0.82, 0.60),
-          new THREE.Color(0.20, 0.65, 0.45),
+          new THREE.Color(0.50, 0.85, 0.55),
+          new THREE.Color(0.10, 0.65, 0.38),
           t
         );
       } else {
-        // 平：浅灰蓝
-        tempColor.setRGB(0.70, 0.75, 0.82);
+        // 平盘：半透明灰蓝（用较低饱和度表示）
+        tempColor.setRGB(0.75, 0.78, 0.84);
       }
 
       mesh.setColorAt(i, tempColor);
@@ -89,7 +107,7 @@ export default function StockNodes({
 
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  }, [stocks, count, heightScale]);
+  }, [stocks, count, heightScale, zMin, zMax]);
 
   const handleClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
@@ -137,12 +155,12 @@ export default function StockNodes({
 
       {/* Hover 标签 */}
       {hoveredStock && showLabels && (
-        <HoverLabel stock={hoveredStock} heightScale={heightScale} />
+        <HoverLabel stock={hoveredStock} heightScale={heightScale} xyScale={xyScale} bounds={bounds} />
       )}
 
       {/* 选中标签 */}
       {selectedStock && (
-        <SelectedLabel stock={selectedStock} heightScale={heightScale} />
+        <SelectedLabel stock={selectedStock} heightScale={heightScale} xyScale={xyScale} bounds={bounds} />
       )}
     </>
   );
@@ -153,14 +171,23 @@ export default function StockNodes({
 function HoverLabel({
   stock,
   heightScale,
+  xyScale = 1.5,
+  bounds,
 }: {
   stock: StockPoint;
   heightScale: number;
+  xyScale?: number;
+  bounds?: { zmin: number; zmax: number };
 }) {
-  const y = stock.z * (heightScale / 10) - 1 + 0.5;
+  const zMin = bounds?.zmin ?? 0;
+  const zMax = bounds?.zmax ?? 1;
+  const zRange = zMax - zMin || 1;
+  const zeroLevel = (0 - zMin) / zRange;
+  const normalized = (stock.z - zMin) / zRange;
+  const y = (normalized - zeroLevel) * heightScale + 0.5;
 
   return (
-    <Billboard position={[stock.x, y, stock.y]} follow={true}>
+    <Billboard position={[stock.x * xyScale, y, stock.y * xyScale]} follow={true}>
       <Html center distanceFactor={15} style={{ pointerEvents: "none" }}>
         <div
           style={{
@@ -198,11 +225,11 @@ function HoverLabel({
               fontWeight: 700,
               fontSize: "14px",
               marginTop: "2px",
-              color: stock.z > 0 ? "#EF4444" : stock.z < 0 ? "#22C55E" : "#9CA3AF",
+              color: ((stock as any).z_pct_chg ?? stock.z) > 0 ? "#EF4444" : ((stock as any).z_pct_chg ?? stock.z) < 0 ? "#22C55E" : "#9CA3AF",
             }}
           >
-            {stock.z > 0 ? "+" : ""}
-            {stock.z.toFixed(2)}%
+            {((stock as any).z_pct_chg ?? stock.z) > 0 ? "+" : ""}
+            {((stock as any).z_pct_chg ?? stock.z).toFixed(2)}%
           </div>
         </div>
       </Html>
@@ -215,14 +242,23 @@ function HoverLabel({
 function SelectedLabel({
   stock,
   heightScale,
+  xyScale = 1.5,
+  bounds,
 }: {
   stock: StockPoint;
   heightScale: number;
+  xyScale?: number;
+  bounds?: { zmin: number; zmax: number };
 }) {
-  const y = stock.z * (heightScale / 10) - 1 + 0.8;
+  const zMin = bounds?.zmin ?? 0;
+  const zMax = bounds?.zmax ?? 1;
+  const zRange = zMax - zMin || 1;
+  const zeroLevel = (0 - zMin) / zRange;
+  const normalized = (stock.z - zMin) / zRange;
+  const y = (normalized - zeroLevel) * heightScale + 0.8;
 
   return (
-    <Billboard position={[stock.x, y, stock.y]} follow={true}>
+    <Billboard position={[stock.x * xyScale, y, stock.y * xyScale]} follow={true}>
       <Html center distanceFactor={12}>
         <div
           style={{
@@ -264,11 +300,11 @@ function SelectedLabel({
               fontFamily: "JetBrains Mono, monospace",
               fontSize: "20px",
               fontWeight: 700,
-              color: stock.z > 0 ? "#EF4444" : stock.z < 0 ? "#22C55E" : "#9CA3AF",
+              color: ((stock as any).z_pct_chg ?? stock.z) > 0 ? "#EF4444" : ((stock as any).z_pct_chg ?? stock.z) < 0 ? "#22C55E" : "#9CA3AF",
             }}
           >
-            {stock.z > 0 ? "+" : ""}
-            {stock.z.toFixed(2)}%
+            {((stock as any).z_pct_chg ?? stock.z) > 0 ? "+" : ""}
+            {((stock as any).z_pct_chg ?? stock.z).toFixed(2)}%
           </div>
           <div
             style={{

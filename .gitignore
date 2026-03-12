@@ -13,11 +13,13 @@ node_modules/
 .next/
 out/
 
-# 数据文件（预计算数据，运行时生成）
+# 数据文件（运行时生成）
 data/*.duckdb
 data/*.duckdb.wal
 data/cache/
-data/precomputed/
+
+# 预计算数据 — 纳入版本控制，部署时直接使用
+# data/precomputed/
 
 # 日志
 logs/

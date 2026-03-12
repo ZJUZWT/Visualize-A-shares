@@ -1,0 +1,10 @@
+{
+  "version": "3.0",
+  "created_at": "2026-03-12T12:55:11",
+  "n_stocks": 5516,
+  "n_with_scope": 5516,
+  "n_with_industry": 5516,
+  "embedding_dim": 768,
+  "embedding_model": "BAAI/bge-base-zh-v1.5",
+  "total_time_seconds": 95.5
+}

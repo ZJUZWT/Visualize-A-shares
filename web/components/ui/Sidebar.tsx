@@ -25,8 +25,18 @@ export default function Sidebar() {
     showContours,
     radiusScale,
     heightScale,
+    weightEmbedding,
+    weightIndustry,
+    weightNumeric,
+    pcaTargetDim,
+    embeddingPcaDim,
     setRadiusScale,
     setHeightScale,
+    setWeightEmbedding,
+    setWeightIndustry,
+    setWeightNumeric,
+    setPcaTargetDim,
+    setEmbeddingPcaDim,
     toggleLabels,
     toggleGrid,
     toggleContours,
@@ -171,6 +181,82 @@ export default function Sidebar() {
             hint="控制股票影响半径"
           />
         </div>
+      </div>
+
+      {/* ─── 聚类权重 ─────────────────────── */}
+      <div className="glass-panel px-5 py-4">
+        <SectionTitle>聚类权重</SectionTitle>
+        
+        <SliderControl
+          label="嵌入权重"
+          value={weightEmbedding}
+          min={0}
+          max={3}
+          step={0.1}
+          onChange={setWeightEmbedding}
+          displayValue={weightEmbedding.toFixed(1)}
+          hint="BGE 语义嵌入层权重"
+        />
+
+        <div className="mt-3">
+          <SliderControl
+            label="行业权重"
+            value={weightIndustry}
+            min={0}
+            max={2}
+            step={0.1}
+            onChange={setWeightIndustry}
+            displayValue={weightIndustry.toFixed(1)}
+            hint="行业 one-hot 层权重"
+          />
+        </div>
+
+        <div className="mt-3">
+          <SliderControl
+            label="数值权重"
+            value={weightNumeric}
+            min={0}
+            max={3}
+            step={0.1}
+            onChange={setWeightNumeric}
+            displayValue={weightNumeric.toFixed(1)}
+            hint="财务/交易特征层权重"
+          />
+        </div>
+
+        <div className="mt-3">
+          <SliderControl
+            label="PCA 维度"
+            value={pcaTargetDim}
+            min={10}
+            max={100}
+            step={5}
+            onChange={setPcaTargetDim}
+            displayValue={pcaTargetDim.toString()}
+            hint="最终降维目标维度"
+          />
+        </div>
+
+        <div className="mt-3">
+          <SliderControl
+            label="嵌入 PCA 维度"
+            value={embeddingPcaDim}
+            min={8}
+            max={64}
+            step={4}
+            onChange={setEmbeddingPcaDim}
+            displayValue={embeddingPcaDim.toString()}
+            hint="嵌入预降维维度"
+          />
+        </div>
+
+        <button
+          onClick={fetchTerrain}
+          disabled={isLoading}
+          className="btn-primary w-full mt-4 text-xs"
+        >
+          {isLoading ? "计算中..." : "🏔️ 重新计算地形"}
+        </button>
       </div>
 
       {/* ─── 显示选项 ─────────────────────── */}

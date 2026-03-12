@@ -82,22 +82,33 @@ class AlgorithmPipeline:
         feature_cols: list[str] | None = None,
         grid_resolution: int = 128,
         radius_scale: float = 2.0,
+        weight_embedding: float | None = None,
+        weight_industry: float | None = None,
+        weight_numeric: float | None = None,
+        pca_target_dim: int | None = None,
+        embedding_pca_dim: int | None = None,
     ) -> TerrainResult:
         """
-        全量计算流水线 (v2.0)
+        全量计算流水线 (v3.0)
         
         - 一次性计算所有 Z 轴指标的地形网格
         - 使用 Wendland C2 核密度场
+        - 支持运行时聚类权重调节
         """
         t0 = time.time()
         logger.info("=" * 60)
-        logger.info("🏔️  算法流水线 v2.0 启动 — 全量计算")
+        logger.info("🏔️  算法流水线 v3.0 启动 — 全量计算")
         logger.info("=" * 60)
 
         # ─── Step 1: 特征提取 ─────────────────────────
         logger.info("📊 Step 1/4: 特征提取...")
         meta_df, X, feature_names = self.feature_eng.build_feature_matrix(
-            snapshot_df, feature_cols
+            snapshot_df, feature_cols,
+            weight_embedding=weight_embedding,
+            weight_industry=weight_industry,
+            weight_numeric=weight_numeric,
+            pca_target_dim=pca_target_dim,
+            embedding_pca_dim=embedding_pca_dim,
         )
 
         if X.size == 0:
