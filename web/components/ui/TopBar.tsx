@@ -8,9 +8,10 @@
 import { useState, useCallback } from "react";
 import { useTerrainStore } from "@/stores/useTerrainStore";
 import type { StockPoint } from "@/types/terrain";
+import { formatZValue } from "@/types/terrain";
 
 export default function TopBar() {
-  const { terrainData, setSelectedStock } = useTerrainStore();
+  const { terrainData, setSelectedStock, zMetric } = useTerrainStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<StockPoint[]>([]);
 
@@ -35,14 +36,22 @@ export default function TopBar() {
   );
 
   const stats = terrainData
-    ? {
-        total: terrainData.stock_count,
-        up: terrainData.stocks.filter((s) => s.z > 0).length,
-        down: terrainData.stocks.filter((s) => s.z < 0).length,
-        flat: terrainData.stocks.filter(
+    ? (() => {
+        const total = terrainData.stock_count;
+        if (zMetric === "rise_prob") {
+          // 上涨概率模式：值已减去0.5，>0.05 看涨 / <-0.05 看跌
+          const up = terrainData.stocks.filter((s) => s.z > 0.05).length;
+          const down = terrainData.stocks.filter((s) => s.z < -0.05).length;
+          const flat = total - up - down;
+          return { total, up, down, flat };
+        }
+        const up = terrainData.stocks.filter((s) => s.z > 0).length;
+        const down = terrainData.stocks.filter((s) => s.z < 0).length;
+        const flat = terrainData.stocks.filter(
           (s) => s.z === 0 || (s.z > -0.01 && s.z < 0.01)
-        ).length,
-      }
+        ).length;
+        return { total, up, down, flat };
+      })()
     : null;
 
   return (
@@ -108,12 +117,10 @@ export default function TopBar() {
                   </span>
                 </div>
                 <span
-                  className={`text-xs font-mono font-semibold ${
-                    stock.z > 0 ? "text-rise" : stock.z < 0 ? "text-fall" : "text-flat"
-                  }`}
+                  className="text-xs font-mono font-semibold"
+                  style={{ color: formatZValue(stock, zMetric).color }}
                 >
-                  {stock.z > 0 ? "+" : ""}
-                  {stock.z.toFixed(2)}%
+                  {formatZValue(stock, zMetric).text}
                 </span>
               </button>
             ))}

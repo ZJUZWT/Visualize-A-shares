@@ -74,6 +74,7 @@ class DuckDBStore:
                 low         DOUBLE,
                 open        DOUBLE,
                 pre_close   DOUBLE,
+                wb_ratio    DOUBLE,
                 updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (code)
             )
@@ -143,14 +144,47 @@ class DuckDBStore:
 
         logger.info("数据表初始化完成")
 
+        # ─── 迁移：为已有表添加新列 ────────────────────
+        self._migrate_add_column("stock_snapshot", "wb_ratio", "DOUBLE DEFAULT 0")
+
+    def _migrate_add_column(self, table: str, column: str, col_type: str):
+        """安全地给已有表添加新列（如果不存在的话）"""
+        try:
+            cols = [
+                r[0] for r in
+                self._conn.execute(f"PRAGMA table_info('{table}')").fetchall()
+            ]
+            if column not in cols:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                logger.info(f"迁移: {table} 新增列 {column}")
+        except Exception as e:
+            logger.warning(f"迁移 {table}.{column} 失败(非致命): {e}")
+
     def save_snapshot(self, df: pd.DataFrame):
         """保存实时行情快照（UPSERT）并同时存入每日历史"""
         if df.empty:
             return
 
-        # 使用临时表实现 UPSERT
-        self._conn.execute("CREATE OR REPLACE TEMP TABLE tmp_snapshot AS SELECT * FROM stock_snapshot WHERE 1=0")
-        self._conn.execute("INSERT INTO tmp_snapshot SELECT *, CURRENT_TIMESTAMP FROM df")
+        # 显式指定列及顺序，确保与表结构对齐
+        snapshot_cols = [
+            "code", "name", "price", "pct_chg", "volume", "amount",
+            "turnover_rate", "pe_ttm", "pb", "total_mv", "circ_mv",
+            "high", "low", "open", "pre_close", "wb_ratio",
+        ]
+        # 确保 df 有所有列（缺失的填 0）
+        for col in snapshot_cols:
+            if col not in df.columns:
+                df[col] = 0
+        insert_cols = ", ".join(snapshot_cols)
+        select_cols = ", ".join(f'df."{c}"' for c in snapshot_cols)
+
+        self._conn.execute(
+            f"CREATE OR REPLACE TEMP TABLE tmp_snapshot AS SELECT * FROM stock_snapshot WHERE 1=0"
+        )
+        self._conn.execute(
+            f"INSERT INTO tmp_snapshot ({insert_cols}, updated_at) "
+            f"SELECT {select_cols}, CURRENT_TIMESTAMP FROM df"
+        )
 
         self._conn.execute("""
             INSERT OR REPLACE INTO stock_snapshot

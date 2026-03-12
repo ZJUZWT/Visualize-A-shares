@@ -34,6 +34,9 @@ class StockPoint(BaseModel):
     z_pe_ttm: float = Field(0, description="市盈率(TTM)")
     z_pb: float = Field(0, description="市净率")
 
+    # v7.0: 明日上涨概率
+    z_rise_prob: float = Field(0.5, description="明日上涨概率 (0~1)")
+
     # v3.1: 同簇关联股票
     related_stocks: list[RelatedStock] = Field(
         default_factory=list, description="同簇相关股票(按距离排序)"

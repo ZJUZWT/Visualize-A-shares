@@ -40,6 +40,7 @@ function LeftPanel() {
     xScaleRatio,
     yScaleRatio,
     gridResolution,
+    computeProgress,
     setHeightScale,
     setRadiusScale,
     setXYScale,
@@ -99,7 +100,9 @@ function LeftPanel() {
               {isLoading ? (
                 <span className="flex items-center justify-center gap-2">
                   <Spinner />
-                  计算中...
+                  {computeProgress
+                    ? `${computeProgress.step}/${computeProgress.totalSteps} ${computeProgress.stepName}`
+                    : "连接服务器..."}
                 </span>
               ) : terrainData ? (
                 "🔄 刷新地形数据"
@@ -108,7 +111,31 @@ function LeftPanel() {
               )}
             </button>
 
-            {terrainData && (
+            {/* 计算进度展示 */}
+            {isLoading && computeProgress && (
+              <div className="mt-2 space-y-1.5">
+                {/* 步骤进度条 */}
+                <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-[var(--accent)] h-full rounded-full transition-all duration-500 ease-out"
+                    style={{
+                      width: `${Math.min(100, (computeProgress.step / computeProgress.totalSteps) * 100)}%`,
+                    }}
+                  />
+                </div>
+                {/* 步骤信息 */}
+                <div className="text-[10px] text-[var(--text-tertiary)] text-center">
+                  {computeProgress.message}
+                </div>
+                {/* 步骤编号 & 耗时 */}
+                <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] font-mono">
+                  <span>步骤 {computeProgress.step}/{computeProgress.totalSteps}</span>
+                  <span>{computeProgress.elapsed}s</span>
+                </div>
+              </div>
+            )}
+
+            {terrainData && !isLoading && (
               <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5 text-center">
                 布局保持稳定 · 调整权重可重排
               </div>
@@ -198,7 +225,14 @@ function LeftPanel() {
             disabled={isLoading}
             className="btn-secondary w-full mt-2 text-xs"
           >
-            {isLoading ? "计算中..." : "🔄 应用核半径/分辨率"}
+            {isLoading ? (
+              <span className="flex items-center justify-center gap-1.5">
+                <Spinner />
+                {computeProgress
+                  ? `${computeProgress.step}/${computeProgress.totalSteps} ${computeProgress.stepName}`
+                  : "连接服务器..."}
+              </span>
+            ) : "🔄 应用核半径/分辨率"}
           </button>
         )}
 
@@ -279,6 +313,7 @@ function RightPanel() {
     weightNumeric,
     pcaTargetDim,
     embeddingPcaDim,
+    computeProgress,
     playbackFrames,
     playbackIndex,
     isPlaying,
@@ -386,12 +421,19 @@ function RightPanel() {
             />
           </div>
 
-          <button
+            <button
             onClick={fetchTerrain}
             disabled={isLoading}
             className="btn-primary w-full mt-3 text-xs"
           >
-            {isLoading ? "计算中..." : "🏔️ 应用并重算"}
+            {isLoading ? (
+              <span className="flex items-center justify-center gap-1.5">
+                <Spinner />
+                {computeProgress
+                  ? `${computeProgress.step}/${computeProgress.totalSteps} ${computeProgress.stepName}`
+                  : "连接服务器..."}
+              </span>
+            ) : "🏔️ 应用并重算"}
           </button>
         </CollapsiblePanel>
       )}
@@ -409,8 +451,13 @@ function RightPanel() {
                 {playbackLoading ? (
                   <span className="flex items-center justify-center gap-2">
                     <Spinner />
-                    {fetchProgress?.phase === "fetching" ? "拉取中..." : 
-                     fetchProgress?.phase === "computing" ? "计算中..." : "准备中..."}
+                    {fetchProgress
+                      ? fetchProgress.phase === "fetching"
+                        ? `拉取行情 ${fetchProgress.done}/${fetchProgress.total}`
+                        : fetchProgress.phase === "computing"
+                          ? `计算地形 ${fetchProgress.done}/${fetchProgress.total}`
+                          : fetchProgress.message || "检查数据..."
+                      : "连接服务器..."}
                   </span>
                 ) : (
                   "📅 加载历史回放"

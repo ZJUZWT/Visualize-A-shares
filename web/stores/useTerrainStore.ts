@@ -16,6 +16,13 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 /** 是否为静态部署模式（无后端 API） */
 const IS_STATIC = process.env.NEXT_PUBLIC_STATIC_MODE === "true";
 
+/**
+ * SSE 流式请求直连后端地址
+ * Next.js rewrites 代理会缓冲 SSE 响应，导致 progress 事件无法实时推送
+ * 所以 SSE 请求需要绕过代理，直接连后端
+ */
+const SSE_API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+
 interface TerrainState {
   // ─── 数据 ────────────────────────────
   terrainData: TerrainData | null;
@@ -66,6 +73,9 @@ interface TerrainState {
   
   // v5.1: SSE 拉取进度
   fetchProgress: FetchProgress | null;
+
+  // v5.2: 地形计算进度
+  computeProgress: ComputeProgress | null;
 
   // ─── Actions ─────────────────────────
   setTerrainData: (data: TerrainData) => void;
@@ -124,6 +134,15 @@ export interface FetchProgress {
   elapsed?: number;
 }
 
+/** 地形计算进度（步骤化） */
+export interface ComputeProgress {
+  step: number;
+  totalSteps: number;
+  stepName: string;
+  message: string;
+  elapsed: number;
+}
+
 export const useTerrainStore = create<TerrainState>((set, get) => ({
   // ─── 初始状态 ────────────────────────
   terrainData: null,
@@ -169,6 +188,7 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   playbackSpeed: 2.0,
   playbackLoading: false,
   fetchProgress: null,
+  computeProgress: null,
 
   // ─── Actions ─────────────────────────
   setTerrainData: (data) =>
@@ -255,21 +275,22 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
     }
   },
 
-  // 全量计算（需要后端 API）
+  // 全量计算（v5.2: SSE 流式进度推送）
   fetchTerrain: async () => {
     // 静态模式下加载快照
     if (IS_STATIC) {
       return get().loadSnapshot();
     }
 
-    set({ isLoading: true, error: null });
+    set({ isLoading: true, error: null, computeProgress: null });
     try {
       const {
         zMetric, radiusScale, gridResolution,
         weightEmbedding, weightIndustry, weightNumeric,
         pcaTargetDim, embeddingPcaDim,
       } = get();
-      const res = await fetch("/api/v1/terrain/compute", {
+
+      const res = await fetch(`${SSE_API_BASE}/api/v1/terrain/compute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -286,19 +307,84 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
 
       if (!res.ok) {
         const errBody = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errBody}`);
+        let detail = `HTTP ${res.status}`;
+        try {
+          const errJson = JSON.parse(errBody);
+          detail = errJson.detail || detail;
+        } catch {
+          detail = errBody || detail;
+        }
+        throw new Error(detail);
       }
-      const data: TerrainData = await res.json();
 
-      set({
-        terrainData: data,
-        isLoading: false,
-        lastUpdateTime: new Date(),
-      });
+      // SSE 流式读取
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("浏览器不支持流式读取");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // 解析 SSE 事件
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const eventBlock of events) {
+          if (!eventBlock.trim()) continue;
+
+          const lines = eventBlock.split("\n");
+          let eventType = "";
+          let eventData = "";
+
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              eventData = line.slice(6);
+            }
+          }
+
+          if (!eventType || !eventData) continue;
+
+          try {
+            const parsed = JSON.parse(eventData);
+
+            if (eventType === "progress") {
+              set({ computeProgress: parsed as ComputeProgress });
+            } else if (eventType === "complete") {
+              set({
+                terrainData: parsed as TerrainData,
+                isLoading: false,
+                lastUpdateTime: new Date(),
+                computeProgress: null,
+              });
+              return; // 成功完成
+            } else if (eventType === "error") {
+              throw new Error(parsed.message || "地形计算失败");
+            }
+          } catch (parseErr) {
+            if (eventType === "error" || eventType === "complete") {
+              throw parseErr;
+            }
+          }
+        }
+      }
+
+      // 流结束但没收到 complete 事件
+      const { terrainData } = get();
+      if (!terrainData) {
+        throw new Error("数据流异常中断");
+      }
     } catch (e) {
       set({
         error: e instanceof Error ? e.message : "获取地形数据失败",
         isLoading: false,
+        computeProgress: null,
       });
     }
   },
@@ -327,7 +413,7 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
     try {
       const { zMetric } = get();
 
-      const res = await fetch("/api/v1/terrain/history", {
+      const res = await fetch(`${SSE_API_BASE}/api/v1/terrain/history`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ days, z_metric: zMetric }),
