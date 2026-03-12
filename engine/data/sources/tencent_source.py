@@ -90,6 +90,23 @@ class TencentSource(BaseDataSource):
             if pct_chg is None and pre_close and pre_close > 0:
                 pct_chg = (price - pre_close) / pre_close * 100
 
+            # 委比 = (委买总量 - 委卖总量) / (委买总量 + 委卖总量) × 100
+            # 买一~买五手数: fields[10,12,14,16,18]
+            # 卖一~卖五手数: fields[20,22,24,26,28]
+            bid_vol = sum(
+                self._safe_float(fields[i]) or 0
+                for i in (10, 12, 14, 16, 18)
+            )
+            ask_vol = sum(
+                self._safe_float(fields[i]) or 0
+                for i in (20, 22, 24, 26, 28)
+            )
+            total_委 = bid_vol + ask_vol
+            wb_ratio = (
+                round((bid_vol - ask_vol) / total_委 * 100, 2)
+                if total_委 > 0 else 0.0
+            )
+
             return {
                 "code": raw_code,
                 "name": fields[1],
@@ -106,6 +123,7 @@ class TencentSource(BaseDataSource):
                 "pb": self._safe_float(fields[46]) if len(fields) > 46 else 0,
                 "total_mv": (self._safe_float(fields[45]) or 0) / 1e4 if len(fields) > 45 else 0,
                 "circ_mv": (self._safe_float(fields[44]) or 0) / 1e4 if len(fields) > 44 else 0,
+                "wb_ratio": wb_ratio,
             }
         except Exception:
             return None

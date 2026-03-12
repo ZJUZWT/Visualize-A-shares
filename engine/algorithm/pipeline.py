@@ -22,10 +22,11 @@ from .features import FeatureEngineer
 from .clustering import ClusterEngine
 from .projection import ProjectionEngine
 from .interpolation import InterpolationEngine
+from .predictor import StockPredictor
 
 
 # 所有可用的 Z 轴指标
-Z_METRICS = ["pct_chg", "turnover_rate", "volume", "amount", "pe_ttm", "pb"]
+Z_METRICS = ["pct_chg", "turnover_rate", "volume", "amount", "pe_ttm", "pb", "wb_ratio", "rise_prob"]
 
 
 @dataclass
@@ -69,6 +70,7 @@ class AlgorithmPipeline:
         self.cluster_eng = ClusterEngine()
         self.projection_eng = ProjectionEngine()
         self.interpolation_eng = InterpolationEngine()
+        self.predictor = StockPredictor()
 
         # 缓存
         self._last_result: TerrainResult | None = None
@@ -142,6 +144,7 @@ class AlgorithmPipeline:
         weight_numeric: float | None = None,
         pca_target_dim: int | None = None,
         embedding_pca_dim: int | None = None,
+        on_progress: "callable | None" = None,
     ) -> TerrainResult:
         """
         全量计算流水线 (v3.1)
@@ -192,8 +195,16 @@ class AlgorithmPipeline:
                     f"♻️  检测到参数不变且股票集重叠率 {overlap_rate:.1%}，复用上次 UMAP 布局"
                 )
 
+        def _notify(step: int, total: int, step_name: str):
+            if on_progress:
+                try:
+                    on_progress(step, total, step_name)
+                except Exception:
+                    pass
+
         if can_reuse_layout:
             # ─── 快速路径：复用布局，只刷新 Z 轴 ──────
+            _notify(1, 4, "复用布局，刷新Z轴数据")
             meta_df = self._last_meta_df
             embedding = self._last_embedding
             labels = self.cluster_eng.labels
@@ -203,6 +214,7 @@ class AlgorithmPipeline:
 
             # Step 1: 特征提取
             logger.info("📊 Step 1/4: 特征提取...")
+            _notify(1, 4, "特征提取")
             meta_df, X, feature_names = self.feature_eng.build_feature_matrix(
                 snapshot_df, feature_cols,
                 weight_embedding=weight_embedding,
@@ -218,6 +230,7 @@ class AlgorithmPipeline:
 
             # Step 2: HDBSCAN 聚类
             logger.info("🔬 Step 2/4: HDBSCAN 聚类...")
+            _notify(2, 4, "HDBSCAN 聚类")
             labels = self.cluster_eng.fit(X)
             cluster_summaries = self.cluster_eng.get_cluster_summary(
                 meta_df, X, feature_names
@@ -230,14 +243,18 @@ class AlgorithmPipeline:
 
             # Step 3: UMAP 降维
             logger.info("🗺️  Step 3/4: UMAP 2D 降维...")
+            _notify(3, 4, "UMAP 2D 降维")
             embedding = self.projection_eng.fit_transform(X)
 
         # ─── Step 4: 多指标 Wendland 核密度插值 ────────
         logger.info("🏔️  Step 4/4: 高斯核密度地形 (多指标批量)...")
+        _notify(4, 4, "核密度插值")
         
         # 构建多指标 Z 值字典
         z_dict = {}
         for metric in Z_METRICS:
+            if metric == "rise_prob":
+                continue  # 预测概率单独处理
             z_values = np.zeros(len(meta_df))
             if metric in snapshot_df.columns:
                 z_map = snapshot_df.set_index("code")[metric].to_dict()
@@ -245,6 +262,17 @@ class AlgorithmPipeline:
                     val = z_map.get(code, 0.0)
                     z_values[i] = float(val) if pd.notna(val) else 0.0
             z_dict[metric] = z_values
+
+        # ─── 预测：明日上涨概率 ──────────────────────
+        prediction_result = self.predictor.predict(
+            snapshot_df, cluster_labels=labels
+        )
+        rise_prob_values = np.zeros(len(meta_df))
+        for i, code in enumerate(meta_df["code"].values):
+            rise_prob_values[i] = prediction_result.predictions.get(
+                str(code), 0.5
+            ) - 0.5  # 减去 0.5，让 50% 成为零线，地形有正有负
+        z_dict["rise_prob"] = rise_prob_values
         
         # 一次性计算所有指标的地形
         terrain_multi = self.interpolation_eng.compute_terrain_multi(

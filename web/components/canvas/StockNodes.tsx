@@ -13,6 +13,7 @@ import { useFrame, ThreeEvent } from "@react-three/fiber";
 import { Html, Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import type { StockPoint } from "@/types/terrain";
+import { formatZValue } from "@/types/terrain";
 import { useTerrainStore } from "@/stores/useTerrainStore";
 
 interface StockNodesProps {
@@ -325,6 +326,7 @@ function HoverLabel({
   stocks: StockPoint[];
   flattenBalls?: boolean;
 }) {
+  const { zMetric } = useTerrainStore();
   const { stockZMin, stockZMax } = useMemo(() => {
     let mn = Infinity, mx = -Infinity;
     for (const s of stocks) {
@@ -335,6 +337,8 @@ function HoverLabel({
   }, [stocks]);
 
   const y = flattenBalls ? 0.5 : computeStockY(stock.z, stockZMin, stockZMax, heightScale) + 0.35;
+
+  const formatted = formatZValue(stock, zMetric);
 
   return (
     <Billboard position={[stock.x * xScale, y, stock.y * yScale]} follow={true}>
@@ -375,11 +379,10 @@ function HoverLabel({
               fontWeight: 700,
               fontSize: "14px",
               marginTop: "2px",
-              color: ((stock as any).z_pct_chg ?? stock.z) > 0 ? "#EF4444" : ((stock as any).z_pct_chg ?? stock.z) < 0 ? "#22C55E" : "#9CA3AF",
+              color: formatted.color,
             }}
           >
-            {((stock as any).z_pct_chg ?? stock.z) > 0 ? "+" : ""}
-            {((stock as any).z_pct_chg ?? stock.z).toFixed(2)}%
+            {formatted.text}
           </div>
         </div>
       </Html>
@@ -404,6 +407,7 @@ function SelectedLabel({
   stocks: StockPoint[];
   flattenBalls?: boolean;
 }) {
+  const { zMetric } = useTerrainStore();
   const { stockZMin, stockZMax } = useMemo(() => {
     let mn = Infinity, mx = -Infinity;
     for (const s of stocks) {
@@ -414,6 +418,11 @@ function SelectedLabel({
   }, [stocks]);
 
   const y = flattenBalls ? 0.8 : computeStockY(stock.z, stockZMin, stockZMax, heightScale) + 0.65;
+
+  const formatted = formatZValue(stock, zMetric);
+  // 涨跌幅始终显示（当指标不是 pct_chg 时作为副指标）
+  const pctChg = (stock as any).z_pct_chg ?? stock.z;
+  const showPctChgSub = zMetric !== "pct_chg";
 
   return (
     <Billboard position={[stock.x * xScale, y, stock.y * yScale]} follow={true}>
@@ -458,12 +467,23 @@ function SelectedLabel({
               fontFamily: "JetBrains Mono, monospace",
               fontSize: "20px",
               fontWeight: 700,
-              color: ((stock as any).z_pct_chg ?? stock.z) > 0 ? "#EF4444" : ((stock as any).z_pct_chg ?? stock.z) < 0 ? "#22C55E" : "#9CA3AF",
+              color: formatted.color,
             }}
           >
-            {((stock as any).z_pct_chg ?? stock.z) > 0 ? "+" : ""}
-            {((stock as any).z_pct_chg ?? stock.z).toFixed(2)}%
+            {formatted.text}
           </div>
+          {showPctChgSub && (
+            <div
+              style={{
+                fontFamily: "JetBrains Mono, monospace",
+                fontSize: "11px",
+                marginTop: "2px",
+                color: pctChg > 0 ? "#EF4444" : pctChg < 0 ? "#22C55E" : "#9CA3AF",
+              }}
+            >
+              {pctChg > 0 ? "+" : ""}{pctChg.toFixed(2)}%
+            </div>
+          )}
           <div
             style={{
               fontSize: "10px",

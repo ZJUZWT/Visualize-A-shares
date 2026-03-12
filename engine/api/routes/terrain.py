@@ -66,14 +66,19 @@ async def health_check():
     )
 
 
-@router.post("/terrain/compute", response_model=TerrainResponse)
+@router.post("/terrain/compute")
 async def compute_terrain(req: ComputeRequest = ComputeRequest()):
     """
-    全量计算 3D 地形
-    
-    流程: 拉取行情 → 特征提取 → 聚类 → 降维 → 插值 → 返回地形数据
+    全量计算 3D 地形 — SSE 流式进度推送
+
+    流程: 拉取行情 → 保存快照 → 特征提取 → 聚类 → 降维 → 插值 → 返回地形数据
+
+    SSE 事件类型：
+    - progress: { step, totalSteps, stepName, message, elapsed }
+    - complete: TerrainResponse JSON
+    - error: { message }
     """
-    logger.info(f"🏔️  收到地形计算请求: z_metric={req.z_metric}, resolution={req.resolution}")
+    logger.info(f"🏔️  收到地形计算请求(SSE): z_metric={req.z_metric}, resolution={req.resolution}")
 
     # 防止并发 UMAP 计算导致 Numba 崩溃
     if _compute_lock.locked():
@@ -82,59 +87,137 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
             detail="计算正在进行中，请稍后重试"
         )
 
-    async with _compute_lock:
-        try:
-            collector = get_collector()
-            pipeline = get_pipeline()
-            store = get_store()
+    async def compute_event_stream():
+        import time as _time
 
-            # 1. 拉取全市场实时行情
-            snapshot = await asyncio.to_thread(collector.get_realtime_quotes)
+        def sse_event(event_type: str, data: dict) -> str:
+            return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-            # 2. 保存快照到 DuckDB
-            await asyncio.to_thread(store.save_snapshot, snapshot)
+        async with _compute_lock:
+            t0 = _time.time()
+            progress_queue: asyncio.Queue = asyncio.Queue()
 
-            # 3. 执行算法流水线 (v4.0: 多指标 + Wendland + 产业链拓扑权重)
-            result = await asyncio.to_thread(
-                pipeline.compute_full,
-                snapshot,
-                z_column=req.z_metric,
-                feature_cols=req.features,
-                grid_resolution=req.resolution,
-                radius_scale=req.radius_scale,
-                weight_embedding=req.weight_embedding,
-                weight_industry=req.weight_industry,
-                weight_numeric=req.weight_numeric,
-                pca_target_dim=req.pca_target_dim,
-                embedding_pca_dim=req.embedding_pca_dim,
-            )
+            try:
+                collector = get_collector()
+                pipeline = get_pipeline()
+                store = get_store()
 
-            # 4. 返回地形数据 (v2.0: 包含所有指标网格)
-            return TerrainResponse(
-                stocks=result.stocks,
-                clusters=result.clusters,
-                grids=result.grids,
-                bounds_per_metric=result.bounds_per_metric,
-                terrain_grid=result.terrain_grid,
-                terrain_resolution=result.terrain_resolution,
-                bounds=result.bounds,
-                stock_count=result.stock_count,
-                cluster_count=result.cluster_count,
-                computation_time_ms=result.computation_time_ms,
-                active_metric=result.active_metric,
-            )
-        except RuntimeError as e:
-            logger.error(f"❌ 地形计算失败(数据源): {e}")
-            raise HTTPException(
-                status_code=503,
-                detail=f"数据源暂时不可用: {str(e)}。请稍后重试。"
-            )
-        except Exception as e:
-            logger.error(f"❌ 地形计算失败: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"地形计算异常: {str(e)}"
-            )
+                # ─── Step 1: 拉取全市场实时行情 ────────
+                yield sse_event("progress", {
+                    "step": 1, "totalSteps": 6,
+                    "stepName": "拉取行情",
+                    "message": "正在拉取全市场实时行情...",
+                    "elapsed": 0,
+                })
+
+                snapshot = await asyncio.to_thread(collector.get_realtime_quotes)
+                elapsed = round(_time.time() - t0, 1)
+
+                yield sse_event("progress", {
+                    "step": 1, "totalSteps": 6,
+                    "stepName": "拉取行情",
+                    "message": f"行情拉取完成：{len(snapshot)} 只股票",
+                    "elapsed": elapsed,
+                })
+
+                # ─── Step 2: 保存快照到 DuckDB ────────
+                yield sse_event("progress", {
+                    "step": 2, "totalSteps": 6,
+                    "stepName": "保存快照",
+                    "message": "正在保存数据快照...",
+                    "elapsed": elapsed,
+                })
+
+                await asyncio.to_thread(store.save_snapshot, snapshot)
+                elapsed = round(_time.time() - t0, 1)
+
+                # ─── Step 3-6: 算法流水线（带进度回调）────
+                def on_pipeline_progress(step, total, step_name):
+                    """算法流水线进度回调"""
+                    progress_queue.put_nowait({
+                        "step": step + 2,  # 偏移2（前面有拉取行情+保存快照）
+                        "totalSteps": total + 2,
+                        "stepName": step_name,
+                        "message": f"正在{step_name}...",
+                        "elapsed": round(_time.time() - t0, 1),
+                    })
+
+                # 在后台线程中运行算法流水线
+                compute_task = asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: pipeline.compute_full(
+                        snapshot,
+                        z_column=req.z_metric,
+                        feature_cols=req.features,
+                        grid_resolution=req.resolution,
+                        radius_scale=req.radius_scale,
+                        weight_embedding=req.weight_embedding,
+                        weight_industry=req.weight_industry,
+                        weight_numeric=req.weight_numeric,
+                        pca_target_dim=req.pca_target_dim,
+                        embedding_pca_dim=req.embedding_pca_dim,
+                        on_progress=on_pipeline_progress,
+                    ),
+                )
+
+                # 异步消费进度队列，同时等待计算完成
+                while True:
+                    try:
+                        progress = progress_queue.get_nowait()
+                        yield sse_event("progress", progress)
+                    except asyncio.QueueEmpty:
+                        pass
+
+                    if compute_task.done():
+                        # 排空队列
+                        while not progress_queue.empty():
+                            try:
+                                progress = progress_queue.get_nowait()
+                                yield sse_event("progress", progress)
+                            except asyncio.QueueEmpty:
+                                break
+                        break
+
+                    await asyncio.sleep(0.3)
+
+                result = compute_task.result()
+                elapsed = round(_time.time() - t0, 1)
+
+                # ─── 推送完整结果 ──────────────────────
+                response_data = TerrainResponse(
+                    stocks=result.stocks,
+                    clusters=result.clusters,
+                    grids=result.grids,
+                    bounds_per_metric=result.bounds_per_metric,
+                    terrain_grid=result.terrain_grid,
+                    terrain_resolution=result.terrain_resolution,
+                    bounds=result.bounds,
+                    stock_count=result.stock_count,
+                    cluster_count=result.cluster_count,
+                    computation_time_ms=result.computation_time_ms,
+                    active_metric=result.active_metric,
+                )
+
+                yield sse_event("complete", response_data.model_dump())
+
+            except HTTPException as he:
+                yield sse_event("error", {"message": he.detail})
+            except RuntimeError as e:
+                logger.error(f"❌ 地形计算失败(数据源): {e}")
+                yield sse_event("error", {"message": f"数据源暂时不可用: {str(e)}。请稍后重试。"})
+            except Exception as e:
+                logger.error(f"❌ 地形计算失败: {e}", exc_info=True)
+                yield sse_event("error", {"message": "地形计算异常，请稍后重试。"})
+
+    return StreamingResponse(
+        compute_event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/terrain/refresh", response_model=TerrainResponse)
