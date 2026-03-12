@@ -39,11 +39,13 @@ function LeftPanel() {
     xyScale,
     xScaleRatio,
     yScaleRatio,
+    gridResolution,
     setHeightScale,
     setRadiusScale,
     setXYScale,
     setXScaleRatio,
     setYScaleRatio,
+    setGridResolution,
     fetchTerrain,
     refreshTerrain,
     switchMetricLocal,
@@ -177,13 +179,26 @@ function LeftPanel() {
           />
         </div>
 
-        {!isStaticMode && radiusScale !== 2.0 && (
+        <div className="mt-2.5">
+          <SliderControl
+            label="网格分辨率"
+            value={gridResolution}
+            min={64}
+            max={1024}
+            step={64}
+            onChange={(v) => setGridResolution(Math.round(v))}
+            displayValue={`${gridResolution}×${gridResolution}`}
+            hint="越高越精细·计算越慢"
+          />
+        </div>
+
+        {!isStaticMode && (radiusScale !== 2.0 || gridResolution !== 512) && (
           <button
             onClick={fetchTerrain}
             disabled={isLoading}
             className="btn-secondary w-full mt-2 text-xs"
           >
-            {isLoading ? "计算中..." : "🔄 应用核半径"}
+            {isLoading ? "计算中..." : "🔄 应用核半径/分辨率"}
           </button>
         )}
 
@@ -257,6 +272,7 @@ function RightPanel() {
     showLabels,
     showGrid,
     showContours,
+    showDropLines,
     flattenBalls,
     weightEmbedding,
     weightIndustry,
@@ -277,6 +293,7 @@ function RightPanel() {
     toggleGrid,
     toggleContours,
     toggleFlattenBalls,
+    toggleDropLines,
     fetchTerrain,
     fetchHistory,
     setPlaybackIndex,
@@ -298,6 +315,7 @@ function RightPanel() {
           <ToggleItem label="底部网格" checked={showGrid} onChange={toggleGrid} />
           <ToggleItem label="等高线" checked={showContours} onChange={toggleContours} />
           <ToggleItem label="球体拍平" checked={flattenBalls} onChange={toggleFlattenBalls} />
+          <ToggleItem label="价格垂线" checked={showDropLines} onChange={toggleDropLines} />
         </div>
       </CollapsiblePanel>
 

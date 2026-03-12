@@ -12,7 +12,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPExcept
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from api.schemas import TerrainResponse, ComputeRequest, HealthResponse
+from api.schemas import TerrainResponse, ComputeRequest, HealthResponse, HistoryRequest, HistoryResponse, HistoryFrame
 from data.collector import DataCollector
 from algorithm.pipeline import AlgorithmPipeline
 from storage.duckdb_store import DuckDBStore
@@ -23,6 +23,9 @@ router = APIRouter(prefix="/api/v1", tags=["terrain"])
 _collector: DataCollector | None = None
 _pipeline: AlgorithmPipeline | None = None
 _store: DuckDBStore | None = None
+
+# ─── 防止 UMAP/Numba 并发崩溃的锁 ───────────────────
+_compute_lock = asyncio.Lock()
 
 
 def get_collector() -> DataCollector:
@@ -71,58 +74,66 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
     """
     logger.info(f"🏔️  收到地形计算请求: z_metric={req.z_metric}, resolution={req.resolution}")
 
-    try:
-        collector = get_collector()
-        pipeline = get_pipeline()
-        store = get_store()
-
-        # 1. 拉取全市场实时行情
-        snapshot = await asyncio.to_thread(collector.get_realtime_quotes)
-
-        # 2. 保存快照到 DuckDB
-        await asyncio.to_thread(store.save_snapshot, snapshot)
-
-        # 3. 执行算法流水线 (v3.0: 多指标 + Wendland + 动态权重)
-        result = await asyncio.to_thread(
-            pipeline.compute_full,
-            snapshot,
-            z_column=req.z_metric,
-            feature_cols=req.features,
-            grid_resolution=req.resolution,
-            radius_scale=req.radius_scale,
-            weight_embedding=req.weight_embedding,
-            weight_industry=req.weight_industry,
-            weight_numeric=req.weight_numeric,
-            pca_target_dim=req.pca_target_dim,
-            embedding_pca_dim=req.embedding_pca_dim,
-        )
-
-        # 4. 返回地形数据 (v2.0: 包含所有指标网格)
-        return TerrainResponse(
-            stocks=result.stocks,
-            clusters=result.clusters,
-            grids=result.grids,
-            bounds_per_metric=result.bounds_per_metric,
-            terrain_grid=result.terrain_grid,
-            terrain_resolution=result.terrain_resolution,
-            bounds=result.bounds,
-            stock_count=result.stock_count,
-            cluster_count=result.cluster_count,
-            computation_time_ms=result.computation_time_ms,
-            active_metric=result.active_metric,
-        )
-    except RuntimeError as e:
-        logger.error(f"❌ 地形计算失败(数据源): {e}")
+    # 防止并发 UMAP 计算导致 Numba 崩溃
+    if _compute_lock.locked():
         raise HTTPException(
-            status_code=503,
-            detail=f"数据源暂时不可用: {str(e)}。请稍后重试。"
+            status_code=429,
+            detail="计算正在进行中，请稍后重试"
         )
-    except Exception as e:
-        logger.error(f"❌ 地形计算失败: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"地形计算异常: {str(e)}"
-        )
+
+    async with _compute_lock:
+        try:
+            collector = get_collector()
+            pipeline = get_pipeline()
+            store = get_store()
+
+            # 1. 拉取全市场实时行情
+            snapshot = await asyncio.to_thread(collector.get_realtime_quotes)
+
+            # 2. 保存快照到 DuckDB
+            await asyncio.to_thread(store.save_snapshot, snapshot)
+
+            # 3. 执行算法流水线 (v4.0: 多指标 + Wendland + 产业链拓扑权重)
+            result = await asyncio.to_thread(
+                pipeline.compute_full,
+                snapshot,
+                z_column=req.z_metric,
+                feature_cols=req.features,
+                grid_resolution=req.resolution,
+                radius_scale=req.radius_scale,
+                weight_embedding=req.weight_embedding,
+                weight_industry=req.weight_industry,
+                weight_numeric=req.weight_numeric,
+                pca_target_dim=req.pca_target_dim,
+                embedding_pca_dim=req.embedding_pca_dim,
+            )
+
+            # 4. 返回地形数据 (v2.0: 包含所有指标网格)
+            return TerrainResponse(
+                stocks=result.stocks,
+                clusters=result.clusters,
+                grids=result.grids,
+                bounds_per_metric=result.bounds_per_metric,
+                terrain_grid=result.terrain_grid,
+                terrain_resolution=result.terrain_resolution,
+                bounds=result.bounds,
+                stock_count=result.stock_count,
+                cluster_count=result.cluster_count,
+                computation_time_ms=result.computation_time_ms,
+                active_metric=result.active_metric,
+            )
+        except RuntimeError as e:
+            logger.error(f"❌ 地形计算失败(数据源): {e}")
+            raise HTTPException(
+                status_code=503,
+                detail=f"数据源暂时不可用: {str(e)}。请稍后重试。"
+            )
+        except Exception as e:
+            logger.error(f"❌ 地形计算失败: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"地形计算异常: {str(e)}"
+            )
 
 
 @router.get("/terrain/refresh", response_model=TerrainResponse)
@@ -178,6 +189,138 @@ async def refresh_terrain(
         raise HTTPException(
             status_code=500,
             detail=f"刷新异常: {str(e)}"
+        )
+
+
+@router.post("/terrain/history", response_model=HistoryResponse)
+async def get_terrain_history(req: HistoryRequest = HistoryRequest()):
+    """
+    获取最近 N 个交易日的地形快照帧
+
+    前提：必须先执行过 compute_terrain，有缓存的 UMAP 布局
+    
+    策略：
+    1. 优先从 DuckDB 本地每日快照查询（毫秒级）
+    2. 如果本地数据不足，则远程拉取（降低并发、增加容错）
+    """
+    pipeline = get_pipeline()
+    if pipeline._last_embedding is None or pipeline._last_meta_df is None:
+        raise HTTPException(
+            status_code=400,
+            detail="请先执行一次地形计算（点击生成3D地形按钮）"
+        )
+
+    logger.info(f"📅 收到历史回放请求: days={req.days}, z_metric={req.z_metric}")
+
+    try:
+        import numpy as np
+        store = get_store()
+        collector = get_collector()
+
+        stock_codes = pipeline._last_meta_df["code"].tolist()
+        embedding = pipeline._last_embedding
+        interpolation_eng = pipeline.interpolation_eng
+
+        # ─── 策略 1: 尝试从 DuckDB 读取本地每日快照 ─────
+        local_snapshots = await asyncio.to_thread(store.get_snapshot_daily_range, req.days)
+
+        # ─── 策略 2: 本地数据不足，远程批量拉取 ──────────
+        if len(local_snapshots) < 2:
+            logger.info("📅 本地历史快照不足，尝试远程拉取...")
+            try:
+                history_by_date = await asyncio.to_thread(
+                    collector.get_market_history,
+                    stock_codes,
+                    days=req.days,
+                    z_metric=req.z_metric,
+                )
+                if history_by_date:
+                    local_snapshots = history_by_date
+            except Exception as e:
+                logger.warning(f"远程拉取失败: {e}")
+                if not local_snapshots:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"历史数据不足且远程拉取失败: {str(e)}。请先多次「生成3D地形」以积累本地数据。"
+                    )
+
+        if not local_snapshots:
+            raise HTTPException(
+                status_code=503,
+                detail="无可用历史数据。请先「生成3D地形」几次（每天至少一次），本地会自动积累快照数据。"
+            )
+
+        # ─── 逐日生成地形帧 ──────────────────────────────
+        frames = []
+        for date_str in sorted(local_snapshots.keys()):
+            day_df = local_snapshots[date_str]
+            if day_df.empty:
+                continue
+
+            # 构建 code → z_value 映射
+            z_map = {}
+            if req.z_metric in day_df.columns:
+                for _, row in day_df.iterrows():
+                    code = str(row.get("code", ""))
+                    val = row.get(req.z_metric, 0.0)
+                    try:
+                        z_map[code] = float(val) if val == val else 0.0
+                    except (TypeError, ValueError):
+                        z_map[code] = 0.0
+
+            if not z_map:
+                continue
+
+            # 构建该天的 z 值数组（与 embedding 对齐）
+            z_values = np.zeros(len(pipeline._last_meta_df))
+            for i, code in enumerate(stock_codes):
+                z_values[i] = z_map.get(code, 0.0)
+
+            # Wendland 插值生成地形网格
+            z_dict_single = {req.z_metric: z_values}
+            terrain = await asyncio.to_thread(
+                interpolation_eng.compute_terrain_multi,
+                embedding[:, 0],
+                embedding[:, 1],
+                z_dict_single,
+            )
+
+            grid = terrain["grids"].get(req.z_metric, [])
+            metric_bounds = terrain["bounds_per_metric"].get(
+                req.z_metric, {"zmin": 0, "zmax": 1}
+            )
+            frame_bounds = terrain["bounds"].copy()
+            frame_bounds["zmin"] = metric_bounds["zmin"]
+            frame_bounds["zmax"] = metric_bounds["zmax"]
+
+            frames.append(HistoryFrame(
+                date=date_str,
+                terrain_grid=grid,
+                bounds=frame_bounds,
+                stock_z_values=z_map,
+            ))
+
+        if not frames:
+            raise HTTPException(
+                status_code=503,
+                detail="无有效历史帧。请先多次「生成3D地形」以积累本地数据。"
+            )
+
+        logger.info(f"📅 历史回放数据生成完成: {len(frames)} 帧")
+
+        return HistoryResponse(
+            frames=frames,
+            dates=[f.date for f in frames],
+            total_stocks=len(stock_codes),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 历史回放失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"历史回放计算异常: {str(e)}"
         )
 
 

@@ -1,22 +1,22 @@
 """
-空间插值引擎 — Wendland C2 核密度场
+空间插值引擎 — 高斯核密度叠加 (KDE)
 
 职责：
 将离散的 (x, y, z) 股票点插值为 3D 地形高度网格
 
-核心算法：
-    terrain[x][y] = Σ stock_i.z_value × W(distance, r_i)
+核心算法（KDE 叠加模式，非加权平均）：
+    terrain[x][y] = Σ stock_i.z_value × G(distance, σ_i)
     
-    W = Wendland C2 紧支撑核：
-        W(d, r) = ((1 - d/r)^4) × (4d/r + 1)   当 d < r
-                = 0                                当 d >= r
+    G = 归一化高斯核：
+        G(d, σ) = 1/(2πσ²) × exp(-d² / (2σ²))   当 d < 3σ
+                = 0                                 当 d >= 3σ
     
-    r_i = k × dist_to_5th_neighbor(stock_i)  自适应影响半径
+    σ_i = radius_scale × dist_to_5th_neighbor(stock_i) / 3  自适应带宽
 
-优势：
-    - 紧支撑：超出影响半径贡献为 0，空白区域自然为海面
-    - 自适应：密集区高分辨率，稀疏区影响范围自动扩大
-    - 保留剧变：涨停/跌停股票在地形中保持尖峰/深谷
+关键区别（vs 加权平均）：
+    - 不做 /Σw 归一化 → 中心高、边缘指数衰减 → 自然形成山峰/山谷
+    - 归一化高斯核（1/(2πσ²)前缀）→ 不同 σ 的核积分面积相同 → 公平叠加
+    - σ/3 → 截断半径 = radius_scale × kth_dist，兼顾集中与平滑
 """
 
 import numpy as np
@@ -27,7 +27,7 @@ from config import settings
 
 
 class InterpolationEngine:
-    """Wendland C2 核密度地形引擎"""
+    """高斯核密度叠加 (KDE) 地形引擎"""
 
     def __init__(self):
         self._grid = None
@@ -36,21 +36,22 @@ class InterpolationEngine:
         self._adaptive_radii = None
 
     @staticmethod
-    def wendland_c2(d: np.ndarray, r: np.ndarray) -> np.ndarray:
+    def gaussian_kernel(d: np.ndarray, sigma: np.ndarray) -> np.ndarray:
         """
-        Wendland C2 紧支撑核函数 (向量化)
+        归一化高斯核函数 (向量化，截断在 3σ)
         
-        W(d, r) = max(0, (1 - d/r))^4 × (4d/r + 1)
+        G(d, σ) = 1/(2πσ²) × exp(-d² / (2σ²))    当 d < 3σ
+                = 0                                  当 d >= 3σ
         
-        - d: 距离数组
-        - r: 影响半径数组
-        - 超出半径贡献为 0
+        归一化保证：∫∫ G(d,σ) dA ≈ 1（2D 高斯核的积分面积为 1）
+        这样不同 σ 大小的核，对地形的贡献是公平的。
         """
-        q = np.clip(d / r, 0, 1)
-        # 超出半径的点贡献为 0
-        mask = d < r
+        cutoff = 3.0 * sigma
+        mask = d < cutoff
         result = np.zeros_like(d)
-        result[mask] = ((1 - q[mask]) ** 4) * (4 * q[mask] + 1)
+        s = sigma[mask]
+        norm = 1.0 / (2.0 * np.pi * s * s)
+        result[mask] = norm * np.exp(-0.5 * (d[mask] / s) ** 2)
         return result
 
     def _compute_adaptive_radii(
@@ -58,35 +59,40 @@ class InterpolationEngine:
         points: np.ndarray,
         k_neighbors: int = 5,
         radius_scale: float = 2.0,
-        min_radius: float = 0.3,
+        min_radius: float = 0.1,
         max_radius: float = 5.0,
     ) -> np.ndarray:
         """
-        计算每个点的自适应影响半径
+        计算每个点的自适应高斯带宽 σ
         
-        r_i = radius_scale × dist_to_kth_neighbor(point_i)
+        σ_i = radius_scale × dist_to_kth_neighbor(point_i) / 3
         
-        密集区 → 半径小 → 地形细节丰富
-        稀疏区 → 半径大 → 单只股票也能撑起地形
+        除以 3 → 截断半径 3σ = radius_scale × kth_dist
+        radius_scale 作为用户控制：
+            - 小值(0.5): 窄核 → 山峰集中
+            - 默认(2.0): 适度宽度 → 相邻点山峰自然融合
+            - 大值(6.0): 宽核 → 平滑连续的山丘
         """
         n_points = len(points)
-        k = min(k_neighbors + 1, n_points)  # +1 因为自身也在 KNN 结果中
+        k = min(k_neighbors + 1, n_points)
         
         self._kdtree = cKDTree(points)
         distances, _ = self._kdtree.query(points, k=k)
         
-        # 取第 k 近邻的距离（跳过自身，index 0）
         kth_dist = distances[:, -1]
         
-        radii = radius_scale * kth_dist
-        radii = np.clip(radii, min_radius, max_radius)
+        # σ = radius_scale × kth_dist / 3
+        # 截断半径 3σ = radius_scale × kth_dist
+        sigmas = radius_scale * kth_dist / 3.0
+        sigmas = np.clip(sigmas, min_radius, max_radius)
         
         logger.debug(
-            f"自适应半径: min={radii.min():.3f}, max={radii.max():.3f}, "
-            f"mean={radii.mean():.3f}, median={np.median(radii):.3f}"
+            f"自适应高斯带宽 σ: min={sigmas.min():.4f}, max={sigmas.max():.4f}, "
+            f"mean={sigmas.mean():.4f}, median={np.median(sigmas):.4f} | "
+            f"截断半径 3σ: [{3*sigmas.min():.4f}, {3*sigmas.max():.4f}]"
         )
         
-        return radii
+        return sigmas
 
     def compute_terrain(
         self,
@@ -114,7 +120,7 @@ class InterpolationEngine:
             resolution = cfg.grid_resolution
 
         logger.info(
-            f"Wendland C2 核密度地形开始: {len(x)} 个散布点 → "
+            f"高斯核密度地形开始: {len(x)} 个散布点 → "
             f"{resolution}×{resolution} 网格 | "
             f"radius_scale={radius_scale}"
         )
@@ -140,7 +146,7 @@ class InterpolationEngine:
         ymin = y_valid.min() - y_range * padding
         ymax = y_valid.max() + y_range * padding
 
-        # ─── 自适应影响半径 ────────────────────
+        # ─── 自适应高斯带宽 ────────────────────
         radii = self._compute_adaptive_radii(
             points,
             k_neighbors=5,
@@ -171,7 +177,7 @@ class InterpolationEngine:
         }
 
         logger.info(
-            f"Wendland C2 核密度地形完成: 网格 {grid.shape}, "
+            f"高斯核密度地形完成: 网格 {grid.shape}, "
             f"Z范围 [{self._bounds['zmin']:.2f}, {self._bounds['zmax']:.2f}]"
         )
 
@@ -238,7 +244,7 @@ class InterpolationEngine:
         ymin = y_valid.min() - y_range * padding
         ymax = y_valid.max() + y_range * padding
 
-        # 自适应影响半径（所有指标共享同一空间布局）
+        # 自适应高斯带宽（所有指标共享同一空间布局）
         radii = self._compute_adaptive_radii(
             points, k_neighbors=5, radius_scale=radius_scale
         )
@@ -292,48 +298,41 @@ class InterpolationEngine:
         self,
         points: np.ndarray,
         z_values: np.ndarray,
-        radii: np.ndarray,
+        sigmas: np.ndarray,
         grid_points: np.ndarray,
     ) -> np.ndarray:
         """
-        计算 Wendland C2 核密度场
+        KDE 叠加模式：terrain[g] = Σ_i z_i × G(d(g, p_i), σ_i)
         
-        对每个网格点，累加所有在其影响范围内的股票的加权贡献
-        使用 KDTree 加速近邻查询，避免 O(N×M) 暴力计算
+        不做归一化（不除以 Σw）！
+        每个股票在其周围产生一个高斯形状的小山峰/山谷，
+        多个股票的贡献直接叠加 → 自然形成平滑地形。
+        
+        归一化的高斯核保证每个点不管 σ 大小，积分面积都是 1，
+        所以叠加是公平的。
         """
         n_grid = len(grid_points)
         grid_z = np.zeros(n_grid)
-        weight_sum = np.zeros(n_grid)
         
-        max_radius = float(radii.max())
-        
-        # 用 KDTree 查询每个网格点附近的股票
         grid_tree = cKDTree(grid_points)
         
-        # 对每个股票点，找到其影响范围内的网格点
         for i in range(len(points)):
-            r_i = radii[i]
-            # 找到半径 r_i 内的所有网格点
-            nearby_indices = grid_tree.query_ball_point(points[i], r=r_i)
+            sigma_i = sigmas[i]
+            cutoff = 3.0 * sigma_i
+            
+            nearby_indices = grid_tree.query_ball_point(points[i], r=cutoff)
             
             if len(nearby_indices) == 0:
                 continue
             
             nearby_indices = np.array(nearby_indices)
-            # 计算距离
             dists = np.sqrt(np.sum((grid_points[nearby_indices] - points[i]) ** 2, axis=1))
             
-            # Wendland C2 权重
-            r_arr = np.full_like(dists, r_i)
-            weights = self.wendland_c2(dists, r_arr)
+            sigma_arr = np.full_like(dists, sigma_i)
+            weights = self.gaussian_kernel(dists, sigma_arr)
             
-            # 累加加权 Z 值
+            # KDE 叠加：直接累加 z × G(d,σ)，不做归一化
             grid_z[nearby_indices] += z_values[i] * weights
-            weight_sum[nearby_indices] += weights
-        
-        # 归一化：加权平均
-        nonzero = weight_sum > 1e-10
-        grid_z[nonzero] /= weight_sum[nonzero]
         
         return grid_z
 

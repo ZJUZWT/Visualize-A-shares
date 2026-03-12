@@ -41,6 +41,9 @@ interface TerrainState {
   xScaleRatio: number;  // X 轴比例因子 (相对于 xyScale)
   yScaleRatio: number;  // Y 轴比例因子 (相对于 xyScale)
 
+  // v6.1: 网格分辨率
+  gridResolution: number;
+
   // v3.0: 聚类权重
   weightEmbedding: number;
   weightIndustry: number;
@@ -50,6 +53,9 @@ interface TerrainState {
 
   // v5.0: 球体拍平
   flattenBalls: boolean;
+
+  // v6.2: 球体垂线（到 Y=0 平面）
+  showDropLines: boolean;
 
   // v5.0: 历史回放
   playbackFrames: PlaybackFrame[] | null;
@@ -70,6 +76,7 @@ interface TerrainState {
   setXYScale: (scale: number) => void;
   setXScaleRatio: (ratio: number) => void;
   setYScaleRatio: (ratio: number) => void;
+  setGridResolution: (res: number) => void;
   setWeightEmbedding: (v: number) => void;
   setWeightIndustry: (v: number) => void;
   setWeightNumeric: (v: number) => void;
@@ -79,6 +86,7 @@ interface TerrainState {
   toggleGrid: () => void;
   toggleContours: () => void;
   toggleFlattenBalls: () => void;
+  toggleDropLines: () => void;
   fetchTerrain: () => Promise<void>;
   refreshTerrain: () => Promise<void>;
   loadSnapshot: () => Promise<void>;
@@ -124,6 +132,9 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   xScaleRatio: 1.0,
   yScaleRatio: 1.0,
 
+  // v6.1: 网格分辨率
+  gridResolution: 512,
+
   // v4.0: 聚类权重默认值（产业链拓扑）
   weightEmbedding: 2.0,
   weightIndustry: 0.0,
@@ -133,6 +144,9 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
 
   // v5.0: 球体拍平
   flattenBalls: false,
+
+  // v6.2: 球体垂线
+  showDropLines: false,
 
   // v5.0: 历史回放
   playbackFrames: null,
@@ -156,6 +170,7 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   setXYScale: (scale) => set({ xyScale: scale }),
   setXScaleRatio: (ratio) => set({ xScaleRatio: ratio }),
   setYScaleRatio: (ratio) => set({ yScaleRatio: ratio }),
+  setGridResolution: (res) => set({ gridResolution: res }),
   setWeightEmbedding: (v) => set({ weightEmbedding: v }),
   setWeightIndustry: (v) => set({ weightIndustry: v }),
   setWeightNumeric: (v) => set({ weightNumeric: v }),
@@ -166,6 +181,7 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
   toggleContours: () => set((s) => ({ showContours: !s.showContours })),
   toggleFlattenBalls: () => set((s) => ({ flattenBalls: !s.flattenBalls })),
+  toggleDropLines: () => set((s) => ({ showDropLines: !s.showDropLines })),
 
   // v2.0: 本地切换指标（从缓存的 grids 中切换，零延迟）
   switchMetricLocal: (metric: ZMetric) => {
@@ -234,7 +250,7 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const {
-        zMetric, radiusScale,
+        zMetric, radiusScale, gridResolution,
         weightEmbedding, weightIndustry, weightNumeric,
         pcaTargetDim, embeddingPcaDim,
       } = get();
@@ -243,7 +259,7 @@ export const useTerrainStore = create<TerrainState>((set, get) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           z_metric: zMetric,
-          resolution: 128,
+          resolution: gridResolution,
           radius_scale: radiusScale,
           weight_embedding: weightEmbedding,
           weight_industry: weightIndustry,

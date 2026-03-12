@@ -3,6 +3,14 @@
  * 前后端共享的数据契约
  */
 
+/** 同簇关联股票 */
+export interface RelatedStock {
+  code: string;
+  name: string;
+  industry: string;
+  pct_chg: number;
+}
+
 /** 单只股票在 3D 空间中的表示 */
 export interface StockPoint {
   code: string;
@@ -20,6 +28,8 @@ export interface StockPoint {
   z_amount?: number;
   z_pe_ttm?: number;
   z_pb?: number;
+  // v3.1: 同簇关联股票
+  related_stocks?: RelatedStock[];
 }
 
 /** 聚类簇信息 */

@@ -178,6 +178,14 @@ class TencentSource(BaseDataSource):
         df = df[df["price"] > 0].copy()
         df = df.drop_duplicates(subset=["code"], keep="first")
 
+        # 过滤退市股票（名称中包含"退市"）
+        if "name" in df.columns:
+            delist_mask = df["name"].str.contains("退市", na=False)
+            n_delist = delist_mask.sum()
+            if n_delist > 0:
+                logger.info(f"[Tencent] 过滤退市股票: {n_delist} 只")
+                df = df[~delist_mask]
+
         elapsed = time.time() - start
         logger.info(
             f"[Tencent] 实时行情获取成功: {len(df)} 只股票 "

@@ -23,9 +23,21 @@ class DuckDBStore:
     def __init__(self, db_path: Path = DB_PATH):
         self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = duckdb.connect(str(db_path))
+        
+        # 尝试连接，如果文件锁冲突则使用备用路径
+        try:
+            self._conn = duckdb.connect(str(db_path))
+        except Exception as e:
+            if "lock" in str(e).lower():
+                alt_path = db_path.parent / "stockterrain_v2.duckdb"
+                logger.warning(f"DuckDB 文件锁冲突，使用备用路径: {alt_path}")
+                self._conn = duckdb.connect(str(alt_path))
+                self._db_path = alt_path
+            else:
+                raise
+        
         self._init_tables()
-        logger.info(f"DuckDB 初始化完成: {db_path}")
+        logger.info(f"DuckDB 初始化完成: {self._db_path}")
 
     def _init_tables(self):
         """创建核心数据表"""
@@ -97,6 +109,25 @@ class DuckDBStore:
             )
         """)
 
+        # 每日快照历史表（用于回放）
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS stock_snapshot_daily (
+                code        VARCHAR NOT NULL,
+                name        VARCHAR,
+                date        DATE NOT NULL,
+                price       DOUBLE,
+                pct_chg     DOUBLE,
+                volume      BIGINT,
+                amount      DOUBLE,
+                turnover_rate DOUBLE,
+                pe_ttm      DOUBLE,
+                pb          DOUBLE,
+                total_mv    DOUBLE,
+                circ_mv     DOUBLE,
+                PRIMARY KEY (code, date)
+            )
+        """)
+
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS cluster_results (
                 date            DATE NOT NULL,
@@ -113,7 +144,7 @@ class DuckDBStore:
         logger.info("数据表初始化完成")
 
     def save_snapshot(self, df: pd.DataFrame):
-        """保存实时行情快照（UPSERT）"""
+        """保存实时行情快照（UPSERT）并同时存入每日历史"""
         if df.empty:
             return
 
@@ -126,7 +157,52 @@ class DuckDBStore:
             SELECT * FROM tmp_snapshot
         """)
 
-        logger.info(f"快照保存: {len(df)} 条")
+        # 同时存入每日历史表
+        try:
+            self._conn.execute("""
+                INSERT OR REPLACE INTO stock_snapshot_daily
+                SELECT code, name, CURRENT_DATE, price, pct_chg,
+                       volume, amount, turnover_rate, pe_ttm, pb,
+                       total_mv, circ_mv
+                FROM df
+            """)
+            logger.info(f"快照保存: {len(df)} 条 (含每日历史)")
+        except Exception as e:
+            logger.warning(f"每日快照写入失败(非致命): {e}")
+            logger.info(f"快照保存: {len(df)} 条")
+
+    def get_snapshot_daily_dates(self) -> list[str]:
+        """获取已保存的每日快照日期列表"""
+        try:
+            result = self._conn.execute("""
+                SELECT DISTINCT date FROM stock_snapshot_daily
+                ORDER BY date DESC
+            """).fetchdf()
+            return [str(d) for d in result["date"].tolist()]
+        except Exception:
+            return []
+
+    def get_snapshot_daily(self, date: str) -> pd.DataFrame:
+        """获取指定日期的快照"""
+        try:
+            return self._conn.execute(
+                "SELECT * FROM stock_snapshot_daily WHERE date = ? ORDER BY code",
+                [date],
+            ).fetchdf()
+        except Exception:
+            return pd.DataFrame()
+
+    def get_snapshot_daily_range(self, days: int = 7) -> dict[str, pd.DataFrame]:
+        """获取最近 N 天的每日快照，按日期分组返回"""
+        try:
+            dates = self.get_snapshot_daily_dates()
+            recent = dates[:days]
+            result = {}
+            for d in sorted(recent):
+                result[d] = self.get_snapshot_daily(d)
+            return result
+        except Exception:
+            return {}
 
     def save_daily(self, df: pd.DataFrame):
         """保存日线数据（追加去重）"""

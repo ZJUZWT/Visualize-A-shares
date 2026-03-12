@@ -411,14 +411,26 @@ def compute_embeddings(
     profiles: dict[str, dict],
 ) -> tuple[list[str], np.ndarray, str]:
     """
-    Step 3: 用公司经营范围计算语义嵌入
+    Step 3: 用公司经营范围计算语义嵌入 (v3.1)
 
-    文本构成：[行业] + 经营范围描述
-    行业作为语义上下文前缀（非 one-hot 硬分类）
+    文本构成：语义加权 — 行业 + 核心营收关键词(×2) + 清洗后经营范围
     """
     logger.info("=" * 60)
-    logger.info("🧠 Step 3: 语义嵌入计算...")
+    logger.info("🧠 Step 3: 语义嵌入计算 (v3.1 加权模式)...")
     logger.info("=" * 60)
+
+    # 过滤退市股票
+    original_count = len(profiles)
+    profiles = {
+        code: p for code, p in profiles.items()
+        if "退市" not in p.get("name", "")
+    }
+    delist_count = original_count - len(profiles)
+    if delist_count > 0:
+        logger.info(f"🚫 过滤退市股票: {delist_count} 只")
+
+    # 导入加权文本构造器
+    from preprocess.rebuild_bge import _build_weighted_text
 
     # 准备文本
     texts = []
@@ -428,14 +440,8 @@ def compute_embeddings(
         scope = profile.get("scope", "")
         industry = profile.get("industry", "")
 
-        # 组合文本：行业 + 经营范围
-        parts = []
-        if industry:
-            parts.append(industry)
-        if scope:
-            parts.append(scope)
-
-        text = " ".join(parts) if parts else "A股上市公司"
+        # 使用语义加权文本构造
+        text = _build_weighted_text(industry, scope)
         texts.append(text)
         valid_codes.append(code)
 

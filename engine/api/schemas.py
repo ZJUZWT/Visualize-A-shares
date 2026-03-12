@@ -8,6 +8,14 @@ v2.0: 支持多指标网格、影响半径参数
 from pydantic import BaseModel, Field
 
 
+class RelatedStock(BaseModel):
+    """同簇相关股票"""
+    code: str
+    name: str
+    industry: str = ""
+    pct_chg: float = 0.0
+
+
 class StockPoint(BaseModel):
     """单只股票在 3D 空间中的表示"""
 
@@ -25,6 +33,11 @@ class StockPoint(BaseModel):
     z_amount: float = Field(0, description="成交额")
     z_pe_ttm: float = Field(0, description="市盈率(TTM)")
     z_pb: float = Field(0, description="市净率")
+
+    # v3.1: 同簇关联股票
+    related_stocks: list[RelatedStock] = Field(
+        default_factory=list, description="同簇相关股票(按距离排序)"
+    )
 
 
 class ClusterInfo(BaseModel):
@@ -95,15 +108,15 @@ class ComputeRequest(BaseModel):
     features: list[str] | None = Field(
         None, description="聚类特征列表，为空则使用默认特征"
     )
-    resolution: int = Field(128, ge=32, le=256, description="地形网格分辨率")
-    radius_scale: float = Field(2.0, ge=0.5, le=8.0, description="影响半径缩放因子")
+    resolution: int = Field(512, ge=32, le=1024, description="地形网格分辨率")
+    radius_scale: float = Field(2.0, ge=0.1, le=8.0, description="影响半径缩放因子")
 
-    # v3.0: 聚类权重参数
-    weight_embedding: float = Field(1.5, ge=0.0, le=3.0, description="嵌入权重")
-    weight_industry: float = Field(0.8, ge=0.0, le=2.0, description="行业权重")
-    weight_numeric: float = Field(1.0, ge=0.0, le=3.0, description="数值权重")
+    # v4.0: 聚类权重参数（默认值与 features.py 同步）
+    weight_embedding: float = Field(2.0, ge=0.0, le=5.0, description="嵌入权重")
+    weight_industry: float = Field(0.0, ge=0.0, le=2.0, description="行业权重")
+    weight_numeric: float = Field(0.5, ge=0.0, le=3.0, description="数值权重")
     pca_target_dim: int = Field(50, ge=10, le=100, description="PCA 维度")
-    embedding_pca_dim: int = Field(32, ge=8, le=64, description="嵌入 PCA 维度")
+    embedding_pca_dim: int = Field(50, ge=8, le=128, description="嵌入 PCA 维度")
 
 
 class StockSearchResult(BaseModel):
@@ -115,3 +128,24 @@ class StockSearchResult(BaseModel):
     pct_chg: float = 0
     x: float | None = None
     y: float | None = None
+
+
+class HistoryRequest(BaseModel):
+    """历史回放请求"""
+    days: int = Field(7, ge=2, le=30, description="回溯天数（交易日）")
+    z_metric: str = Field("pct_chg", description="Z 轴指标")
+
+
+class HistoryFrame(BaseModel):
+    """单帧历史数据"""
+    date: str
+    terrain_grid: list[float]
+    bounds: dict
+    stock_z_values: dict[str, float]
+
+
+class HistoryResponse(BaseModel):
+    """历史回放响应"""
+    frames: list[HistoryFrame]
+    dates: list[str]
+    total_stocks: int = 0

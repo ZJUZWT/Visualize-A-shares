@@ -95,4 +95,12 @@ class BaseDataSource(ABC):
         df = df.dropna(subset=["code", "price"])
         df = df[df["price"] > 0]
 
+        # 过滤退市股票（名称中包含"退市"）
+        if "name" in df.columns:
+            delist_mask = df["name"].str.contains("退市", na=False)
+            n_delist = delist_mask.sum()
+            if n_delist > 0:
+                logger.info(f"过滤退市股票: {n_delist} 只")
+                df = df[~delist_mask]
+
         return df.reset_index(drop=True)
