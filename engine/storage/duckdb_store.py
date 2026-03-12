@@ -204,6 +204,49 @@ class DuckDBStore:
         except Exception:
             return {}
 
+    def save_history_as_snapshots(self, history_by_date: dict[str, "pd.DataFrame"]):
+        """
+        将远程拉取的历史日线数据写入 stock_snapshot_daily 表
+        
+        这样下次请求历史回放时可以直接从本地读取，无需再次远程拉取。
+        
+        Args:
+            history_by_date: { date_str: DataFrame(code, pct_chg, volume, ...) }
+        """
+        total = 0
+        for date_str, day_df in history_by_date.items():
+            if day_df.empty:
+                continue
+            try:
+                # 构造与 stock_snapshot_daily 表匹配的 DataFrame
+                snap = pd.DataFrame()
+                snap["code"] = day_df["code"].astype(str) if "code" in day_df.columns else ""
+                snap["name"] = day_df["name"].astype(str) if "name" in day_df.columns else ""
+                snap["date"] = date_str
+                snap["price"] = pd.to_numeric(day_df.get("close", day_df.get("price", 0)), errors="coerce").fillna(0)
+                snap["pct_chg"] = pd.to_numeric(day_df.get("pct_chg", 0), errors="coerce").fillna(0)
+                snap["volume"] = pd.to_numeric(day_df.get("volume", 0), errors="coerce").fillna(0).astype(int)
+                snap["amount"] = pd.to_numeric(day_df.get("amount", 0), errors="coerce").fillna(0)
+                snap["turnover_rate"] = pd.to_numeric(day_df.get("turnover_rate", day_df.get("turn", 0)), errors="coerce").fillna(0)
+                snap["pe_ttm"] = pd.to_numeric(day_df.get("pe_ttm", 0), errors="coerce").fillna(0)
+                snap["pb"] = pd.to_numeric(day_df.get("pb", 0), errors="coerce").fillna(0)
+                snap["total_mv"] = pd.to_numeric(day_df.get("total_mv", 0), errors="coerce").fillna(0)
+                snap["circ_mv"] = pd.to_numeric(day_df.get("circ_mv", 0), errors="coerce").fillna(0)
+
+                self._conn.execute("""
+                    INSERT OR REPLACE INTO stock_snapshot_daily
+                    SELECT code, name, date::DATE, price, pct_chg,
+                           volume, amount, turnover_rate, pe_ttm, pb,
+                           total_mv, circ_mv
+                    FROM snap
+                """)
+                total += len(snap)
+            except Exception as e:
+                logger.warning(f"写入快照 {date_str} 失败: {e}")
+
+        if total > 0:
+            logger.info(f"📦 历史快照持久化完成: {len(history_by_date)} 天, {total} 条记录")
+
     def save_daily(self, df: pd.DataFrame):
         """保存日线数据（追加去重）"""
         if df.empty:

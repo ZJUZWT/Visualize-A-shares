@@ -150,11 +150,11 @@ class DataCollector:
         """
         批量获取全市场历史日线 — 用于历史回放
 
-        v2.0 改进:
-        - 降低并发到 3 线程，防止 API 限流
-        - 分批处理，每批之间加延迟
-        - 增加单只超时和容错
-        - 最多拉取 2000 只最活跃的股票（按代码排序取前2000）
+        v3.0 改进:
+        - 全量拉取所有有效股票（不再限制 500 只）
+        - 提高并发到 20 线程（东方财富接口实测可承受）
+        - 批次大小 100，批间延迟 0.3 秒
+        - 拉取完成后返回按日期分组的 DataFrame
 
         Args:
             stock_codes: 需要查询的股票代码列表
@@ -173,20 +173,25 @@ class DataCollector:
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
 
-        # 限制最多 500 只（减少请求量，避免超时）
-        target_codes = stock_codes[:500]
+        # 全量拉取所有有效股票
+        target_codes = stock_codes
 
         logger.info(
             f"📅 批量拉取 {len(target_codes)} 只股票历史日线 "
             f"({start_str} ~ {end_str})..."
         )
 
-        # 找一个支持历史数据的源
+        # 找一个支持历史数据的源（优先 AKShare，响应更快）
         hist_source = None
         for source in self._sources:
-            if source.name in ("akshare", "baostock"):
+            if source.name == "akshare":
                 hist_source = source
                 break
+        if hist_source is None:
+            for source in self._sources:
+                if source.name == "baostock":
+                    hist_source = source
+                    break
         if hist_source is None:
             raise RuntimeError("没有可用的历史数据源")
 
@@ -204,9 +209,9 @@ class DataCollector:
                 pass
             return None
 
-        # 降低并发到 3 线程，分批处理防限流
-        BATCH_SIZE = 50
-        MAX_WORKERS = 3
+        # 高并发拉取：20 线程、每批 100 只
+        BATCH_SIZE = 100
+        MAX_WORKERS = 20
 
         for batch_start in range(0, len(target_codes), BATCH_SIZE):
             batch_codes = target_codes[batch_start:batch_start + BATCH_SIZE]
@@ -235,12 +240,7 @@ class DataCollector:
 
             # 批次间短暂延迟，防限流
             if done < len(target_codes):
-                time.sleep(0.5)
-
-            # 如果已经拉到足够数据（>200只成功），可以提前停止
-            if success >= 200 and failed > success * 2:
-                logger.warning("失败率过高，提前停止拉取")
-                break
+                time.sleep(0.3)
 
         if not all_records:
             raise RuntimeError("批量历史数据拉取失败：无有效数据")

@@ -408,14 +408,14 @@ function RightPanel() {
                 {playbackLoading ? (
                   <span className="flex items-center justify-center gap-2">
                     <Spinner />
-                    加载历史数据...
+                    正在拉取历史数据…
                   </span>
                 ) : (
                   "📅 加载历史回放"
                 )}
               </button>
               <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5 text-center">
-                每次生成地形会自动积累快照
+                首次加载需拉取全市场数据，约 1-3 分钟
               </div>
             </>
           ) : (
