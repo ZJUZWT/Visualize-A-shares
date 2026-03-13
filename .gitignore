@@ -39,3 +39,6 @@ logs/
 
 # CodeBuddy
 .codebuddy/
+
+# Claude Code
+.claude/

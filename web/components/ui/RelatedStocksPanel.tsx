@@ -1,32 +1,31 @@
 "use client";
 
 /**
- * RelatedStocksPanel v3.1 — 关联股票面板
+ * RelatedStocksPanel v4.0 — 关联+相似股票面板
  *
- * 悬停/选中某只股票时，在右下角显示同簇中距离最近的关联股票列表。
- * 点击列表中的股票可直接切换选中。
+ * v4.0: 新增"跨簇相似"tab，展示全局最近邻（不限同簇）
  */
 
+import { useState } from "react";
 import { useTerrainStore } from "@/stores/useTerrainStore";
-import type { RelatedStock } from "@/types/terrain";
+import type { RelatedStock, SimilarStock } from "@/types/terrain";
 
 export default function RelatedStocksPanel() {
   const { selectedStock, hoveredStock, terrainData, setSelectedStock } =
     useTerrainStore();
+  const [tab, setTab] = useState<"related" | "similar">("related");
 
-  // 优先显示选中股票的关联，否则显示悬停股票的
   const activeStock = selectedStock || hoveredStock;
 
-  if (
-    !activeStock ||
-    !activeStock.related_stocks ||
-    activeStock.related_stocks.length === 0
-  ) {
-    return null;
-  }
+  if (!activeStock) return null;
 
-  const related = activeStock.related_stocks;
+  const related = activeStock.related_stocks || [];
+  const similar = activeStock.similar_stocks || [];
   const isSelected = !!selectedStock && selectedStock.code === activeStock.code;
+
+  if (related.length === 0 && similar.length === 0) return null;
+
+  const activeList = tab === "related" ? related : similar;
 
   return (
     <div className="overlay fixed bottom-4 right-4 w-[340px] z-20">
@@ -41,7 +40,7 @@ export default function RelatedStocksPanel() {
               {activeStock.name}
             </span>
             <span className="text-[10px] text-[var(--text-tertiary)] font-mono bg-[var(--accent-light)] px-1.5 py-0.5 rounded-full">
-              簇 #{activeStock.cluster_id}
+              {activeStock.cluster_id === -1 ? "离群" : `簇 #${activeStock.cluster_id}`}
             </span>
             {isSelected && (
               <span className="text-[10px] text-[var(--accent)]">📌</span>
@@ -49,17 +48,44 @@ export default function RelatedStocksPanel() {
           </div>
         </div>
 
+        {/* Tab 切换 */}
+        {similar.length > 0 && (
+          <div className="flex gap-1 mb-2">
+            <button
+              onClick={() => setTab("related")}
+              className={`flex-1 text-[10px] py-1 rounded-lg transition-smooth ${
+                tab === "related"
+                  ? "bg-[var(--accent-light)] text-[var(--accent)] font-medium"
+                  : "text-[var(--text-tertiary)] hover:bg-gray-50"
+              }`}
+            >
+              同簇关联 ({related.length})
+            </button>
+            <button
+              onClick={() => setTab("similar")}
+              className={`flex-1 text-[10px] py-1 rounded-lg transition-smooth ${
+                tab === "similar"
+                  ? "bg-[var(--accent-light)] text-[var(--accent)] font-medium"
+                  : "text-[var(--text-tertiary)] hover:bg-gray-50"
+              }`}
+            >
+              跨簇相似 ({similar.length})
+            </button>
+          </div>
+        )}
+
         {/* 表头 */}
         <div className="flex items-center text-[10px] text-[var(--text-tertiary)] pb-1.5 border-b border-[var(--border)] mb-1">
           <span className="w-[52px]">代码</span>
           <span className="flex-1 min-w-0">名称</span>
+          {tab === "similar" && <span className="w-[32px] text-right">簇</span>}
           <span className="w-[64px] text-right">行业</span>
           <span className="w-[52px] text-right">涨跌幅</span>
         </div>
 
         {/* 列表 */}
         <div className="overflow-y-auto flex-1 min-h-0">
-          {related.slice(0, 10).map((stock: RelatedStock) => (
+          {activeList.slice(0, 10).map((stock: RelatedStock | SimilarStock) => (
             <button
               key={stock.code}
               onClick={() => {
@@ -76,6 +102,11 @@ export default function RelatedStocksPanel() {
               <span className="flex-1 min-w-0 text-[var(--text-primary)] truncate text-left">
                 {stock.name}
               </span>
+              {tab === "similar" && "cluster_id" in stock && (
+                <span className="w-[32px] text-right text-[10px] font-mono text-[var(--text-tertiary)]">
+                  #{(stock as SimilarStock).cluster_id}
+                </span>
+              )}
               <span className="w-[64px] text-right text-[var(--text-secondary)] text-[10px] truncate">
                 {stock.industry}
               </span>
@@ -97,7 +128,9 @@ export default function RelatedStocksPanel() {
 
         {/* 底部提示 */}
         <div className="text-[10px] text-[var(--text-tertiary)] mt-2 pt-1.5 border-t border-[var(--border)]">
-          共 {related.length} 只关联股票 · 按空间距离排序 · 点击切换
+          {tab === "related"
+            ? `共 ${related.length} 只关联股票 · 按空间距离排序 · 点击切换`
+            : `共 ${similar.length} 只跨簇相似股 · 按特征距离排序 · 点击切换`}
         </div>
       </div>
     </div>
