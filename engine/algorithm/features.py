@@ -351,31 +351,68 @@ class FeatureEngineer:
         weight_numeric: float | None = None,
         pca_target_dim: int | None = None,
         embedding_pca_dim: int | None = None,
-    ) -> tuple[pd.DataFrame, np.ndarray, list[str]]:
+        daily_df_map: dict[str, pd.DataFrame] | None = None,
+    ) -> tuple[pd.DataFrame, np.ndarray, list[str], pd.DataFrame, list[str]]:
         """
         构建标准化特征矩阵
 
-        v3.0: BGE 嵌入 + 数值特征两层融合 + PCA 降维
+        v4.0: BGE 嵌入 + 数值特征(快照+技术)两层融合 + PCA 降维
         支持运行时权重调节
         fallback: 纯数值特征
+
+        Args:
+            daily_df_map: {code: daily_df} 日线历史数据，用于计算技术指标
 
         Returns:
             meta_df: 包含 code, name 的元信息
             X: (n_stocks, n_features) 标准化后的特征矩阵
             feature_names: 使用的特征名列表
+            raw_features_df: 原始特征 DataFrame（未标准化），用于可解释聚类画像
+            raw_feature_cols: 原始特征列名列表
         """
         features_df = self.extract_from_snapshot(snapshot_df)
 
         if features_df.empty:
-            return pd.DataFrame(), np.array([]), []
+            return pd.DataFrame(), np.array([]), [], pd.DataFrame(), []
+
+        # v4.0: 如果有日线历史，计算技术指标并合并
+        if daily_df_map:
+            tech_records = []
+            matched = 0
+            for _, row in features_df.iterrows():
+                code = str(row["code"])
+                daily = daily_df_map.get(code)
+                if daily is not None and not daily.empty:
+                    tech = self.compute_technical_features(daily)
+                    if tech:
+                        tech["code"] = code
+                        tech_records.append(tech)
+                        matched += 1
+                    else:
+                        tech_records.append({"code": code})
+                else:
+                    tech_records.append({"code": code})
+
+            if tech_records:
+                tech_df = pd.DataFrame(tech_records)
+                features_df = features_df.merge(tech_df, on="code", how="left")
+                logger.info(
+                    f"📈 技术指标计算完成: {matched}/{len(features_df)} 只股票有日线数据"
+                )
 
         if feature_cols is None:
+            # 自动包含所有可用的快照+技术特征
             feature_cols = [
-                c for c in SNAPSHOT_FEATURES if c in features_df.columns
+                c for c in SNAPSHOT_FEATURES + COMPUTED_FEATURES
+                if c in features_df.columns
             ]
 
         meta_df = features_df[["code", "name"]].copy()
         codes = meta_df["code"].tolist()
+
+        # 保存原始特征用于可解释聚类画像
+        raw_feature_cols = [c for c in feature_cols if c in features_df.columns]
+        raw_features_df = features_df[raw_feature_cols].copy()
 
         # 数值特征矩阵
         X_numeric = features_df[feature_cols].values.astype(float)
@@ -416,10 +453,12 @@ class FeatureEngineer:
         logger.info(
             f"特征矩阵构建完成: {X_final.shape[0]} 只股票, "
             f"{X_final.shape[1]} 维特征 "
-            f"({'语义嵌入融合+PCA' if self._precomputed.available else '纯数值'})"
+            f"({'语义嵌入融合+PCA' if self._precomputed.available else '纯数值'}), "
+            f"数值特征 {len(feature_cols)} 维 "
+            f"({len([c for c in COMPUTED_FEATURES if c in features_df.columns])} 个技术指标)"
         )
 
-        return meta_df, X_final, feature_names
+        return meta_df, X_final, feature_names, raw_features_df, raw_feature_cols
 
     def _fuse_features(
         self,

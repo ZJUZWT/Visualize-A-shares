@@ -1,0 +1,31 @@
+# StockTerrain — A股多维聚类3D地形可视化平台
+
+## 项目结构
+- `engine/` — Python 后端 (FastAPI + DuckDB + HDBSCAN/UMAP 算法流水线)
+- `web/` — Next.js 前端 (Three.js 3D 地形渲染)
+- `data/precomputed/` — BGE 嵌入向量、公司概况 JSON
+
+## 后端核心模块
+- `engine/algorithm/pipeline.py` — 算法流水线 (特征→聚类→降维→插值)
+- `engine/algorithm/predictor_v2.py` — 13因子预测器, `FACTOR_DEFS` 常量
+- `engine/algorithm/factor_backtest.py` — 因子 IC 回测
+- `engine/storage/duckdb_store.py` — DuckDB 持久化
+- `engine/api/routes/terrain.py` — REST API (含 SSE 流式)
+- `engine/mcpserver/` — MCP Server (10 tools, stdio transport)
+
+## 开发约定
+- 中文注释和日志
+- Loguru 日志框架
+- DuckDB 单文件数据库，路径: `data/stockterrain.duckdb`
+- `engine/main.py` 会将 engine/ 加入 sys.path
+- MCP 包命名 `mcpserver` 而非 `mcp`，避免与 mcp SDK 冲突
+
+## 运行
+- 后端: `cd engine && python main.py` (端口 8000)
+- 前端: `cd web && npm run dev` (端口 3000)
+- MCP: `cd engine && python -m mcpserver` (stdio, 配置见 `.mcp.json`)
+
+## MCP 使用须知
+- 使用 MCP 工具前必须先启动后端 (`cd engine && python main.py`)
+- MCP Server 通过 REST API 与后端通信，后端未启动时会降级为 DuckDB 离线快照（数据非实时）
+- `.mcp.json` 使用相对路径，clone 后可直接使用

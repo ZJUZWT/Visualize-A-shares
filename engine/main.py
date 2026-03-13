@@ -21,6 +21,7 @@ from loguru import logger
 
 from config import settings
 from api.routes.terrain import router as terrain_router
+from api.routes.chat import router as chat_router
 
 # ─── 配置日志 ──────────────────────────────────────────
 logger.remove()
@@ -56,18 +57,29 @@ app.add_middleware(
 
 # ─── 注册路由 ─────────────────────────────────────────
 app.include_router(terrain_router)
+app.include_router(chat_router)
 
 
 # ─── 启动/关闭事件 ────────────────────────────────────
 @app.on_event("startup")
 async def startup():
+    from llm.config import llm_settings
     logger.info("=" * 60)
     logger.info("🏔️  StockTerrain Engine 启动")
     logger.info(f"   数据源: AKShare(主力) + BaoStock(备选)")
     logger.info(f"   算法: HDBSCAN + UMAP + RBF")
+    logger.info(f"   预测: v2.0 (MAD去极值 + 正交化 + ICIR自适应权重)")
+    logger.info(f"   LLM: {'已配置 (' + llm_settings.provider + '/' + llm_settings.model + ')' if llm_settings.api_key else '未配置 (可在设置中启用)'}")
     logger.info(f"   端口: {settings.server.port}")
     logger.info(f"   API 文档: http://localhost:{settings.server.port}/docs")
     logger.info("=" * 60)
+
+    # 自动尝试 ICIR 权重校准（静默失败）
+    try:
+        from api.routes.terrain import _try_auto_inject_icir_weights
+        _try_auto_inject_icir_weights()
+    except Exception as e:
+        logger.warning(f"⚠️ ICIR 自动校准跳过: {e}")
 
 
 @app.on_event("shutdown")
@@ -88,7 +100,12 @@ async def root():
             "compute": "POST /api/v1/terrain/compute",
             "refresh": "GET /api/v1/terrain/refresh",
             "search": "GET /api/v1/stocks/search?q=xxx",
+            "factor_backtest": "POST /api/v1/factor/backtest",
+            "factor_weights": "GET /api/v1/factor/weights",
             "websocket": "WS /api/v1/ws/terrain",
+            "chat": "POST /api/v1/chat (SSE 流式)",
+            "chat_sync": "POST /api/v1/chat/sync",
+            "chat_config": "GET/POST /api/v1/chat/config",
         },
     }
 

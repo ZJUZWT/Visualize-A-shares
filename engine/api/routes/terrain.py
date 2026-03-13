@@ -16,6 +16,7 @@ from loguru import logger
 from api.schemas import TerrainResponse, ComputeRequest, HealthResponse, HistoryRequest, HistoryResponse, HistoryFrame
 from data.collector import DataCollector
 from algorithm.pipeline import AlgorithmPipeline
+from algorithm.factor_backtest import FactorBacktester, run_ic_backtest_from_store
 from storage.duckdb_store import DuckDBStore
 
 router = APIRouter(prefix="/api/v1", tags=["terrain"])
@@ -51,6 +52,37 @@ def get_store() -> DuckDBStore:
 
 
 # ─── REST 接口 ────────────────────────────────────────
+
+
+def _get_daily_history_batch(store: DuckDBStore, snapshot: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """
+    批量从 DuckDB 获取日线历史（用于技术指标计算）
+    只从本地缓存读取，不触发网络请求。如果没有历史数据则返回空。
+    """
+    import datetime
+
+    if snapshot.empty or "code" not in snapshot.columns:
+        return {}
+
+    # 计算需要的日期范围（60 个交易日 ≈ 3 个月，覆盖 volatility_60d）
+    end_date = datetime.date.today().strftime("%Y-%m-%d")
+    start_date = (datetime.date.today() - datetime.timedelta(days=120)).strftime("%Y-%m-%d")
+
+    codes = snapshot["code"].astype(str).tolist()
+    daily_map: dict[str, pd.DataFrame] = {}
+    matched = 0
+
+    for code in codes:
+        try:
+            df = store.get_daily(code, start_date, end_date)
+            if df is not None and len(df) >= 20:
+                daily_map[code] = df
+                matched += 1
+        except Exception:
+            continue
+
+    logger.info(f"📈 日线历史读取: {matched}/{len(codes)} 只股票有 ≥20 日数据")
+    return daily_map
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -131,6 +163,18 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
                 await asyncio.to_thread(store.save_snapshot, snapshot)
                 elapsed = round(_time.time() - t0, 1)
 
+                # ─── Step 2.5: 批量获取日线历史（用于技术指标）────
+                yield sse_event("progress", {
+                    "step": 2, "totalSteps": 6,
+                    "stepName": "获取日线历史",
+                    "message": "正在从本地获取日线历史数据（计算技术指标）...",
+                    "elapsed": elapsed,
+                })
+
+                daily_df_map = await asyncio.to_thread(
+                    _get_daily_history_batch, store, snapshot
+                )
+
                 # ─── Step 3-6: 算法流水线（带进度回调）────
                 def on_pipeline_progress(step, total, step_name):
                     """算法流水线进度回调"""
@@ -157,6 +201,7 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
                         pca_target_dim=req.pca_target_dim,
                         embedding_pca_dim=req.embedding_pca_dim,
                         on_progress=on_pipeline_progress,
+                        daily_df_map=daily_df_map,
                     ),
                 )
 
@@ -198,7 +243,11 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
                     active_metric=result.active_metric,
                 )
 
-                yield sse_event("complete", response_data.model_dump())
+                # v3.0: 追加聚类质量评分
+                resp_dict = response_data.model_dump()
+                resp_dict["cluster_quality"] = result.cluster_quality
+
+                yield sse_event("complete", resp_dict)
 
             except HTTPException as he:
                 yield sse_event("error", {"message": he.detail})
@@ -513,9 +562,119 @@ async def search_stocks(q: str = Query(..., min_length=1)):
     return {"results": results}
 
 
-# ─── WebSocket 实时推送 ───────────────────────────────
+@router.post("/factor/backtest")
+async def run_factor_backtest(
+    rolling_window: int = Query(20, description="ICIR 滚动窗口天数"),
+    auto_inject: bool = Query(True, description="是否自动注入权重到预测器"),
+):
+    """
+    执行因子 IC 回测 + 自适应权重计算
 
-_ws_clients: set[WebSocket] = set()
+    从 DuckDB 中读取历史快照数据，计算每个因子的 RankIC 时序，
+    再用滚动 ICIR 作为自适应权重注入预测器。
+
+    需要先积累 ≥3 天的快照数据（每次「生成3D地形」会自动保存一天）。
+    """
+    try:
+        store = get_store()
+        pipeline = get_pipeline()
+
+        result = await asyncio.to_thread(
+            run_ic_backtest_from_store, store, rolling_window
+        )
+
+        # 自动注入权重到 v2 预测器
+        if auto_inject and result.icir_weights:
+            pipeline.predictor_v2.set_icir_weights(result.icir_weights)
+            logger.info("✅ ICIR 权重已自动注入到预测器 v2")
+
+        # 构建响应
+        factor_list = []
+        for name, report in result.factor_reports.items():
+            factor_list.append({
+                "name": name,
+                "ic_mean": report.ic_mean,
+                "ic_std": report.ic_std,
+                "icir": report.icir,
+                "ic_positive_rate": report.ic_positive_rate,
+                "t_stat": report.t_stat,
+                "p_value": report.p_value,
+                "ic_series": report.ic_series[-20:],  # 只返回最近 20 天
+                "ic_dates": report.ic_dates[-20:],
+            })
+
+        return {
+            "status": "ok",
+            "backtest_days": result.backtest_days,
+            "total_stocks_avg": result.total_stocks_avg,
+            "computation_time_ms": round(result.computation_time_ms, 0),
+            "data_source": result.data_source,
+            "factors": factor_list,
+            "icir_weights": result.icir_weights,
+            "weights_injected": auto_inject and bool(result.icir_weights),
+        }
+
+    except Exception as e:
+        logger.error(f"❌ 因子回测失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"因子回测失败: {str(e)}")
+
+
+@router.get("/factor/weights")
+async def get_factor_weights():
+    """查看当前预测器使用的因子权重"""
+    pipeline = get_pipeline()
+    predictor = pipeline.predictor_v2
+
+    weights = predictor._get_weights()
+    source = predictor._weight_source
+
+    from algorithm.predictor_v2 import FACTOR_DEFS
+    factor_info = []
+    for fdef in FACTOR_DEFS:
+        factor_info.append({
+            "name": fdef.name,
+            "source_col": fdef.source_col,
+            "direction": fdef.direction,
+            "group": fdef.group,
+            "weight": weights.get(fdef.name, 0.0),
+            "default_weight": fdef.default_weight,
+            "desc": fdef.desc,
+        })
+
+    return {
+        "weight_source": source,
+        "factors": factor_info,
+    }
+
+
+def _try_auto_inject_icir_weights():
+    """
+    启动时自动尝试从历史数据计算 ICIR 权重并注入预测器
+
+    静默失败 — 如果没有足够历史数据，使用默认权重。
+    """
+    try:
+        store = get_store()
+        dates = store.get_snapshot_daily_dates()
+        if len(dates) >= 5:
+            logger.info(f"🔄 检测到 {len(dates)} 天历史快照，自动运行 IC 回测...")
+            result = run_ic_backtest_from_store(store, rolling_window=20)
+            if result.icir_weights:
+                pipeline = get_pipeline()
+                pipeline.predictor_v2.set_icir_weights(result.icir_weights)
+                logger.info("✅ 启动时 ICIR 权重自动注入成功")
+            else:
+                logger.info("ℹ️ IC 回测无显著权重，使用默认权重")
+        else:
+            logger.info(
+                f"ℹ️ 历史快照仅 {len(dates)} 天（<5天），跳过 ICIR 自动校准。"
+                f"多次「生成3D地形」积累数据后将自动启用。"
+            )
+    except Exception as e:
+        logger.warning(f"⚠️ 启动时 ICIR 自动校准跳过: {e}")
+
+
+# ─── WebSocket 实时推送 ───────────────────────────────
 
 
 @router.websocket("/ws/terrain")

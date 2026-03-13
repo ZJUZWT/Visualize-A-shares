@@ -576,32 +576,26 @@ function RightPanel() {
         </CollapsiblePanel>
       )}
 
+      {/* ─── 聚类质量评分（v4.0）─────────────── */}
+      {terrainData?.cluster_quality && (
+        <CollapsiblePanel title="聚类质量" icon="📊" defaultOpen>
+          <ClusterQualityPanel quality={terrainData.cluster_quality} />
+        </CollapsiblePanel>
+      )}
+
       {/* ─── 聚类图例 ─────────────────────── */}
       {terrainData && terrainData.clusters.length > 0 && (
         <CollapsiblePanel title="聚类图例" icon="🎨" defaultOpen={false}>
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-1">
             {terrainData.clusters
               .filter((c) => !c.is_noise)
               .slice(0, 15)
               .map((cluster, i) => (
-                <div
+                <ClusterLegendItem
                   key={cluster.cluster_id}
-                  className="flex items-center gap-2 text-xs py-1 px-2 rounded-lg hover:bg-gray-50 transition-smooth"
-                >
-                  <div
-                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                    style={{
-                      backgroundColor:
-                        CLUSTER_COLORS[i % CLUSTER_COLORS.length],
-                    }}
-                  />
-                  <span className="text-[var(--text-secondary)]">
-                    #{cluster.cluster_id}
-                  </span>
-                  <span className="font-mono text-[var(--text-primary)] ml-auto font-medium text-[11px]">
-                    {cluster.size}
-                  </span>
-                </div>
+                  cluster={cluster}
+                  color={CLUSTER_COLORS[i % CLUSTER_COLORS.length]}
+                />
               ))}
             {terrainData.clusters.find((c) => c.is_noise) && (
               <div className="flex items-center gap-2 text-xs py-1 px-2 opacity-60">
@@ -761,6 +755,160 @@ function SliderControl({
       />
       {hint && (
         <div className="text-[10px] text-[var(--text-tertiary)] mt-1">{hint}</div>
+      )}
+    </div>
+  );
+}
+
+/** v4.0: 聚类质量评分面板 */
+function ClusterQualityPanel({ quality }: { quality: import("@/types/terrain").ClusterQuality }) {
+  const silhouette = quality.silhouette_score ?? 0;
+  const ch = quality.calinski_harabasz ?? 0;
+  const noiseRatio = quality.noise_ratio ?? 0;
+  const nClusters = quality.n_clusters ?? 0;
+  const avgSize = quality.avg_cluster_size ?? 0;
+
+  // Silhouette 评级
+  const silRating = silhouette > 0.5 ? "优秀" : silhouette > 0.25 ? "良好" : silhouette > 0 ? "一般" : "较差";
+  const silColor = silhouette > 0.5 ? "text-green-600" : silhouette > 0.25 ? "text-blue-600" : silhouette > 0 ? "text-yellow-600" : "text-red-600";
+
+  return (
+    <div className="space-y-2">
+      {/* Silhouette 分数 — 带评级标签 */}
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-[var(--text-secondary)]">轮廓系数</span>
+        <div className="flex items-center gap-1.5">
+          <span className={`text-xs font-mono font-semibold ${silColor}`}>
+            {silhouette.toFixed(4)}
+          </span>
+          <span className={`text-[10px] ${silColor} bg-opacity-10 px-1.5 py-0.5 rounded-full`}
+            style={{ backgroundColor: `${silhouette > 0.25 ? '#dcfce7' : '#fef3c7'}` }}>
+            {silRating}
+          </span>
+        </div>
+      </div>
+
+      {/* Silhouette 进度条 */}
+      <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${
+            silhouette > 0.5 ? "bg-green-500" : silhouette > 0.25 ? "bg-blue-500" : silhouette > 0 ? "bg-yellow-500" : "bg-red-500"
+          }`}
+          style={{ width: `${Math.max(0, Math.min(100, (silhouette + 1) * 50))}%` }}
+        />
+      </div>
+
+      {/* CH 指数 */}
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-[var(--text-secondary)]">CH 指数</span>
+        <span className="text-xs font-mono font-medium text-[var(--text-primary)]">
+          {ch > 1000 ? `${(ch / 1000).toFixed(1)}k` : ch.toFixed(1)}
+        </span>
+      </div>
+
+      {/* 摘要统计 */}
+      <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-gray-100">
+        <div className="text-center">
+          <div className="text-[10px] text-[var(--text-tertiary)]">簇数</div>
+          <div className="text-xs font-mono font-medium">{nClusters}</div>
+        </div>
+        <div className="text-center">
+          <div className="text-[10px] text-[var(--text-tertiary)]">平均大小</div>
+          <div className="text-xs font-mono font-medium">{avgSize.toFixed(0)}</div>
+        </div>
+        <div className="text-center">
+          <div className="text-[10px] text-[var(--text-tertiary)]">噪声率</div>
+          <div className="text-xs font-mono font-medium">{(noiseRatio * 100).toFixed(1)}%</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** v4.0: 聚类图例项 — 含语义标签和可展开的特征画像 */
+function ClusterLegendItem({ cluster, color }: { cluster: import("@/types/terrain").ClusterInfo; color: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const clusterLabel = cluster.label || `板块 ${cluster.cluster_id}`;
+  const profile = cluster.feature_profile;
+  const topIndustries = cluster.top_industries;
+
+  // 特征中文名映射
+  const FEATURE_LABELS: Record<string, string> = {
+    avg_pe_ttm: "PE(TTM)", avg_pb: "PB", avg_total_mv: "总市值(对数)", avg_circ_mv: "流通市值(对数)",
+    avg_turnover_rate: "换手率%", avg_pct_chg: "涨跌幅%",
+    avg_volatility_20d: "20日波动率", avg_volatility_60d: "60日波动率",
+    avg_momentum_20d: "20日动量%", avg_rsi_14: "RSI(14)",
+    avg_ma_deviation_20: "20均线偏离%", avg_ma_deviation_60: "60均线偏离%",
+  };
+
+  return (
+    <div className="rounded-lg hover:bg-gray-50 transition-smooth">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-xs py-1.5 px-2 w-full"
+      >
+        <div
+          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+          style={{ backgroundColor: color }}
+        />
+        <span className="text-[var(--text-secondary)] truncate flex-1 text-left" title={clusterLabel}>
+          {clusterLabel}
+        </span>
+        <span className="font-mono text-[var(--text-primary)] font-medium text-[11px] flex-shrink-0">
+          {cluster.size}
+        </span>
+        <svg
+          className={`w-2.5 h-2.5 text-[var(--text-tertiary)] transition-transform duration-150 flex-shrink-0 ${expanded ? "rotate-0" : "-rotate-90"}`}
+          fill="none" stroke="currentColor" viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <div className="px-2 pb-2 space-y-1.5">
+          {/* 行业分布 */}
+          {topIndustries && topIndustries.length > 0 && (
+            <div>
+              <div className="text-[10px] text-[var(--text-tertiary)] mb-0.5">行业分布</div>
+              <div className="flex flex-wrap gap-1">
+                {topIndustries.map((ind) => (
+                  <span key={ind.name} className="text-[10px] bg-gray-100 px-1.5 py-0.5 rounded-full text-[var(--text-secondary)]">
+                    {ind.name} {ind.count}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 特征画像 */}
+          {profile && Object.keys(profile).filter(k => k.startsWith("avg_")).length > 0 && (
+            <div>
+              <div className="text-[10px] text-[var(--text-tertiary)] mb-0.5">特征均值</div>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                {Object.entries(profile)
+                  .filter(([k]) => k.startsWith("avg_"))
+                  .map(([key, val]) => (
+                    <div key={key} className="flex justify-between text-[10px]">
+                      <span className="text-[var(--text-tertiary)] truncate">
+                        {FEATURE_LABELS[key] || key.replace("avg_", "")}
+                      </span>
+                      <span className="font-mono text-[var(--text-primary)] ml-1">
+                        {Math.abs(val) >= 1000 ? `${(val / 1000).toFixed(1)}k` : val.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* 代表股票 */}
+          {cluster.top_stocks?.length > 0 && (
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              代表: {cluster.top_stocks.slice(0, 3).join("、")}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

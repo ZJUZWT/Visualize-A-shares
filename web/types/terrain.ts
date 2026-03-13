@@ -11,6 +11,15 @@ export interface RelatedStock {
   pct_chg: number;
 }
 
+/** 跨簇相似股票 */
+export interface SimilarStock {
+  code: string;
+  name: string;
+  industry: string;
+  pct_chg: number;
+  cluster_id: number;
+}
+
 /** 单只股票在 3D 空间中的表示 */
 export interface StockPoint {
   code: string;
@@ -34,6 +43,8 @@ export interface StockPoint {
   z_rise_prob?: number;
   // v3.1: 同簇关联股票
   related_stocks?: RelatedStock[];
+  // v4.0: 跨簇相似股票
+  similar_stocks?: SimilarStock[];
 }
 
 /** 聚类簇信息 */
@@ -47,6 +58,17 @@ export interface ClusterInfo {
   feature_profile: Record<string, number>;
   // v2.0: 簇内行业分布 (top 5)
   top_industries?: { name: string; count: number }[];
+  // v4.0: 自动生成的语义标签
+  label?: string;
+}
+
+/** 聚类质量评分 */
+export interface ClusterQuality {
+  silhouette_score: number;    // [-1, 1]，越高越好
+  calinski_harabasz: number;   // 越高越好
+  noise_ratio: number;         // 噪声比例
+  n_clusters: number;          // 簇数
+  avg_cluster_size: number;    // 平均簇大小
 }
 
 /** 地形边界 */
@@ -77,10 +99,13 @@ export interface TerrainData {
   cluster_count: number;
   computation_time_ms: number;
   active_metric: string;
+
+  // v4.0: 聚类质量评分
+  cluster_quality?: ClusterQuality;
 }
 
 /** Z 轴可选指标 */
-export type ZMetric = "pct_chg" | "turnover_rate" | "volume" | "amount" | "pe_ttm" | "pb" | "rise_prob";
+export type ZMetric = "pct_chg" | "turnover_rate" | "volume" | "amount" | "pe_ttm" | "pb" | "wb_ratio" | "rise_prob";
 
 /** Z 轴指标显示信息 */
 export const Z_METRIC_LABELS: Record<ZMetric, string> = {
@@ -90,6 +115,7 @@ export const Z_METRIC_LABELS: Record<ZMetric, string> = {
   amount: "成交额",
   pe_ttm: "市盈率(TTM)",
   pb: "市净率",
+  wb_ratio: "委比 %",
   rise_prob: "🔮 明日上涨概率",
 };
 
@@ -138,7 +164,8 @@ export function formatZValue(
   metric: ZMetric,
 ): { text: string; color: string } {
   // 获取当前指标对应的 z_ 字段值
-  const raw = (stock as Record<string, unknown>)[`z_${metric}`] as number | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const raw = (stock as any)[`z_${metric}`] as number | undefined;
   const val = raw ?? stock.z;
 
   switch (metric) {
