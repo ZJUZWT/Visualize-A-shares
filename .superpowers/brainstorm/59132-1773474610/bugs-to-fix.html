@@ -1,0 +1,42 @@
+<h2>前端已发现的问题 — 哪些需要在本次一起修复？</h2>
+<p class="subtitle">代码审查中发现以下问题，勾选你想在这次改造中一并处理的项</p>
+
+<div class="options" data-multiselect>
+  <div class="option" data-choice="bug-types" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>类型安全问题</h3>
+      <p>多处 <code>(stock as any).z_pct_chg</code> 强转，shader 扩展 <code>as any</code>。应在 StockPoint 接口中正确定义所有字段，消除 any 类型转换。</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="bug-emoji" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>Emoji 图标替换为 lucide-react</h3>
+      <p>Sidebar、AIChatPanel、TopBar、terrain.ts 中大量使用 emoji（📊🏔️📅👁️🤖💡🔮⚙️…）作为 UI 图标。跨平台渲染不一致，且视觉风格不统一。已安装 lucide-react 但几乎未使用。</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="bug-color" onclick="toggleSelect(this)">
+    <div class="letter">3</div>
+    <div class="content">
+      <h3>球体颜色逻辑重复</h3>
+      <p>StockNodes.tsx 中球体着色逻辑在 useEffect (L140-161) 和 dropLinesGeo (L245-258) 中完全重复。应抽取为共享函数。</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="bug-perf" onclick="toggleSelect(this)">
+    <div class="letter">4</div>
+    <div class="content">
+      <h3>性能：computeTargetY 每帧调用</h3>
+      <p>useFrame 中每帧都调用 computeTargetY()，即使没有任何状态变化。应加入 dirty flag 机制，仅在 playbackIndex/flattenBalls 等状态变化时重算。</p>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top: 20px; padding: 14px; background: rgba(79,142,247,0.05); border-radius: 10px; border: 1px solid rgba(79,142,247,0.1);">
+  <p style="font-size: 12px; color: #475569; margin: 0;">
+    <strong>💡 建议：</strong>问题 1（类型安全）和问题 2（Emoji 替换）与本次 UI 美化直接相关，建议优先处理。问题 3、4 是代码质量改进，可以顺手修但非必须。
+  </p>
+</div>

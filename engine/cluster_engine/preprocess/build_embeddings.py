@@ -14,7 +14,7 @@
   - precompute_meta.json   : 元信息
 
 使用方式:
-  cd engine && python -m preprocess.build_embeddings
+  cd engine && python -m cluster_engine.preprocess.build_embeddings
 """
 
 import os
@@ -30,7 +30,7 @@ import numpy as np
 from loguru import logger
 
 # ─── 路径 ─────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 ENGINE_ROOT = PROJECT_ROOT / "engine"
 DATA_DIR = PROJECT_ROOT / "data"
 PRECOMPUTED_DIR = DATA_DIR / "precomputed"
@@ -430,7 +430,7 @@ def compute_embeddings(
         logger.info(f"🚫 过滤退市股票: {delist_count} 只")
 
     # 导入加权文本构造器
-    from preprocess.rebuild_bge import _build_weighted_text
+    from cluster_engine.preprocess.rebuild_bge import _build_weighted_text
 
     # 准备文本
     texts = []

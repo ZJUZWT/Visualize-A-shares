@@ -3,7 +3,7 @@
 
 运行方式:
     cd engine
-    python -m preprocess.export_snapshot
+    python -m cluster_engine.preprocess.export_snapshot
 
 输出:
     web/public/terrain_snapshot.json
@@ -15,12 +15,12 @@ import time
 from pathlib import Path
 
 # 确保 engine 目录在 sys.path 中
-ENGINE_DIR = Path(__file__).resolve().parent.parent
+ENGINE_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ENGINE_DIR) not in sys.path:
     sys.path.insert(0, str(ENGINE_DIR))
 
-from data.collector import DataCollector
-from algorithm.pipeline import AlgorithmPipeline
+from data_engine import get_data_engine
+from cluster_engine.algorithm.pipeline import AlgorithmPipeline
 
 
 def export_snapshot():
@@ -33,13 +33,13 @@ def export_snapshot():
 
     # 1. 拉取全市场实时行情
     print("\n📡 拉取全市场实时行情...")
-    collector = DataCollector()
-    snapshot = collector.get_realtime_quotes()
+    de = get_data_engine()
+    snapshot = de.get_realtime_quotes()
     print(f"   获取到 {len(snapshot)} 只股票行情")
 
     # 2. 执行算法流水线（使用默认参数）
     print("\n🧮 执行算法流水线...")
-    pipeline = AlgorithmPipeline()
+    pipeline = AlgorithmPipeline(profiles=de.get_profiles())
     result = pipeline.compute_full(
         snapshot,
         z_column="pct_chg",

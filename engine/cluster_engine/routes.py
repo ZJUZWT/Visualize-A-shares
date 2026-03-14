@@ -1,7 +1,8 @@
 """
-地形数据 API — 核心接口
+聚类引擎 API — 核心接口
 
-提供 3D 地形计算和实时更新的 REST + WebSocket 接口
+提供 3D 地形计算和实时更新的 REST + WebSocket 接口。
+从 api/routes/terrain.py 迁移而来，使用 data_engine / cluster_engine 门面。
 """
 
 import asyncio
@@ -13,88 +14,32 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPExcept
 from fastapi.responses import JSONResponse, StreamingResponse
 from loguru import logger
 
-from api.schemas import TerrainResponse, ComputeRequest, HealthResponse, HistoryRequest, HistoryResponse, HistoryFrame
-from data.collector import DataCollector
-from algorithm.pipeline import AlgorithmPipeline
-from algorithm.factor_backtest import FactorBacktester, run_ic_backtest_from_store
-from storage.duckdb_store import DuckDBStore
+from data_engine import get_data_engine
+from cluster_engine import get_cluster_engine
+from cluster_engine.schemas import TerrainResponse, ComputeRequest, HealthResponse, HistoryRequest, HistoryResponse, HistoryFrame
+from cluster_engine.algorithm.factor_backtest import run_ic_backtest_from_store
 
 router = APIRouter(prefix="/api/v1", tags=["terrain"])
-
-# ─── 全局单例 ────────────────────────────────────────
-_collector: DataCollector | None = None
-_pipeline: AlgorithmPipeline | None = None
-_store: DuckDBStore | None = None
 
 # ─── 防止 UMAP/Numba 并发崩溃的锁 ───────────────────
 _compute_lock = asyncio.Lock()
 
-
-def get_collector() -> DataCollector:
-    global _collector
-    if _collector is None:
-        _collector = DataCollector()
-    return _collector
-
-
-def get_pipeline() -> AlgorithmPipeline:
-    global _pipeline
-    if _pipeline is None:
-        _pipeline = AlgorithmPipeline()
-    return _pipeline
-
-
-def get_store() -> DuckDBStore:
-    global _store
-    if _store is None:
-        _store = DuckDBStore()
-    return _store
+# ─── WebSocket 客户端集合 ─────────────────────────────
+_ws_clients: set[WebSocket] = set()
 
 
 # ─── REST 接口 ────────────────────────────────────────
 
 
-def _get_daily_history_batch(store: DuckDBStore, snapshot: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """
-    批量从 DuckDB 获取日线历史（用于技术指标计算）
-    只从本地缓存读取，不触发网络请求。如果没有历史数据则返回空。
-    """
-    import datetime
-
-    if snapshot.empty or "code" not in snapshot.columns:
-        return {}
-
-    # 计算需要的日期范围（60 个交易日 ≈ 3 个月，覆盖 volatility_60d）
-    end_date = datetime.date.today().strftime("%Y-%m-%d")
-    start_date = (datetime.date.today() - datetime.timedelta(days=120)).strftime("%Y-%m-%d")
-
-    codes = snapshot["code"].astype(str).tolist()
-    daily_map: dict[str, pd.DataFrame] = {}
-    matched = 0
-
-    for code in codes:
-        try:
-            df = store.get_daily(code, start_date, end_date)
-            if df is not None and len(df) >= 20:
-                daily_map[code] = df
-                matched += 1
-        except Exception:
-            continue
-
-    logger.info(f"📈 日线历史读取: {matched}/{len(codes)} 只股票有 ≥20 日数据")
-    return daily_map
-
-
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
     """系统健康检查"""
-    collector = get_collector()
-    store = get_store()
+    de = get_data_engine()
 
     return HealthResponse(
         status="ok",
-        data_sources={s: True for s in collector.available_sources},
-        stock_count=store.get_stock_count(),
+        data_sources={s: True for s in de.available_sources},
+        stock_count=de.get_stock_count(),
     )
 
 
@@ -103,7 +48,7 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
     """
     全量计算 3D 地形 — SSE 流式进度推送
 
-    流程: 拉取行情 → 保存快照 → 特征提取 → 聚类 → 降维 → 插值 → 返回地形数据
+    流程: 拉取行情 -> 保存快照 -> 特征提取 -> 聚类 -> 降维 -> 插值 -> 返回地形数据
 
     SSE 事件类型：
     - progress: { step, totalSteps, stepName, message, elapsed }
@@ -130,9 +75,9 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
             progress_queue: asyncio.Queue = asyncio.Queue()
 
             try:
-                collector = get_collector()
-                pipeline = get_pipeline()
-                store = get_store()
+                de = get_data_engine()
+                ce = get_cluster_engine()
+                pipeline = ce.pipeline
 
                 # ─── Step 1: 拉取全市场实时行情 ────────
                 yield sse_event("progress", {
@@ -142,7 +87,7 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
                     "elapsed": 0,
                 })
 
-                snapshot = await asyncio.to_thread(collector.get_realtime_quotes)
+                snapshot = await asyncio.to_thread(de.get_realtime_quotes)
                 elapsed = round(_time.time() - t0, 1)
 
                 yield sse_event("progress", {
@@ -160,7 +105,7 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
                     "elapsed": elapsed,
                 })
 
-                await asyncio.to_thread(store.save_snapshot, snapshot)
+                await asyncio.to_thread(de.save_snapshot, snapshot)
                 elapsed = round(_time.time() - t0, 1)
 
                 # ─── Step 2.5: 批量获取日线历史（用于技术指标）────
@@ -172,7 +117,7 @@ async def compute_terrain(req: ComputeRequest = ComputeRequest()):
                 })
 
                 daily_df_map = await asyncio.to_thread(
-                    _get_daily_history_batch, store, snapshot
+                    de.get_daily_history_batch, snapshot
                 )
 
                 # ─── Step 3-6: 算法流水线（带进度回调）────
@@ -278,15 +223,16 @@ async def refresh_terrain(
     用于实时行情更新
     """
     try:
-        collector = get_collector()
-        pipeline = get_pipeline()
+        de = get_data_engine()
+        ce = get_cluster_engine()
+        pipeline = ce.pipeline
 
         if pipeline.last_result is None:
             # 如果还没有初始计算，先执行全量计算
             return await compute_terrain(ComputeRequest(z_metric=z_metric))
 
         # 拉取最新行情
-        snapshot = await asyncio.to_thread(collector.get_realtime_quotes)
+        snapshot = await asyncio.to_thread(de.get_realtime_quotes)
 
         # 快速更新 Z 轴
         result = await asyncio.to_thread(
@@ -337,7 +283,8 @@ async def get_terrain_history(req: HistoryRequest = HistoryRequest()):
     - complete: { frames, dates, total_stocks }
     - error: { message }
     """
-    pipeline = get_pipeline()
+    ce = get_cluster_engine()
+    pipeline = ce.pipeline
     if pipeline._last_embedding is None or pipeline._last_meta_df is None:
         raise HTTPException(
             status_code=400,
@@ -354,8 +301,7 @@ async def get_terrain_history(req: HistoryRequest = HistoryRequest()):
             return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
         try:
-            store = get_store()
-            collector = get_collector()
+            de = get_data_engine()
 
             stock_codes = pipeline._last_meta_df["code"].tolist()
             embedding = pipeline._last_embedding
@@ -370,7 +316,7 @@ async def get_terrain_history(req: HistoryRequest = HistoryRequest()):
                 "done": 0, "total": 0, "success": 0, "failed": 0, "elapsed": 0,
             })
 
-            local_snapshots = store.get_snapshot_daily_range(req.days)
+            local_snapshots = de.get_snapshot_daily_range(req.days)
             logger.info(f"📅 本地快照: {len(local_snapshots)} 天 (需要 {req.days} 天)")
 
             # ─── Phase 2: 需要远程拉取 ───────────────────
@@ -384,7 +330,7 @@ async def get_terrain_history(req: HistoryRequest = HistoryRequest()):
                     "success": 0, "failed": 0, "elapsed": 0,
                 })
 
-                # 进度回调 → SSE 推送（在线程中收集，主协程推送）
+                # 进度回调 -> SSE 推送（在线程中收集，主协程推送）
                 progress_queue: asyncio.Queue = asyncio.Queue()
 
                 def on_progress(done, total, success, failed, elapsed):
@@ -403,14 +349,14 @@ async def get_terrain_history(req: HistoryRequest = HistoryRequest()):
                         if "date" in batch_df.columns:
                             batch_df["date"] = batch_df["date"].astype(str)
                             for d, grp in batch_df.groupby("date"):
-                                store.save_history_as_snapshots({d: grp})
+                                de.save_history_as_snapshots({d: grp})
                     except Exception as e:
                         logger.warning(f"批次持久化失败(非致命): {e}")
 
                 # 在后台线程中运行拉取
                 fetch_task = asyncio.get_event_loop().run_in_executor(
                     None,
-                    lambda: collector.get_market_history_streaming(
+                    lambda: de.get_market_history_streaming(
                         stock_codes,
                         days=req.days,
                         on_progress=on_progress,
@@ -548,7 +494,8 @@ async def get_terrain_history(req: HistoryRequest = HistoryRequest()):
 @router.get("/stocks/search")
 async def search_stocks(q: str = Query(..., min_length=1)):
     """搜索股票（代码/名称模糊匹配）"""
-    pipeline = get_pipeline()
+    ce = get_cluster_engine()
+    pipeline = ce.pipeline
     results = []
 
     if pipeline.last_result and pipeline.last_result.stocks:
@@ -573,14 +520,15 @@ async def run_factor_backtest(
     从 DuckDB 中读取历史快照数据，计算每个因子的 RankIC 时序，
     再用滚动 ICIR 作为自适应权重注入预测器。
 
-    需要先积累 ≥3 天的快照数据（每次「生成3D地形」会自动保存一天）。
+    需要先积累 >=3 天的快照数据（每次「生成3D地形」会自动保存一天）。
     """
     try:
-        store = get_store()
-        pipeline = get_pipeline()
+        de = get_data_engine()
+        ce = get_cluster_engine()
+        pipeline = ce.pipeline
 
         result = await asyncio.to_thread(
-            run_ic_backtest_from_store, store, rolling_window
+            run_ic_backtest_from_store, de.store, rolling_window
         )
 
         # 自动注入权重到 v2 预测器
@@ -622,13 +570,14 @@ async def run_factor_backtest(
 @router.get("/factor/weights")
 async def get_factor_weights():
     """查看当前预测器使用的因子权重"""
-    pipeline = get_pipeline()
+    ce = get_cluster_engine()
+    pipeline = ce.pipeline
     predictor = pipeline.predictor_v2
 
     weights = predictor._get_weights()
     source = predictor._weight_source
 
-    from algorithm.predictor_v2 import FACTOR_DEFS
+    from cluster_engine.algorithm.predictor_v2 import FACTOR_DEFS
     factor_info = []
     for fdef in FACTOR_DEFS:
         factor_info.append({
@@ -647,33 +596,6 @@ async def get_factor_weights():
     }
 
 
-def _try_auto_inject_icir_weights():
-    """
-    启动时自动尝试从历史数据计算 ICIR 权重并注入预测器
-
-    静默失败 — 如果没有足够历史数据，使用默认权重。
-    """
-    try:
-        store = get_store()
-        dates = store.get_snapshot_daily_dates()
-        if len(dates) >= 5:
-            logger.info(f"🔄 检测到 {len(dates)} 天历史快照，自动运行 IC 回测...")
-            result = run_ic_backtest_from_store(store, rolling_window=20)
-            if result.icir_weights:
-                pipeline = get_pipeline()
-                pipeline.predictor_v2.set_icir_weights(result.icir_weights)
-                logger.info("✅ 启动时 ICIR 权重自动注入成功")
-            else:
-                logger.info("ℹ️ IC 回测无显著权重，使用默认权重")
-        else:
-            logger.info(
-                f"ℹ️ 历史快照仅 {len(dates)} 天（<5天），跳过 ICIR 自动校准。"
-                f"多次「生成3D地形」积累数据后将自动启用。"
-            )
-    except Exception as e:
-        logger.warning(f"⚠️ 启动时 ICIR 自动校准跳过: {e}")
-
-
 # ─── WebSocket 实时推送 ───────────────────────────────
 
 
@@ -681,7 +603,7 @@ def _try_auto_inject_icir_weights():
 async def websocket_terrain(ws: WebSocket):
     """
     WebSocket 实时地形推送
-    
+
     连接后自动推送最新地形数据
     客户端可发送 {"action": "refresh"} 触发更新
     """
@@ -691,7 +613,8 @@ async def websocket_terrain(ws: WebSocket):
 
     try:
         # 立即推送最新数据
-        pipeline = get_pipeline()
+        ce = get_cluster_engine()
+        pipeline = ce.pipeline
         if pipeline.last_result:
             await ws.send_json({
                 "type": "terrain_full",
@@ -705,9 +628,9 @@ async def websocket_terrain(ws: WebSocket):
                 msg = json.loads(data)
                 if msg.get("action") == "refresh":
                     z_metric = msg.get("z_metric", "pct_chg")
-                    collector = get_collector()
+                    de = get_data_engine()
                     snapshot = await asyncio.to_thread(
-                        collector.get_realtime_quotes
+                        de.get_realtime_quotes
                     )
                     result = await asyncio.to_thread(
                         pipeline.update_z_axis, snapshot, z_metric

@@ -1,0 +1,199 @@
+<h2>侧边栏布局：你倾向哪种精简方式？</h2>
+<p class="subtitle">当前左右两侧面板控件过多，是视觉杂乱的主因。需要决定如何重新组织。</p>
+
+<div class="split">
+  <!-- Current State -->
+  <div class="mockup">
+    <div class="mockup-header">❌ 当前状态（问题）</div>
+    <div class="mockup-body" style="padding: 16px; background: #f8fafe; min-height: 400px;">
+      <div style="display: flex; gap: 12px; height: 100%;">
+        <!-- Left panel -->
+        <div style="width: 140px; background: white; border-radius: 8px; padding: 8px; font-size: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); overflow: hidden;">
+          <div style="font-weight: 600; font-size: 9px; margin-bottom: 6px;">StockTerrain v3.0</div>
+          <div style="background: #4F8EF7; color: white; border-radius: 4px; padding: 4px 6px; margin-bottom: 6px; font-size: 8px;">🏔️ 生成 3D 地形</div>
+          <div style="border-top: 1px solid #eee; padding-top: 4px; margin-top: 4px;">
+            <div style="color: #9ca3af; font-size: 7px; text-transform: uppercase; margin-bottom: 3px;">📊 Z 轴指标</div>
+            <div style="color: #4F8EF7; font-size: 7px; padding: 2px 4px; background: #eff4ff; border-radius: 3px; margin-bottom: 2px;">📈 涨跌幅</div>
+            <div style="font-size: 7px; padding: 2px 4px; color: #6b7280;">🔄 换手率</div>
+            <div style="font-size: 7px; padding: 2px 4px; color: #6b7280;">📊 成交量</div>
+            <div style="font-size: 7px; padding: 2px 4px; color: #6b7280;">💰 成交额</div>
+            <div style="font-size: 7px; padding: 2px 4px; color: #6b7280;">📋 市盈率</div>
+            <div style="font-size: 7px; padding: 2px 4px; color: #6b7280;">📖 市净率</div>
+            <div style="font-size: 7px; padding: 2px 4px; color: #6b7280;">⚖️ 委比</div>
+            <div style="font-size: 7px; padding: 2px 4px; color: #6b7280;">🔮 上涨概率</div>
+          </div>
+          <div style="border-top: 1px solid #eee; padding-top: 4px; margin-top: 4px;">
+            <div style="color: #9ca3af; font-size: 7px; text-transform: uppercase; margin-bottom: 3px;">🏔️ 地形控制</div>
+            <div style="font-size: 7px; color: #6b7280; margin-bottom: 4px;">高度缩放 <span style="color: #4F8EF7;">×3.5</span></div>
+            <div style="height: 2px; background: #e5e9f0; border-radius: 1px; margin-bottom: 4px;"><div style="width: 50%; height: 100%; background: #4F8EF7; border-radius: 1px;"></div></div>
+            <div style="font-size: 7px; color: #6b7280; margin-bottom: 4px;">核平滑半径 <span style="color: #4F8EF7;">×2.0</span></div>
+            <div style="height: 2px; background: #e5e9f0; border-radius: 1px; margin-bottom: 4px;"><div style="width: 30%; height: 100%; background: #4F8EF7; border-radius: 1px;"></div></div>
+            <div style="font-size: 7px; color: #6b7280; margin-bottom: 4px;">网格分辨率 <span style="color: #4F8EF7;">512²</span></div>
+            <div style="height: 2px; background: #e5e9f0; border-radius: 1px; margin-bottom: 4px;"><div style="width: 60%; height: 100%; background: #4F8EF7; border-radius: 1px;"></div></div>
+            <div style="font-size: 7px; color: #6b7280; margin-bottom: 4px;">XY 整体缩放 <span style="color: #4F8EF7;">×1.5</span></div>
+            <div style="height: 2px; background: #e5e9f0; border-radius: 1px; margin-bottom: 4px;"><div style="width: 40%; height: 100%; background: #4F8EF7; border-radius: 1px;"></div></div>
+            <div style="font-size: 7px; color: #6b7280; margin-bottom: 4px;">X 轴比例 <span style="color: #4F8EF7;">×1.00</span></div>
+            <div style="height: 2px; background: #e5e9f0; border-radius: 1px; margin-bottom: 4px;"><div style="width: 50%; height: 100%; background: #4F8EF7; border-radius: 1px;"></div></div>
+            <div style="font-size: 7px; color: #6b7280; margin-bottom: 4px;">Y 轴比例 <span style="color: #4F8EF7;">×1.00</span></div>
+            <div style="height: 2px; background: #e5e9f0; border-radius: 1px;"><div style="width: 50%; height: 100%; background: #4F8EF7; border-radius: 1px;"></div></div>
+          </div>
+          <div style="border-top: 1px solid #eee; padding-top: 4px; margin-top: 4px;">
+            <div style="color: #9ca3af; font-size: 7px; text-transform: uppercase;">📋 数据概览</div>
+          </div>
+        </div>
+        <!-- Center -->
+        <div style="flex: 1; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #cbd5e1;">[3D]</div>
+        <!-- Right panel -->
+        <div style="width: 130px; background: white; border-radius: 8px; padding: 8px; font-size: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+          <div style="color: #9ca3af; font-size: 7px; text-transform: uppercase; margin-bottom: 3px;">👁️ 显示选项</div>
+          <div style="font-size: 7px; display: flex; justify-content: space-between; margin-bottom: 2px;">股票标签 <span style="color: #4F8EF7;">●</span></div>
+          <div style="font-size: 7px; display: flex; justify-content: space-between; margin-bottom: 2px;">底部网格 <span style="color: #4F8EF7;">●</span></div>
+          <div style="font-size: 7px; display: flex; justify-content: space-between; margin-bottom: 2px;">等高线 <span style="color: #4F8EF7;">●</span></div>
+          <div style="font-size: 7px; display: flex; justify-content: space-between; margin-bottom: 2px;">球体拍平 <span style="color: #ccc;">○</span></div>
+          <div style="font-size: 7px; display: flex; justify-content: space-between; margin-bottom: 6px;">价格垂线 <span style="color: #ccc;">○</span></div>
+          <div style="border-top: 1px solid #eee; padding-top: 4px;">
+            <div style="color: #9ca3af; font-size: 7px; text-transform: uppercase; margin-bottom: 3px;">⚙️ 聚类权重</div>
+            <div style="font-size: 7px; color: #6b7280;">5 个滑块...</div>
+          </div>
+          <div style="border-top: 1px solid #eee; padding-top: 4px; margin-top: 4px;">
+            <div style="color: #9ca3af; font-size: 7px; text-transform: uppercase; margin-bottom: 3px;">📅 历史回放</div>
+            <div style="font-size: 7px; color: #6b7280;">按钮+滑块...</div>
+          </div>
+          <div style="border-top: 1px solid #eee; padding-top: 4px; margin-top: 4px;">
+            <div style="color: #9ca3af; font-size: 7px; text-transform: uppercase; margin-bottom: 3px;">📊 聚类质量</div>
+            <div style="font-size: 7px; color: #6b7280;">评分面板...</div>
+          </div>
+          <div style="border-top: 1px solid #eee; padding-top: 4px; margin-top: 4px;">
+            <div style="color: #9ca3af; font-size: 7px; text-transform: uppercase; margin-bottom: 3px;">🎨 聚类图例</div>
+            <div style="font-size: 7px; color: #6b7280;">N 个簇...</div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top: 12px; font-size: 9px; color: #ef4444; text-align: center;">
+        ⚠️ 左侧 6 个滑块 + 8 个指标按钮 · 右侧 5 个开关 + 5 个滑块 + 回放 + 图例<br>
+        Emoji 图标混杂 · 信息密度过高 · 需要大量滚动
+      </div>
+    </div>
+  </div>
+
+  <!-- Proposed State -->
+  <div class="mockup">
+    <div class="mockup-header">✅ 改造目标</div>
+    <div class="mockup-body" style="padding: 16px; background: linear-gradient(135deg, #f0f4ff, #f8f6ff); min-height: 400px;">
+      <div style="display: flex; gap: 12px; height: 100%; position: relative;">
+        <!-- Single left sidebar -->
+        <div style="width: 150px; background: rgba(255,255,255,0.82); backdrop-filter: blur(20px); border-radius: 12px; border: 1px solid rgba(255,255,255,0.6); padding: 10px; font-size: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.04);">
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
+            <div style="width: 18px; height: 18px; background: linear-gradient(135deg, #4F8EF7, #7B68EE); border-radius: 5px;"></div>
+            <span style="font-weight: 600; font-size: 10px; color: #0f172a;">StockTerrain</span>
+          </div>
+
+          <!-- Primary action -->
+          <div style="background: linear-gradient(135deg, #4F8EF7, #6366f1); color: white; border-radius: 8px; padding: 7px 10px; margin-bottom: 10px; font-size: 8px; font-weight: 500; text-align: center;">生成 3D 地形</div>
+
+          <!-- Metric selector - compact -->
+          <div style="margin-bottom: 8px;">
+            <div style="color: #94a3b8; font-size: 7px; font-weight: 500; margin-bottom: 4px;">Z 轴指标</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px;">
+              <div style="font-size: 7px; padding: 4px 6px; background: rgba(79,142,247,0.1); border-radius: 4px; color: #4F8EF7; text-align: center; font-weight: 500;">涨跌幅</div>
+              <div style="font-size: 7px; padding: 4px 6px; color: #94a3b8; text-align: center;">换手率</div>
+              <div style="font-size: 7px; padding: 4px 6px; color: #94a3b8; text-align: center;">成交量</div>
+              <div style="font-size: 7px; padding: 4px 6px; color: #94a3b8; text-align: center;">成交额</div>
+              <div style="font-size: 7px; padding: 4px 6px; color: #94a3b8; text-align: center;">PE</div>
+              <div style="font-size: 7px; padding: 4px 6px; color: #94a3b8; text-align: center;">PB</div>
+              <div style="font-size: 7px; padding: 4px 6px; color: #94a3b8; text-align: center;">委比</div>
+              <div style="font-size: 7px; padding: 4px 6px; color: #94a3b8; text-align: center; border: 1px dashed rgba(124,92,252,0.3); color: #7C5CFC;">🔮预测</div>
+            </div>
+          </div>
+
+          <!-- Essential sliders only -->
+          <div style="border-top: 1px solid rgba(0,0,0,0.04); padding-top: 6px;">
+            <div style="color: #94a3b8; font-size: 7px; font-weight: 500; margin-bottom: 4px;">视图控制</div>
+            <div style="font-size: 7px; color: #475569; display: flex; justify-content: space-between; margin-bottom: 3px;">高度 <span style="color: #4F8EF7; font-family: monospace;">×3.5</span></div>
+            <div style="height: 3px; background: rgba(0,0,0,0.06); border-radius: 2px; margin-bottom: 6px;"><div style="width: 50%; height: 100%; background: #4F8EF7; border-radius: 2px;"></div></div>
+            <div style="font-size: 7px; color: #475569; display: flex; justify-content: space-between; margin-bottom: 3px;">缩放 <span style="color: #4F8EF7; font-family: monospace;">×1.5</span></div>
+            <div style="height: 3px; background: rgba(0,0,0,0.06); border-radius: 2px;"><div style="width: 40%; height: 100%; background: #4F8EF7; border-radius: 2px;"></div></div>
+          </div>
+
+          <!-- Display toggles - icon row -->
+          <div style="border-top: 1px solid rgba(0,0,0,0.04); padding-top: 6px; margin-top: 6px;">
+            <div style="color: #94a3b8; font-size: 7px; font-weight: 500; margin-bottom: 4px;">显示</div>
+            <div style="display: flex; gap: 3px; flex-wrap: wrap;">
+              <div style="width: 22px; height: 22px; background: rgba(79,142,247,0.1); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #4F8EF7;">T</div>
+              <div style="width: 22px; height: 22px; background: rgba(79,142,247,0.1); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #4F8EF7;">G</div>
+              <div style="width: 22px; height: 22px; background: rgba(0,0,0,0.03); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #94a3b8;">C</div>
+              <div style="width: 22px; height: 22px; background: rgba(0,0,0,0.03); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #94a3b8;">F</div>
+              <div style="width: 22px; height: 22px; background: rgba(0,0,0,0.03); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #94a3b8;">L</div>
+            </div>
+          </div>
+
+          <!-- Cluster legend - compact -->
+          <div style="border-top: 1px solid rgba(0,0,0,0.04); padding-top: 6px; margin-top: 6px;">
+            <div style="color: #94a3b8; font-size: 7px; font-weight: 500; margin-bottom: 4px;">聚类</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 3px;">
+              <div style="display: flex; align-items: center; gap: 2px; font-size: 7px; color: #475569;"><div style="width: 6px; height: 6px; background: #4F8EF7; border-radius: 50%;"></div>科技 128</div>
+              <div style="display: flex; align-items: center; gap: 2px; font-size: 7px; color: #475569;"><div style="width: 6px; height: 6px; background: #FF7E67; border-radius: 50%;"></div>金融 95</div>
+              <div style="display: flex; align-items: center; gap: 2px; font-size: 7px; color: #475569;"><div style="width: 6px; height: 6px; background: #6DD47E; border-radius: 50%;"></div>消费 87</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Center 3D -->
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+          <!-- Top bar -->
+          <div style="background: rgba(255,255,255,0.82); backdrop-filter: blur(20px); border-radius: 10px; border: 1px solid rgba(255,255,255,0.6); padding: 7px 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
+            <div style="font-size: 8px; color: #94a3b8; background: rgba(0,0,0,0.03); padding: 3px 10px; border-radius: 6px;">⌘K 搜索股票</div>
+            <div style="display: flex; gap: 10px; font-size: 8px; font-family: monospace;">
+              <span>5,000</span>
+              <span style="color: #ef4444;">▲2,847</span>
+              <span style="color: #10b981;">▼1,653</span>
+            </div>
+          </div>
+          <!-- 3D -->
+          <div style="flex: 1; display: flex; align-items: center; justify-content: center; min-height: 200px; background: radial-gradient(ellipse at 30% 20%, rgba(79,142,247,0.06), transparent 60%);">
+            <div style="font-size: 10px; color: #cbd5e1;">[ 3D Terrain — 更大的可视区域 ]</div>
+          </div>
+        </div>
+
+        <!-- Bottom floating bar for secondary actions -->
+        <div style="position: absolute; bottom: 0; left: 170px; right: 10px; background: rgba(255,255,255,0.9); backdrop-filter: blur(16px); border-radius: 10px; border: 1px solid rgba(255,255,255,0.6); padding: 6px 12px; display: flex; align-items: center; justify-content: center; gap: 16px; font-size: 8px; box-shadow: 0 -2px 12px rgba(0,0,0,0.04);">
+          <span style="color: #475569; cursor: pointer;">⏮ 回放</span>
+          <span style="color: #94a3b8;">|</span>
+          <span style="color: #475569; cursor: pointer;">⚙ 高级设置</span>
+          <span style="color: #94a3b8;">|</span>
+          <span style="color: #475569; cursor: pointer;">📊 质量</span>
+        </div>
+      </div>
+      <div style="margin-top: 12px; font-size: 9px; color: #10b981; text-align: center;">
+        ✓ 仅一个侧边栏 · 控件精简分层 · 无 emoji · 右侧留给 3D<br>
+        ✓ 高级设置隐藏在底部浮动栏 · 二级面板按需弹出
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3 style="margin-top: 32px;">核心改动点</h3>
+
+<div class="options">
+  <div class="option" data-choice="layout-a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>单左侧栏 + 底部浮动工具栏</h3>
+      <p>取消右侧面板，所有核心控件放左侧。高级设置（聚类权重、回放、质量评分）移到底部浮动栏，点击弹出面板。3D 可视区域最大化。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="layout-b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>单左侧栏 + 右侧按需面板</h3>
+      <p>取消右侧常驻面板，改为点击时滑出（如选中股票后滑出详情，点击"高级"后滑出设置）。大多数时候右侧完全留给 3D。</p>
+    </div>
+  </div>
+  <div class="option" data-choice="layout-c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>保持双栏，但大幅精简</h3>
+      <p>保留左右面板结构，但压缩内容：左侧只放指标+2个核心滑块，右侧只放显示开关+聚类图例。其余移到弹出层。</p>
+    </div>
+  </div>
+</div>

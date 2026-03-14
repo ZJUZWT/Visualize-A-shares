@@ -1,0 +1,135 @@
+<h2>你想要的"清新"风格是哪种方向？</h2>
+<p class="subtitle">这决定了整个改造的基调 — 请选择最接近你心目中的风格</p>
+
+<div class="cards">
+  <!-- Option A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 50%, #f8f6ff 100%); padding: 24px; min-height: 280px;">
+      <!-- Glassmorphism Dashboard Mockup -->
+      <div style="display: flex; gap: 12px; height: 100%;">
+        <!-- Left sidebar -->
+        <div style="width: 140px; background: rgba(255,255,255,0.7); backdrop-filter: blur(20px); border-radius: 12px; border: 1px solid rgba(255,255,255,0.8); padding: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.04);">
+          <div style="font-size: 11px; font-weight: 600; color: #1a1d26; margin-bottom: 12px;">StockTerrain</div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="font-size: 9px; padding: 6px 8px; background: rgba(79,142,247,0.1); border-radius: 6px; color: #4F8EF7;">▣ 涨跌幅</div>
+            <div style="font-size: 9px; padding: 6px 8px; color: #6b7280;">▣ 换手率</div>
+            <div style="font-size: 9px; padding: 6px 8px; color: #6b7280;">▣ 成交量</div>
+          </div>
+          <div style="margin-top: 16px; height: 4px; background: rgba(0,0,0,0.06); border-radius: 2px;">
+            <div style="width: 60%; height: 100%; background: #4F8EF7; border-radius: 2px;"></div>
+          </div>
+          <div style="font-size: 8px; color: #9ca3af; margin-top: 4px;">高度缩放 ×3.5</div>
+        </div>
+        <!-- Main area -->
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+          <!-- Top bar -->
+          <div style="background: rgba(255,255,255,0.7); backdrop-filter: blur(20px); border-radius: 10px; border: 1px solid rgba(255,255,255,0.8); padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
+            <div style="font-size: 9px; color: #9ca3af;">🔍 搜索股票...</div>
+            <div style="display: flex; gap: 8px; font-size: 9px;">
+              <span style="color: #ef4444;">▲ 2,847</span>
+              <span style="color: #10b981;">▼ 1,653</span>
+            </div>
+          </div>
+          <!-- 3D area placeholder -->
+          <div style="flex: 1; background: radial-gradient(ellipse at 30% 20%, rgba(79,142,247,0.08), transparent 60%), radial-gradient(ellipse at 70% 80%, rgba(123,104,238,0.05), transparent 50%); border-radius: 10px; display: flex; align-items: center; justify-content: center; min-height: 120px;">
+            <div style="font-size: 10px; color: #9ca3af; opacity: 0.6;">[ 3D Terrain ]</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. Apple visionOS 毛玻璃风</h3>
+      <p>在现有基础上精炼：更轻薄的毛玻璃面板、柔和渐变背景、精致的内发光边框。像 Apple 设计系统那样通透、轻盈。改动最小，风险最低。</p>
+    </div>
+  </div>
+
+  <!-- Option B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: #fafbfd; padding: 24px; min-height: 280px;">
+      <!-- Linear-style Flat Minimal -->
+      <div style="display: flex; gap: 1px; height: 100%; background: #e5e9f0; border-radius: 10px; overflow: hidden;">
+        <!-- Left panel -->
+        <div style="width: 140px; background: #fafbfd; padding: 12px;">
+          <div style="font-size: 11px; font-weight: 600; color: #0f172a; margin-bottom: 16px; display: flex; align-items: center; gap: 6px;">
+            <div style="width: 16px; height: 16px; background: linear-gradient(135deg, #4F8EF7, #7B68EE); border-radius: 4px;"></div>
+            ST
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 2px;">
+            <div style="font-size: 9px; padding: 6px 8px; background: #f1f5f9; border-radius: 6px; color: #0f172a; font-weight: 500;">涨跌幅</div>
+            <div style="font-size: 9px; padding: 6px 8px; color: #94a3b8;">换手率</div>
+            <div style="font-size: 9px; padding: 6px 8px; color: #94a3b8;">成交量</div>
+          </div>
+          <div style="margin-top: 16px; border-top: 1px solid #e5e9f0; padding-top: 8px;">
+            <div style="font-size: 8px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Controls</div>
+            <div style="height: 3px; background: #e5e9f0; border-radius: 2px;">
+              <div style="width: 50%; height: 100%; background: #475569; border-radius: 2px;"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Main content -->
+        <div style="flex: 1; background: #fafbfd; display: flex; flex-direction: column;">
+          <!-- Top bar - minimal -->
+          <div style="padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e5e9f0;">
+            <div style="font-size: 9px; color: #94a3b8; background: #f1f5f9; padding: 4px 10px; border-radius: 6px;">⌘K 搜索</div>
+            <div style="display: flex; gap: 12px; font-size: 9px; font-family: monospace;">
+              <span style="color: #ef4444;">2,847↑</span>
+              <span style="color: #10b981;">1,653↓</span>
+              <span style="color: #94a3b8;">500—</span>
+            </div>
+          </div>
+          <!-- 3D area -->
+          <div style="flex: 1; display: flex; align-items: center; justify-content: center; min-height: 140px;">
+            <div style="font-size: 10px; color: #cbd5e1;">[ 3D Terrain ]</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. Linear / Vercel 极简扁平风</h3>
+      <p>去掉毛玻璃，采用纯白+极细分割线。Cmd+K 命令面板搜索、单色图标、紧凑排版。像 Linear 或 Notion 那样克制、专业。改动中等。</p>
+    </div>
+  </div>
+
+  <!-- Option C -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); padding: 24px; min-height: 280px;">
+      <!-- Dark + Glow -->
+      <div style="display: flex; gap: 12px; height: 100%;">
+        <!-- Left sidebar -->
+        <div style="width: 140px; background: rgba(255,255,255,0.06); border-radius: 10px; border: 1px solid rgba(255,255,255,0.08); padding: 12px;">
+          <div style="font-size: 11px; font-weight: 600; color: #e2e8f0; margin-bottom: 12px;">StockTerrain</div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="font-size: 9px; padding: 6px 8px; background: rgba(79,142,247,0.15); border: 1px solid rgba(79,142,247,0.3); border-radius: 6px; color: #93c5fd;">涨跌幅</div>
+            <div style="font-size: 9px; padding: 6px 8px; color: #64748b;">换手率</div>
+          </div>
+          <div style="margin-top: 16px; height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px;">
+            <div style="width: 60%; height: 100%; background: linear-gradient(90deg, #4F8EF7, #7C5CFC); border-radius: 2px; box-shadow: 0 0 8px rgba(79,142,247,0.4);"></div>
+          </div>
+        </div>
+        <!-- Main area -->
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+          <div style="background: rgba(255,255,255,0.04); border-radius: 8px; border: 1px solid rgba(255,255,255,0.06); padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 9px; color: #64748b;">搜索...</div>
+            <div style="display: flex; gap: 8px; font-size: 9px;">
+              <span style="color: #f87171;">▲ 2,847</span>
+              <span style="color: #34d399;">▼ 1,653</span>
+            </div>
+          </div>
+          <div style="flex: 1; background: radial-gradient(ellipse at center, rgba(79,142,247,0.06), transparent 70%); border-radius: 8px; display: flex; align-items: center; justify-content: center; min-height: 120px;">
+            <div style="font-size: 10px; color: #475569;">[ 3D Terrain ]</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. 暗色科技风（Raycast / GitHub Dark）</h3>
+      <p>深色背景 + 发光强调色、微光边框。让 3D 地形成为舞台焦点，UI 退到暗处。视觉冲击力最强，但跟"清新"的方向不太一致。改动量大。</p>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top: 24px; padding: 16px; background: rgba(79,142,247,0.05); border-radius: 10px; border: 1px solid rgba(79,142,247,0.1);">
+  <p style="font-size: 12px; color: #475569; margin: 0;">
+    <strong>💡 我的建议：</strong>方案 A 最符合"清新"的气质，且在你现有代码基础上改动最小。方案 B 是目前最流行的专业工具风格。你也可以混搭 — 比如 A 的毛玻璃 + B 的极简图标和排版。
+  </p>
+</div>
