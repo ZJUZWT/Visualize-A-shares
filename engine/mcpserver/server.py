@@ -48,7 +48,7 @@ server = FastMCP(
 _da = DataAccess()
 
 
-# ─── 注册 15 个 Tool ──────────────────────────────────
+# ─── 注册 18 个 Tool ──────────────────────────────────
 
 @server.tool()
 def query_market_overview() -> str:
@@ -133,6 +133,26 @@ def get_factor_scores(code: str) -> str:
 def get_signal_history(code: str, days: int = 30) -> str:
     """查询个股历史量化信号记录。返回最近 N 天的买卖信号。Phase 1 返回空列表。"""
     return tools.get_signal_history(_da, code, days)
+
+
+# ─── InfoEngine Tools ──────────────────────────────
+
+@server.tool()
+def get_news(code: str, limit: int = 20) -> str:
+    """获取个股新闻 + 情感分析。返回新闻列表（含情感标注 positive/negative/neutral）和情感统计。code 示例: '600519'"""
+    return tools.get_news(_da, code, limit)
+
+
+@server.tool()
+def get_announcements(code: str, limit: int = 10) -> str:
+    """获取公司公告 + 情感分析。返回公告列表和情感标注。code 示例: '600519'"""
+    return tools.get_announcements(_da, code, limit)
+
+
+@server.tool()
+def assess_event_impact(code: str, event_desc: str) -> str:
+    """评估事件对个股的影响。需要描述具体事件内容。返回影响方向(positive/negative/neutral)、强度(high/medium/low)和推理过程。"""
+    return tools.assess_event_impact(_da, code, event_desc)
 
 
 # ─── Agent Tools ────────────────────────────────────
