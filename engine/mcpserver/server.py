@@ -48,7 +48,7 @@ server = FastMCP(
 _da = DataAccess()
 
 
-# ─── 注册 10 个 Tool ──────────────────────────────────
+# ─── 注册 15 个 Tool ──────────────────────────────────
 
 @server.tool()
 def query_market_overview() -> str:
@@ -113,6 +113,40 @@ def run_backtest(rolling_window: int = 20, auto_inject: bool = False) -> str:
 def compute_terrain(z_metric: str = "pct_chg", radius_scale: float = 2.0) -> str:
     """触发全量地形计算（仅在线模式）。拉取全市场行情 → 聚类 → 降维 → 插值。返回计算摘要（不含网格数据）。"""
     return tools.compute_terrain(_da, z_metric, radius_scale)
+
+
+# ─── QuantEngine Tools ──────────────────────────────
+
+@server.tool()
+def get_technical_indicators(code: str) -> str:
+    """获取个股技术指标（RSI/MACD/布林带）。需要有日线历史数据。code 示例: '600519'"""
+    return tools.get_technical_indicators(_da, code)
+
+
+@server.tool()
+def get_factor_scores(code: str) -> str:
+    """获取个股多因子评分（13个因子的值、方向、权重）。code 示例: '600519'"""
+    return tools.get_factor_scores(_da, code)
+
+
+@server.tool()
+def get_signal_history(code: str, days: int = 30) -> str:
+    """查询个股历史量化信号记录。返回最近 N 天的买卖信号。Phase 1 返回空列表。"""
+    return tools.get_signal_history(_da, code, days)
+
+
+# ─── Agent Tools ────────────────────────────────────
+
+@server.tool()
+def submit_analysis(code: str, depth: str = "standard") -> str:
+    """触发 AI Multi-Agent 分析。返回分析请求状态。depth: 'quick'|'standard'|'deep'。需要配置 LLM API Key。"""
+    return tools.submit_analysis(code, depth)
+
+
+@server.tool()
+def get_analysis_history(code: str, limit: int = 5) -> str:
+    """查询个股的历史 AI 分析报告。返回最近 N 条分析结果。"""
+    return tools.get_analysis_history(code, limit)
 
 
 # ─── 入口 ─────────────────────────────────────────────
