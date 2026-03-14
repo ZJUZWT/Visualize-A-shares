@@ -1135,3 +1135,9 @@ def assess_event_impact(da: "DataAccess", code: str, event_desc: str) -> str:
         return json.dumps(impact.model_dump(), ensure_ascii=False, indent=2)
     except Exception as e:
         return json.dumps({"error": f"事件评估失败: {e}"}, ensure_ascii=False)
+
+
+# TODO Phase 4: full_analysis 组合工具（预留，本次不实现）
+# def full_analysis(da: DataAccess, code: str) -> str:
+#     """并行调用三引擎数据聚合，返回结构化 Markdown 报告（不调 LLM，推理留给 MCP 调用方）"""
+#     pass
