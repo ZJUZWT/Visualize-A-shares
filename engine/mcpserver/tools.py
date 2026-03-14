@@ -533,7 +533,7 @@ def query_factor_analysis(da: DataAccess, factor_name: str | None = None) -> str
             return "\n".join(lines)
 
     # 离线：从代码常量读取
-    from cluster_engine.algorithm.predictor_v2 import FACTOR_DEFS
+    from quant_engine.predictor import FACTOR_DEFS
 
     if factor_name:
         matched = [f for f in FACTOR_DEFS if f.name == factor_name]
@@ -849,7 +849,7 @@ def run_backtest(
 
     # 离线：本地计算
     try:
-        from cluster_engine.algorithm.factor_backtest import FactorBacktester
+        from quant_engine.factor_backtest import FactorBacktester
 
         daily_snapshots = da.get_snapshot_daily_range(30)
         if len(daily_snapshots) < 3:

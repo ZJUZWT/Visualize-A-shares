@@ -17,7 +17,7 @@ from loguru import logger
 from data_engine import get_data_engine
 from cluster_engine import get_cluster_engine
 from cluster_engine.schemas import TerrainResponse, ComputeRequest, HealthResponse, HistoryRequest, HistoryResponse, HistoryFrame
-from cluster_engine.algorithm.factor_backtest import run_ic_backtest_from_store
+from quant_engine.factor_backtest import run_ic_backtest_from_store
 
 router = APIRouter(prefix="/api/v1", tags=["terrain"])
 
@@ -577,7 +577,7 @@ async def get_factor_weights():
     weights = predictor._get_weights()
     source = predictor._weight_source
 
-    from cluster_engine.algorithm.predictor_v2 import FACTOR_DEFS
+    from quant_engine.predictor import FACTOR_DEFS
     factor_info = []
     for fdef in FACTOR_DEFS:
         factor_info.append({
