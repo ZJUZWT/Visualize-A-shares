@@ -20,7 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from config import settings
-from api.routes.terrain import router as terrain_router
+from data_engine.routes import router as data_router
+from cluster_engine.routes import router as cluster_router
 from api.routes.chat import router as chat_router
 
 # ─── 配置日志 ──────────────────────────────────────────
@@ -56,7 +57,8 @@ app.add_middleware(
 )
 
 # ─── 注册路由 ─────────────────────────────────────────
-app.include_router(terrain_router)
+app.include_router(data_router)
+app.include_router(cluster_router)
 app.include_router(chat_router)
 
 
@@ -76,8 +78,8 @@ async def startup():
 
     # 自动尝试 ICIR 权重校准（静默失败）
     try:
-        from api.routes.terrain import _try_auto_inject_icir_weights
-        _try_auto_inject_icir_weights()
+        from cluster_engine import get_cluster_engine
+        get_cluster_engine().try_auto_inject_icir_weights()
     except Exception as e:
         logger.warning(f"⚠️ ICIR 自动校准跳过: {e}")
 
@@ -106,6 +108,10 @@ async def root():
             "chat": "POST /api/v1/chat (SSE 流式)",
             "chat_sync": "POST /api/v1/chat/sync",
             "chat_config": "GET/POST /api/v1/chat/config",
+            "data_health": "GET /api/v1/data/health",
+            "data_snapshot": "GET /api/v1/data/snapshot",
+            "data_daily": "GET /api/v1/data/daily/{code}",
+            "data_profiles": "GET /api/v1/data/profiles",
         },
     }
 
