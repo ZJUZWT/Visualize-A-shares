@@ -97,6 +97,16 @@ class ChromaDBConfig(BaseModel):
     retention_days: int = 90
 
 
+# ─── 信息引擎配置 ─────────────────────────────────────
+class InfoConfig(BaseModel):
+    """信息引擎配置"""
+    news_cache_hours: int = 24
+    announcement_cache_hours: int = 48
+    default_news_limit: int = 50
+    default_announcement_limit: int = 20
+    sentiment_mode: str = "auto"  # "auto" | "llm" | "rules"
+
+
 # ─── 聚合配置 ───────────────────────────────────────────
 class AppConfig(BaseModel):
     datasource: DataSourceConfig = DataSourceConfig()
@@ -108,6 +118,7 @@ class AppConfig(BaseModel):
     redis: RedisConfig = RedisConfig()
     quant: QuantConfig = QuantConfig()
     chromadb: ChromaDBConfig = ChromaDBConfig()
+    info: InfoConfig = InfoConfig()
 
 
 # 全局单例
