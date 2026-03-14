@@ -369,6 +369,24 @@ async def speak(
 
 **错误处理策略：** 辩论者（`bull_expert`/`bear_expert`）失败时使用 `stance="insist"` 的默认条目，确保辩论不中断。观察员失败时默认 `speak=False`。失败信息记录到 Loguru 日志，不向前端暴露。
 
+**`validate_data_requests` 行为契约：**
+- 过滤掉不在 `DEBATE_DATA_WHITELIST[role]` 中的 action，记录 warning 日志
+- 超出 `MAX_DATA_REQUESTS_PER_ROLE_PER_ROUND` 的请求静默截断（保留前 N 条）
+- 返回通过验证的 `list[DataRequest]`，不抛出异常
+
+**`fulfill_data_requests` 行为契约：**
+- 对每条 `DataRequest` 调用 `DataFetcher.fetch_by_request(req)`
+- 将结果写入 `req.result`，更新 `req.status = "done"`
+- 单条请求失败时设 `req.status = "failed"`，`req.result = error_message`，继续处理其余请求（不中断）
+- 全部完成后返回，不抛出异常
+
+**`judge_summarize` 字段注入：** LLM 只生成 `summary`、`signal`、`score`、`key_arguments`、`bull_core_thesis`、`bear_core_thesis`、`retail_sentiment_note`、`smart_money_note`、`risk_warnings`、`debate_quality` 这 10 个字段。`target`、`debate_id`、`termination_reason`、`timestamp` 四个字段由 `judge_summarize()` 在解析 LLM 输出后从 Blackboard 中注入，不由 LLM 生成。
+
+**`persist_debate` 行为契约：**
+- 将 `Blackboard` 和 `JudgeVerdict` 分别序列化写入 `shared.debate_records`
+- 同时将 `JudgeVerdict` 写入 `shared.analysis_reports`（与普通分析报告统一存档）
+- 持久化异常时只记录 warning 日志，**不重新抛出**——此时 `judge_verdict` SSE 事件已推送给客户端，持久化失败属于可接受的数据丢失，不应影响用户响应
+
 ### 4.3 认输后的行为
 
 - 当某方 `stance == "concede"` 时，当轮**剩余角色仍正常发言**，不立即中断
@@ -515,6 +533,7 @@ async def speak(
 - risk_warnings 必须具体，至少包含一条，不允许"市场有不确定性"此类泛泛表述
 
 ## 输出格式（严格 JSON，不含 markdown 代码块）
+// 注意：target、debate_id、termination_reason、timestamp 由调用代码注入，无需输出
 {
   "summary": "...",
   "signal": "bullish" | "bearish" | "neutral" | null,
@@ -583,7 +602,7 @@ data: { "debate_id": "...", "summary": "...", "signal": "bullish", "score": 0.65
 | `get_debate_transcript` | 获取辩论记录，支持按轮次和角色过滤 | `debate_id: str`, `round: int = None`, `role: str = None` |
 | `get_judge_verdict` | 获取裁判最终总结（辩论 completed 后可用） | `debate_id: str` |
 
-**`debate_id` 格式：** `"{stock_code}_{YYYYMMDDHHMMSS}"`，由 Orchestrator 在初始化 Blackboard 时使用 `datetime.now().strftime` 生成。`debate_start` SSE 事件中携带，客户端存储后用于后续查询。同一股票并发发起多个辩论时，时间戳天然区分，两个独立实例互不影响。
+**`debate_id` 格式：** `"{stock_code}_{YYYYMMDDHHMMSS}"`，由 Orchestrator 在初始化 Blackboard 时使用 `datetime.now(tz=ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d%H%M%S")` 生成。`debate_start` SSE 事件中携带，客户端存储后用于后续查询。同一股票并发发起多个辩论时，时间戳天然区分（1 秒内并发触发两次辩论属于已知极端边缘情况，接受重复 id 风险，不做额外处理）。
 
 ---
 
