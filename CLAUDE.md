@@ -6,12 +6,19 @@
 - `data/precomputed/` — BGE 嵌入向量、公司概况 JSON
 
 ## 后端核心模块
-- `engine/algorithm/pipeline.py` — 算法流水线 (特征→聚类→降维→插值)
-- `engine/algorithm/predictor_v2.py` — 13因子预测器, `FACTOR_DEFS` 常量
-- `engine/algorithm/factor_backtest.py` — 因子 IC 回测
-- `engine/storage/duckdb_store.py` — DuckDB 持久化
-- `engine/api/routes/terrain.py` — REST API (含 SSE 流式)
+- `engine/data_engine/` — 数据引擎 (行情拉取、DuckDB 持久化、公司概况)
+  - `engine.py` DataEngine 门面类
+  - `collector.py` 数据采集器 (Tencent/AKShare/BaoStock 三级降级)
+  - `store.py` DuckDB 持久化
+  - `routes.py` REST API `/api/v1/data/*`
+- `engine/cluster_engine/` — 聚类引擎 (特征提取、聚类、降维、插值、预测)
+  - `engine.py` ClusterEngine 门面类
+  - `algorithm/pipeline.py` 算法流水线 (特征→聚类→降维→插值)
+  - `algorithm/predictor_v2.py` 13因子预测器
+  - `algorithm/factor_backtest.py` 因子 IC 回测
+  - `routes.py` REST API `/api/v1/terrain/*`
 - `engine/mcpserver/` — MCP Server (10 tools, stdio transport)
+- `engine/llm/` — LLM 模块 (AI 聊天)
 
 ## 开发约定
 - 中文注释和日志
@@ -24,6 +31,7 @@
 - 后端: `cd engine && python main.py` (端口 8000)
 - 前端: `cd web && npm run dev` (端口 3000)
 - MCP: `cd engine && python -m mcpserver` (stdio, 配置见 `.mcp.json`)
+- 重建嵌入: `cd engine && python -m cluster_engine.preprocess.rebuild_bge`
 
 ## MCP 使用须知
 - 使用 MCP 工具前必须先启动后端 (`cd engine && python main.py`)
