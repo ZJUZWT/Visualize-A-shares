@@ -13,14 +13,19 @@ def get_orchestrator() -> Orchestrator:
     if _orchestrator is None:
         from llm.config import llm_settings
         from llm.providers import LLMProviderFactory
+        from llm.capability import LLMCapability
         from config import settings
-
-        if not llm_settings.api_key:
-            raise RuntimeError("LLM API Key 未配置。请设置环境变量 LLM_API_KEY 或在 .env 中配置。")
-
-        provider = LLMProviderFactory.create(llm_settings)
+        from data_engine import get_data_engine
+        from rag import get_rag_store
+        de = get_data_engine()
+        provider = LLMProviderFactory.create(llm_settings) if llm_settings.api_key else None
+        llm_cap = LLMCapability(provider=provider, cache_store=de.store)
         memory = AgentMemory(persist_dir=settings.chromadb.persist_dir)
-        _orchestrator = Orchestrator(llm_provider=provider, memory=memory)
+        _orchestrator = Orchestrator(
+            llm_capability=llm_cap,
+            memory=memory,
+            rag_store=get_rag_store(),
+        )
     return _orchestrator
 
 

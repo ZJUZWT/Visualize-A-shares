@@ -5,8 +5,22 @@
 
 import asyncio
 import datetime
+import importlib
+from typing import Any
 
 from loguru import logger
+
+
+ACTION_DISPATCH: dict[str, tuple[str, str, str, bool]] = {
+    # action → (module_name, getter_fn, method_name, is_async)
+    "get_stock_info":           ("data_engine",    "get_data_engine",    "get_profile",           False),
+    "get_daily_history":        ("data_engine",    "get_data_engine",    "get_daily_history",     False),
+    "get_technical_indicators": ("quant_engine",   "get_quant_engine",   "compute_indicators",    False),
+    "get_factor_scores":        ("quant_engine",   "get_quant_engine",   "get_factor_scores",     False),
+    "get_news":                 ("info_engine",    "get_info_engine",    "get_news",              True),
+    "get_announcements":        ("info_engine",    "get_info_engine",    "get_announcements",     True),
+    "get_cluster_for_stock":    ("cluster_engine", "get_cluster_engine", "get_cluster_for_stock", False),
+}
 
 
 class DataFetcher:
@@ -88,3 +102,20 @@ class DataFetcher:
             "info": info_data,
             "quant": quant_data,
         }
+
+    async def fetch_by_request(self, req) -> Any:
+        """按 DataRequest 路由到对应引擎方法
+
+        ACTION_DISPATCH 中未知 action 抛出 ValueError。
+        sync 方法用 asyncio.to_thread() 包装；async 方法直接 await。
+        """
+        if req.action not in ACTION_DISPATCH:
+            raise ValueError(f"不支持的 action: {req.action}")
+        module_name, getter_fn, method_name, is_async = ACTION_DISPATCH[req.action]
+        mod = importlib.import_module(module_name)
+        engine = getattr(mod, getter_fn)()
+        method = getattr(engine, method_name)
+        if is_async:
+            return await method(**req.params)
+        else:
+            return await asyncio.to_thread(method, **req.params)
