@@ -172,9 +172,9 @@ def get_analysis_history(code: str, limit: int = 5) -> str:
 # ─── Debate Tools ────────────────────────────────────
 
 @server.tool()
-def start_debate(code: str, max_rounds: int = 3) -> str:
+def start_debate(code: str | int, max_rounds: int = 3) -> str:
     """发起专家辩论（多头 vs 空头 + 散户/主力观察员 + 裁判）。需要后端在线且配置 LLM API Key。code 示例: '600519'"""
-    return tools.start_debate(_da, code, max_rounds)
+    return tools.start_debate(_da, str(code), max_rounds)
 
 
 @server.tool()
