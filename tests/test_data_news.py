@@ -93,3 +93,74 @@ class TestAKShareNewsSource:
             assert len(df) == 1
             assert "title" in df.columns
             assert "type" in df.columns
+
+
+class TestDataCollectorNews:
+    """DataCollector 新闻降级编排测试"""
+
+    def test_get_stock_news_delegates_to_source(self):
+        from data_engine.collector import DataCollector
+
+        collector = DataCollector.__new__(DataCollector)
+        mock_source = MagicMock()
+        mock_source.get_stock_news.return_value = pd.DataFrame({"title": ["test"]})
+        mock_source.priority = 0
+        mock_source.name = "mock"
+        collector._sources = [mock_source]
+
+        df = collector.get_stock_news("600519", limit=10)
+        assert len(df) == 1
+        mock_source.get_stock_news.assert_called_once_with("600519", 10)
+
+    def test_get_stock_news_fallback_on_not_implemented(self):
+        from data_engine.collector import DataCollector
+
+        collector = DataCollector.__new__(DataCollector)
+        source1 = MagicMock()
+        source1.get_stock_news.side_effect = NotImplementedError
+        source1.name = "source1"
+        source2 = MagicMock()
+        source2.get_stock_news.return_value = pd.DataFrame({"title": ["from source2"]})
+        source2.name = "source2"
+        collector._sources = [source1, source2]
+
+        df = collector.get_stock_news("600519")
+        assert len(df) == 1
+
+    def test_get_stock_news_all_fail_returns_empty(self):
+        from data_engine.collector import DataCollector
+
+        collector = DataCollector.__new__(DataCollector)
+        source1 = MagicMock()
+        source1.get_stock_news.side_effect = Exception("fail")
+        source1.name = "source1"
+        collector._sources = [source1]
+
+        df = collector.get_stock_news("600519")
+        assert df.empty
+
+
+class TestDataEngineNews:
+    """DataEngine 门面新闻方法测试"""
+
+    def test_get_news_delegates_to_collector(self):
+        from data_engine.engine import DataEngine
+
+        engine = DataEngine.__new__(DataEngine)
+        engine._collector = MagicMock()
+        engine._collector.get_stock_news.return_value = pd.DataFrame({"title": ["test"]})
+
+        df = engine.get_news("600519", limit=20)
+        assert len(df) == 1
+        engine._collector.get_stock_news.assert_called_once_with("600519", 20)
+
+    def test_get_announcements_delegates_to_collector(self):
+        from data_engine.engine import DataEngine
+
+        engine = DataEngine.__new__(DataEngine)
+        engine._collector = MagicMock()
+        engine._collector.get_announcements.return_value = pd.DataFrame({"title": ["公告"]})
+
+        df = engine.get_announcements("600519", limit=10)
+        assert len(df) == 1
+        engine._collector.get_announcements.assert_called_once_with("600519", 10)

@@ -62,6 +62,11 @@ class DataEngine:
         # 本地无数据，尝试网络拉取
         df = self._collector.get_daily_history(code, start, end)
         if df is not None and len(df) > 0:
+            # 补齐 save_daily 所需的列
+            if "code" not in df.columns:
+                df["code"] = code
+            if "turnover_rate" not in df.columns:
+                df["turnover_rate"] = 0.0
             self._store.save_daily(df)
         return df if df is not None else pd.DataFrame()
 
@@ -111,6 +116,16 @@ class DataEngine:
     def get_financial_data(self, code: str, year: int, quarter: int) -> pd.DataFrame:
         """获取季频财务数据（逐级降级）"""
         return self._collector.get_financial_data(code, year, quarter)
+
+    # ── 新闻/公告 ──
+
+    def get_news(self, code: str, limit: int = 50) -> pd.DataFrame:
+        """获取个股新闻（原始数据，不含情感分析）"""
+        return self._collector.get_stock_news(code, limit)
+
+    def get_announcements(self, code: str, limit: int = 20) -> pd.DataFrame:
+        """获取公司公告（原始数据）"""
+        return self._collector.get_announcements(code, limit)
 
     # ── 快照历史（回放用）──
 
