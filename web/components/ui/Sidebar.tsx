@@ -13,6 +13,23 @@ import { useState } from "react";
 import { useTerrainStore } from "@/stores/useTerrainStore";
 import { Z_METRIC_LABELS, Z_METRIC_ICONS, CLUSTER_COLORS, NOISE_COLOR } from "@/types/terrain";
 import type { ZMetric } from "@/types/terrain";
+import {
+  BarChart3, Mountain, FileText, Eye, Settings2, History,
+  Activity, Palette, TrendingUp, RefreshCw, DollarSign,
+  BookOpen, Scale, Sparkles, Tag, Grid3x3, Waves, Minimize2, GripVertical,
+} from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+
+const METRIC_ICON_COMPONENTS: Record<ZMetric, React.ComponentType<{ className?: string }>> = {
+  pct_chg: TrendingUp,
+  turnover_rate: RefreshCw,
+  volume: BarChart3,
+  amount: DollarSign,
+  pe_ttm: FileText,
+  pb: BookOpen,
+  wb_ratio: Scale,
+  rise_prob: Sparkles,
+};
 
 export default function Sidebar() {
   return (
@@ -589,7 +606,6 @@ function RightPanel() {
           <div className="flex flex-col gap-1">
             {terrainData.clusters
               .filter((c) => !c.is_noise)
-              .slice(0, 15)
               .map((cluster, i) => (
                 <ClusterLegendItem
                   key={cluster.cluster_id}
@@ -628,7 +644,7 @@ function CollapsiblePanel({
   children,
 }: {
   title: string;
-  icon?: string;
+  icon?: React.ReactNode;
   defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
@@ -640,8 +656,8 @@ function CollapsiblePanel({
         onClick={() => setIsOpen(!isOpen)}
         className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-gray-50/50 transition-smooth rounded-[var(--radius)]"
       >
-        {icon && <span className="text-xs">{icon}</span>}
-        <span className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+        {icon && <span className="text-[var(--text-tertiary)]">{icon}</span>}
+        <span className="text-xs font-medium text-[var(--text-secondary)]">
           {title}
         </span>
         <svg
