@@ -50,12 +50,14 @@ def get_stock_news(self, code: str, limit: int = 50) -> pd.DataFrame:
     """获取个股新闻（东方财富）
     底层接口: ak.stock_news_em(symbol=code)
     返回: title, content, source, publish_time, url
+    注意: AKShare API 名称可能随版本变动，实现时需验证当前版本的实际接口名。
     """
 
 def get_announcements(self, code: str, limit: int = 20) -> pd.DataFrame:
     """获取公司公告（东方财富）
     底层接口: ak.stock_notice_report_em(symbol=code)
     返回: title, type, date, url
+    注意: 同上，需验证 AKShare 当前版本的实际接口名，失败时返回空 DataFrame。
     """
 ```
 
@@ -130,21 +132,28 @@ class EventImpact(BaseModel):
 
 ### 4.2 情感分析 (sentiment.py)
 
+**Async/Sync 桥接：** `BaseLLMProvider.chat()` 是 async 方法。SentimentAnalyzer 和 EventAssessor 的 LLM 调用方法设计为 async，InfoEngine 门面的 `get_news()` / `get_announcements()` / `assess_event_impact()` 也是 async。REST API 路由层天然 async，DataFetcher 通过 `asyncio.to_thread()` 包装同步采集 + `await` 异步分析。
+
 ```python
 class SentimentAnalyzer:
     def __init__(self, llm_provider=None):
-        self._llm = llm_provider  # None = 规则模式
+        self._llm = llm_provider  # BaseLLMProvider | None
 
-    def analyze(self, title: str, content: str | None = None) -> SentimentResult:
+    async def analyze(self, title: str, content: str | None = None) -> SentimentResult:
         if self._llm:
-            return self._analyze_llm(title, content)
+            return await self._analyze_llm(title, content)
         return self._analyze_rules(title, content)
 
     def _analyze_rules(self, title, content) -> SentimentResult:
-        """关键词词典：利好词/利空词各 ~50 个，统计正负词频打分"""
+        """关键词词典：利好词/利空词各 ~50 个，统计正负词频打分
+        词典作为 POSITIVE_KEYWORDS / NEGATIVE_KEYWORDS 常量定义在模块顶层。
+        """
 
-    def _analyze_llm(self, title, content) -> SentimentResult:
-        """单次无状态 LLM 调用，返回 JSON {sentiment, score, reason}"""
+    async def _analyze_llm(self, title, content) -> SentimentResult:
+        """单次无状态 LLM 调用
+        Prompt 要求返回 JSON: {"sentiment": "positive|negative|neutral", "score": -1.0~1.0, "reason": "..."}
+        解析失败时退化为规则模式。
+        """
 ```
 
 **规则模式词典示例：**
@@ -158,10 +167,14 @@ class EventAssessor:
     def __init__(self, llm_provider=None):
         self._llm = llm_provider
 
-    def assess(self, code: str, event_desc: str, stock_context: dict | None = None) -> EventImpact:
+    async def assess(self, code: str, event_desc: str, stock_context: dict | None = None) -> EventImpact:
         """评估事件对个股的影响
         注入个股基本面上下文（行业、市值等）让 LLM 做更精准判断。
         无 LLM 时返回 neutral + magnitude=low + "LLM 未配置，无法评估"
+
+        LLM Prompt 期望返回 JSON:
+        {"impact": "positive|negative|neutral", "magnitude": "high|medium|low",
+         "reasoning": "...", "affected_factors": ["盈利预期", "市场情绪"]}
         """
 ```
 
@@ -174,24 +187,25 @@ class InfoEngine:
         self._sentiment = SentimentAnalyzer(llm_provider)
         self._assessor = EventAssessor(llm_provider)
         self._store = data_engine.store  # DuckDB
+        self._config = None  # 延迟加载 InfoConfig
 
-    def get_news(self, code: str, limit: int = 50) -> list[NewsArticle]:
+    async def get_news(self, code: str, limit: int = 50) -> list[NewsArticle]:
         """拉取新闻 + 情感分析
-        1. 检查 DuckDB info.news_articles 缓存（24h 内）
-        2. 缓存未命中 → DataEngine.get_news() 拉取原始数据
-        3. 逐条情感分析
+        1. 检查 DuckDB info.news_articles 缓存（config.news_cache_hours 内）
+        2. 缓存未命中 → DataEngine.get_news() 拉取原始数据（同步，通过 to_thread）
+        3. 逐条情感分析（async LLM 调用）
         4. 写入缓存
         """
 
-    def get_announcements(self, code: str, limit: int = 20) -> list[Announcement]:
+    async def get_announcements(self, code: str, limit: int = 20) -> list[Announcement]:
         """拉取公告 + 情感分析
-        同上，缓存 48h
+        同上，缓存 config.announcement_cache_hours
         """
 
-    def assess_event_impact(self, code: str, event_desc: str) -> EventImpact:
+    async def assess_event_impact(self, code: str, event_desc: str) -> EventImpact:
         """事件影响评估
         1. 检查 info.event_impacts 缓存
-        2. 未命中 → LLM 评估
+        2. 未命中 → LLM 评估（async）
         3. 写入缓存
         """
 ```
@@ -230,7 +244,7 @@ def get_info_engine() -> InfoEngine:
 CREATE SCHEMA IF NOT EXISTS info;
 
 CREATE TABLE IF NOT EXISTS info.news_articles (
-    id          INTEGER PRIMARY KEY,
+    id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     code        VARCHAR NOT NULL,
     title       VARCHAR NOT NULL,
     content     VARCHAR,
@@ -244,7 +258,7 @@ CREATE TABLE IF NOT EXISTS info.news_articles (
 );
 
 CREATE TABLE IF NOT EXISTS info.announcements (
-    id          INTEGER PRIMARY KEY,
+    id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     code        VARCHAR NOT NULL,
     title       VARCHAR NOT NULL,
     type        VARCHAR,
@@ -256,7 +270,7 @@ CREATE TABLE IF NOT EXISTS info.announcements (
 );
 
 CREATE TABLE IF NOT EXISTS info.event_impacts (
-    id          INTEGER PRIMARY KEY,
+    id          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     code        VARCHAR NOT NULL,
     event_desc  VARCHAR NOT NULL,
     impact      VARCHAR,          -- positive/negative/neutral
@@ -312,16 +326,20 @@ def get_info_data(self, target: str) -> dict:
 
 ### 7.2 MCP Tools
 
-替换 `mcpserver/tools.py` 和 `mcpserver/server.py` 中的三个 stub tool：
+新增 3 个 tool 到 `mcpserver/tools.py` 和 `mcpserver/server.py`（15 → 18 tools）：
 - `get_news` → 调 InfoEngine.get_news()
 - `get_announcements` → 调 InfoEngine.get_announcements()
 - `assess_event_impact` → 调 InfoEngine.assess_event_impact()
+
+> 注：路线图 `/api/v1/news/*` 改为 `/api/v1/info/*`，因为 InfoEngine 不仅覆盖新闻，还包括公告和事件评估。
 
 ### 7.3 main.py
 
 注册 `info_router`，与 quant_router 同模式。
 
 ### 7.4 config.py
+
+新增 `InfoConfig` 并注册到 `AppConfig`：
 
 ```python
 class InfoConfig(BaseModel):
@@ -330,6 +348,10 @@ class InfoConfig(BaseModel):
     default_news_limit: int = 50
     default_announcement_limit: int = 20
     sentiment_mode: str = "auto"  # "auto" | "llm" | "rules"
+
+class AppConfig(BaseModel):
+    # ... 现有字段 ...
+    info: InfoConfig = InfoConfig()
 ```
 
 ## 8. 不在本次范围内
@@ -342,7 +364,8 @@ class InfoConfig(BaseModel):
 
 ## 9. 测试策略
 
-- **单元测试：** schemas 验证、规则情感分析、缓存命中/未命中
+- **单元测试：** schemas 验证、规则情感分析（关键词匹配）、缓存命中/未命中
 - **集成测试：** DataEngine → InfoEngine 全链路（mock AKShare 返回）
-- **LLM 测试：** mock LLM provider，验证 prompt 构造和 JSON 解析
-- **MCP/API 测试：** 路由注册、参数校验
+- **LLM 测试：** mock LLM provider，验证 prompt 构造和 JSON 解析，LLM 返回格式异常时退化为规则
+- **降级测试：** AKShare 新闻接口不可用时返回空列表（不抛异常），LLM 不可用时退化为规则
+- **MCP/API 测试：** 路由注册、参数校验、tool count 验证（18 tools）
