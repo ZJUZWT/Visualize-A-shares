@@ -1159,35 +1159,110 @@ def _get_debate_record(da: "DataAccess", debate_id: str) -> dict | None:
 
 
 def start_debate(da: "DataAccess", code: str, max_rounds: int = 3) -> str:
-    """发起专家辩论"""
+    """发起专家辩论 — 消费完整 SSE 流，返回辩论摘要"""
+    import httpx
+
     if not da.is_online():
         return json.dumps({
             "error": "后端未运行，无法发起辩论",
             "hint": "请先启动 engine: `cd engine && python main.py`",
         }, ensure_ascii=False, indent=2)
 
-    result = da.api_post(
-        "/api/v1/analysis",
-        params={
-            "trigger_type": "user",
-            "target": code,
-            "target_type": "stock",
-            "depth": "deep",
-            "max_debate_rounds": max_rounds,
-        },
-    )
-    if result and not result.get("_error"):
-        return json.dumps({
-            "status": "辩论已触发",
-            "code": code,
-            "max_rounds": max_rounds,
-            "note": "辩论通过 SSE 流式推送，使用 get_debate_status 查询进度",
-        }, ensure_ascii=False, indent=2)
+    try:
+        entries = []
+        verdict = None
+        debate_id = None
+        termination_reason = None
 
-    return json.dumps({
-        "status": "请通过 REST API 触发辩论",
-        "hint": f"POST /api/v1/analysis with depth='deep', target='{code}'",
-    }, ensure_ascii=False, indent=2)
+        with httpx.stream(
+            "POST",
+            f"{da._api_base}/api/v1/debate",
+            json={"code": code, "max_rounds": max_rounds},
+            timeout=300.0,  # 辩论可能需要几分钟
+        ) as resp:
+            resp.raise_for_status()
+            event_type = None
+            data_buf = ""
+            for line in resp.iter_lines():
+                if line.startswith("event: "):
+                    event_type = line[7:].strip()
+                elif line.startswith("data: "):
+                    data_buf = line[6:]
+                elif line == "" and event_type and data_buf:
+                    try:
+                        data = json.loads(data_buf)
+                    except json.JSONDecodeError:
+                        event_type = None
+                        data_buf = ""
+                        continue
+
+                    if event_type == "debate_start":
+                        debate_id = data.get("debate_id")
+                    elif event_type == "debate_entry":
+                        entries.append(data)
+                    elif event_type == "debate_end":
+                        termination_reason = data.get("reason")
+                    elif event_type == "judge_verdict":
+                        verdict = data
+                    elif event_type == "error":
+                        return json.dumps({"error": data.get("message", "辩论失败")}, ensure_ascii=False)
+
+                    event_type = None
+                    data_buf = ""
+
+        # 格式化为 Markdown 摘要
+        lines = [f"## 专家辩论: {code}", ""]
+
+        if debate_id:
+            lines.append(f"debate_id: `{debate_id}`")
+            lines.append("")
+
+        for entry in entries:
+            role = entry.get("role", "")
+            rd = entry.get("round", 0)
+            stance = entry.get("stance", "")
+            arg = entry.get("argument", "")
+            conf = entry.get("confidence", 0)
+            stance_str = f" [{stance}]" if stance else ""
+            lines.append(f"**Round {rd} — {role}{stance_str}** (confidence={conf:.2f})")
+            if arg:
+                lines.append(arg)
+            challenges = entry.get("challenges", [])
+            if challenges:
+                lines.append("质疑: " + "；".join(challenges))
+            lines.append("")
+
+        if termination_reason:
+            lines.append(f"终止原因: {termination_reason}")
+            lines.append("")
+
+        if verdict:
+            lines.append("---")
+            lines.append("## 裁判裁决")
+            lines.append("")
+            lines.append(verdict.get("summary", ""))
+            lines.append("")
+            signal = verdict.get("signal")
+            score = verdict.get("score")
+            if signal:
+                lines.append(f"- 信号: **{signal}**" + (f" (score={score:.2f})" if score else ""))
+            lines.append(f"- 多头核心论点: {verdict.get('bull_core_thesis', '')}")
+            lines.append(f"- 空头核心论点: {verdict.get('bear_core_thesis', '')}")
+            lines.append(f"- 散户情绪: {verdict.get('retail_sentiment_note', '')}")
+            lines.append(f"- 主力动向: {verdict.get('smart_money_note', '')}")
+            lines.append(f"- 辩论质量: {verdict.get('debate_quality', '')}")
+            warnings = verdict.get("risk_warnings", [])
+            if warnings:
+                lines.append(f"- 风险提示: {'；'.join(warnings)}")
+
+        return "\n".join(lines)
+
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 503:
+            return json.dumps({"error": "LLM 未配置，请先在 .env 中设置 API Key"}, ensure_ascii=False)
+        return json.dumps({"error": f"辩论请求失败: {e}"}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"辩论失败: {e}"}, ensure_ascii=False)
 
 
 def get_debate_status(da: "DataAccess", debate_id: str) -> str:
