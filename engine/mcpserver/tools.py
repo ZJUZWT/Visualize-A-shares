@@ -1,5 +1,5 @@
 """
-MCP Tools — 10 个 Tool 实现
+MCP Tools — 15 个 Tool 实现
 
 每个 tool 返回 AI 友好的 Markdown 文本（非原始 JSON）。
 在线模式优先走 REST API，离线自动降级到 DuckDB read-only。
@@ -974,3 +974,93 @@ def compute_terrain(
         lines.append(f"- 聚类质量: Silhouette={sil:.4f}, CH={ch:.1f}, 噪声率={noise:.1%}")
 
     return "\n".join(lines)
+
+
+# ─── QuantEngine Tools ──────────────────────────────
+
+def get_technical_indicators(da: "DataAccess", code: str) -> str:
+    """获取技术指标"""
+    import json
+    import datetime
+
+    try:
+        from quant_engine import get_quant_engine
+    except ImportError:
+        return json.dumps({"error": "QuantEngine 未安装"}, ensure_ascii=False)
+
+    # 获取日线数据
+    daily = da.get_daily_history(code, days=90)
+    if daily is None or daily.empty:
+        return json.dumps({"error": f"无 {code} 日线数据"}, ensure_ascii=False)
+
+    qe = get_quant_engine()
+    indicators = qe.compute_indicators(daily)
+    return json.dumps({
+        "code": code,
+        "indicators": indicators,
+    }, ensure_ascii=False, indent=2)
+
+
+def get_factor_scores(da: "DataAccess", code: str) -> str:
+    """获取多因子评分"""
+    import json
+
+    try:
+        from quant_engine import get_quant_engine
+    except ImportError:
+        return json.dumps({"error": "QuantEngine 未安装"}, ensure_ascii=False)
+
+    stock_data = da.get_stock_detail(code)
+    if not stock_data:
+        return json.dumps({"error": f"无 {code} 数据"}, ensure_ascii=False)
+
+    qe = get_quant_engine()
+    weights, source = qe.get_factor_weights()
+    factor_defs = qe.get_factor_defs()
+    scores = {}
+    for fdef in factor_defs:
+        col = fdef.source_col
+        if col.startswith("_"):
+            continue
+        val = stock_data.get(col)
+        if val is not None:
+            scores[fdef.name] = {
+                "value": round(float(val), 4),
+                "direction": fdef.direction,
+                "weight": weights.get(fdef.name, fdef.default_weight),
+                "desc": fdef.desc,
+            }
+    return json.dumps({
+        "code": code,
+        "weight_source": source,
+        "factor_scores": scores,
+    }, ensure_ascii=False, indent=2)
+
+
+def submit_analysis(code: str, depth: str = "standard") -> str:
+    """触发分析（同步返回状态，实际分析通过 REST API SSE 进行）"""
+    import json
+    return json.dumps({
+        "status": "请通过 POST /api/v1/analysis 触发分析",
+        "hint": f"curl -X POST http://localhost:8000/api/v1/analysis -H 'Content-Type: application/json' -d '{{\"trigger_type\":\"user\",\"target\":\"{code}\",\"target_type\":\"stock\",\"depth\":\"{depth}\"}}'",
+    }, ensure_ascii=False, indent=2)
+
+
+def get_analysis_history(code: str, limit: int = 5) -> str:
+    """查询历史分析报告 — Phase 1: 返回空（持久化在 Phase 2 实现）"""
+    import json
+    return json.dumps({
+        "code": code,
+        "history": [],
+        "note": "历史分析报告持久化将在 Phase 2 实现",
+    }, ensure_ascii=False, indent=2)
+
+
+def get_signal_history(da: "DataAccess", code: str, days: int = 30) -> str:
+    """查询历史量化信号 — Phase 1: 返回空（信号持久化在 Phase 2 实现）"""
+    import json
+    return json.dumps({
+        "code": code,
+        "signals": [],
+        "note": "历史信号记录将在 Phase 2 QuantEngine DuckDB 持久化后实现",
+    }, ensure_ascii=False, indent=2)
