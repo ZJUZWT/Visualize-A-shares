@@ -25,6 +25,7 @@ from cluster_engine.routes import router as cluster_router
 from api.routes.chat import router as chat_router
 from quant_engine.routes import router as quant_router
 from api.routes.analysis import router as analysis_router
+from api.routes.debate import router as debate_router
 from info_engine.routes import router as info_router
 
 # ─── 配置日志 ──────────────────────────────────────────
@@ -65,6 +66,7 @@ app.include_router(cluster_router)
 app.include_router(chat_router)
 app.include_router(quant_router)
 app.include_router(analysis_router)
+app.include_router(debate_router)
 app.include_router(info_router)
 
 
