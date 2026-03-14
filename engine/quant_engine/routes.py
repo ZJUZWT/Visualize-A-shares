@@ -5,9 +5,9 @@
 """
 
 import asyncio
+import datetime
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Path as PathParam, Query
 from loguru import logger
 
 from quant_engine import get_quant_engine
@@ -73,12 +73,16 @@ async def run_backtest(
     """执行因子 IC 回测"""
     qe = get_quant_engine()
 
-    result = await asyncio.get_event_loop().run_in_executor(
-        None, lambda: qe.run_backtest(rolling_window=rolling_window)
-    )
+    result = await asyncio.to_thread(qe.run_backtest, rolling_window=rolling_window)
 
     if auto_inject and result.icir_weights:
         qe.predictor.set_icir_weights(result.icir_weights)
+        # 同步到 ClusterEngine 的 pipeline
+        try:
+            from cluster_engine import get_cluster_engine
+            get_cluster_engine().pipeline.predictor_v2.set_icir_weights(result.icir_weights)
+        except Exception:
+            pass
 
     return {
         "backtest_days": result.backtest_days,
@@ -102,20 +106,17 @@ async def run_backtest(
 
 @router.get("/indicators/{code}")
 async def get_indicators(
-    code: str,
+    code: str = PathParam(..., pattern=r"^\d{6}$"),
     days: int = Query(default=120, ge=20, le=365),
 ):
     """获取单只股票的全部技术指标"""
     qe = get_quant_engine()
     de = get_data_engine()
 
-    import datetime
     end = datetime.date.today().strftime("%Y-%m-%d")
     start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
 
-    daily = await asyncio.get_event_loop().run_in_executor(
-        None, lambda: de.get_daily_history(code, start, end)
-    )
+    daily = await asyncio.to_thread(de.get_daily_history, code, start, end)
 
     if daily is None or daily.empty:
         raise HTTPException(status_code=404, detail=f"股票 {code} 无日线数据")

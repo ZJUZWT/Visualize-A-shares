@@ -14,7 +14,6 @@
 
 import numpy as np
 import pandas as pd
-from loguru import logger
 
 
 def compute_rsi(close: np.ndarray, period: int = 14) -> float:

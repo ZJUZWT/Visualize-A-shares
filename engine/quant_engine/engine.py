@@ -22,9 +22,11 @@ class QuantEngine:
         Args:
             data_engine: DataEngine 实例（通过依赖注入）
         """
+        from config import settings
         self._data = data_engine
         self._predictor = StockPredictorV2()
-        self._backtester = FactorBacktester(rolling_window=20)
+        self._backtester = FactorBacktester(rolling_window=settings.quant.icir_rolling_window)
+        self._config = settings.quant
 
     @property
     def predictor(self) -> StockPredictorV2:
@@ -68,9 +70,11 @@ class QuantEngine:
         """启动时自动从历史数据计算 ICIR 权重并注入预测器"""
         try:
             dates = self._data.store.get_snapshot_daily_dates()
-            if len(dates) >= 5:
+            if len(dates) >= self._config.min_history_days:
                 logger.info(f"🔄 检测到 {len(dates)} 天历史快照，自动运行 IC 回测...")
-                result = run_ic_backtest_from_store(self._data.store, rolling_window=20)
+                result = run_ic_backtest_from_store(
+                    self._data.store, rolling_window=self._config.icir_rolling_window
+                )
                 if result.icir_weights:
                     self._predictor.set_icir_weights(result.icir_weights)
                     logger.info("✅ 启动时 ICIR 权重自动注入成功")
@@ -78,7 +82,7 @@ class QuantEngine:
                     logger.info("ℹ️ IC 回测无显著权重，使用默认权重")
             else:
                 logger.info(
-                    f"ℹ️ 历史快照仅 {len(dates)} 天（<5天），跳过 ICIR 自动校准。"
+                    f"ℹ️ 历史快照仅 {len(dates)} 天（<{self._config.min_history_days}天），跳过 ICIR 自动校准。"
                 )
         except Exception as e:
             logger.warning(f"⚠️ 启动时 ICIR 自动校准跳过: {e}")
