@@ -10,18 +10,22 @@ def get_info_engine() -> InfoEngine:
     """获取信息引擎全局单例（依赖数据引擎，可选 LLM）"""
     global _info_engine
     if _info_engine is None:
-        llm_provider = None
+        llm_capability = None
         try:
             from llm.config import llm_settings
             from llm.providers import LLMProviderFactory
+            from llm.capability import LLMCapability
             if llm_settings.api_key:
-                llm_provider = LLMProviderFactory.create(llm_settings)
+                provider = LLMProviderFactory.create(llm_settings)
+                llm_capability = LLMCapability(
+                    provider=provider,
+                    cache_store=get_data_engine().store,
+                )
         except Exception:
             pass
-
         _info_engine = InfoEngine(
             data_engine=get_data_engine(),
-            llm_provider=llm_provider,
+            llm_capability=llm_capability,
         )
     return _info_engine
 

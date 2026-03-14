@@ -35,15 +35,15 @@ class SentimentAnalyzer:
     """情感分析器 — LLM 优先，规则退化
 
     Args:
-        llm_provider: BaseLLMProvider 实例。None 时使用纯规则模式。
+        llm_capability: LLMCapability 实例。None 或 disabled 时使用纯规则模式。
     """
 
-    def __init__(self, llm_provider=None):
-        self._llm = llm_provider
+    def __init__(self, llm_capability=None):
+        self._llm = llm_capability
 
     async def analyze(self, title: str, content: str | None = None) -> SentimentResult:
         """分析新闻/公告的情感倾向"""
-        if self._llm:
+        if self._llm and self._llm.enabled:
             try:
                 return await self._analyze_llm(title, content)
             except Exception as e:
@@ -72,26 +72,15 @@ class SentimentAnalyzer:
         return SentimentResult(sentiment=sentiment, score=round(score, 2))
 
     async def _analyze_llm(self, title: str, content: str | None) -> SentimentResult:
-        """LLM 模式 — 无状态单次调用"""
-        from llm.providers import ChatMessage
-
-        text = f"标题: {title}"
-        if content:
-            text += f"\n内容: {content[:500]}"
-
-        messages = [
-            ChatMessage("system",
-                "你是一个金融新闻情感分析专家。分析以下新闻的情感倾向。"
-                "仅返回 JSON（不要 markdown 代码块），格式："
-                '{"sentiment": "positive|negative|neutral", "score": -1.0到1.0的浮点数, "reason": "简短原因"}'
-            ),
-            ChatMessage("user", text),
-        ]
-
-        raw = await self._llm.chat(messages)
-        data = json.loads(raw.strip())
+        """LLM 模式 — 调用 LLMCapability.classify()"""
+        text = f"{title}\n{content or ''}"
+        result = await self._llm.classify(
+            text=text,
+            categories=["positive", "negative", "neutral"],
+            system="你是 A 股股票新闻情感分析专家。",
+        )
         return SentimentResult(
-            sentiment=data["sentiment"],
-            score=float(data["score"]),
-            reason=data.get("reason"),
+            sentiment=result["label"],
+            score=result.get("score", 0.0),
+            reason=result.get("reason"),
         )
