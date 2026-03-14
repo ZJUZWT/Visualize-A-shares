@@ -1,16 +1,15 @@
 """
-特征工程模块 v3.0 — 语义嵌入 + 数值特征融合
+特征工程模块 v4.0 — UMAP 语义嵌入驱动聚类
 
 架构：
-  Layer 1: BGE 语义嵌入 (768 维) × 权重 2.0 — 公司经营范围语义相似度
-  Layer 2: 数值特征 (6 维) × 权重 1.0 — 财务/交易特征
+  聚类特征: BGE 语义嵌入 (768 维) → UMAP(cosine, 15维) → HDBSCAN
+  画像特征: 数值特征 (PE/PB/市值/换手率等) — 仅用于聚类画像和 Z 轴渲染
 
-融合后 → PCA 降到 50 维 → 输入 HDBSCAN + UMAP
-
-v3.0 变更：
-  - 去掉行业 one-hot 硬分类层（避免行业主导聚类）
-  - 行业信息融入 BGE 嵌入文本（作为语义上下文）
-  - 公司概况数据改用 company_profiles.json
+v4.0 核心发现：
+  - PCA 在 cosine 嵌入空间中丢失流形结构，HDBSCAN 无法找到密度簇
+  - UMAP(cosine) 保留语义流形 → HDBSCAN 可发现 15~25 个有意义的板块
+  - 数值特征混入会破坏嵌入的聚类结构（即使权重很低），因此不参与聚类
+  - 数值特征保留用于: 聚类画像描述、Z轴地形高度、因子预测
 """
 
 import json
@@ -53,12 +52,12 @@ COMPUTED_FEATURES = [
 ALL_FEATURES = SNAPSHOT_FEATURES + COMPUTED_FEATURES
 
 
-# ─── 三层融合权重（v4.0 调整版）─────────────────────
+# ─── 特征配置（v4.0 UMAP 版）─────────────────────
 WEIGHT_INDUSTRY = 0.0   # 行业 one-hot 权重（v4.0: 去掉，产业链信号已在嵌入中）
-WEIGHT_EMBEDDING = 2.0  # BGE 语义嵌入权重（产业链拓扑主导）
-WEIGHT_NUMERIC = 0.5    # 数值特征权重（降低，避免财务数据干扰板块分布）
-EMBEDDING_PCA_DIM = 50  # 嵌入先降到此维度（增加以保留更多语义信息）
-PCA_TARGET_DIM = 50     # 最终 PCA 降维目标维度
+WEIGHT_EMBEDDING = 1.0  # BGE 语义嵌入权重（UMAP 降维后直接用于聚类）
+WEIGHT_NUMERIC = 0.0    # 数值特征不参与聚类（混入会破坏嵌入的密度结构）
+EMBEDDING_UMAP_DIM = 15 # 嵌入 UMAP 降维目标维度
+PCA_TARGET_DIM = 30     # 保留兼容性，实际不再使用
 
 
 class PrecomputedData:
@@ -453,7 +452,7 @@ class FeatureEngineer:
         logger.info(
             f"特征矩阵构建完成: {X_final.shape[0]} 只股票, "
             f"{X_final.shape[1]} 维特征 "
-            f"({'语义嵌入融合+PCA' if self._precomputed.available else '纯数值'}), "
+            f"({'UMAP语义嵌入' if self._precomputed.available else '纯数值'}), "
             f"数值特征 {len(feature_cols)} 维 "
             f"({len([c for c in COMPUTED_FEATURES if c in features_df.columns])} 个技术指标)"
         )
@@ -472,38 +471,44 @@ class FeatureEngineer:
         embedding_pca_dim: int | None = None,
     ) -> tuple[np.ndarray, list[str]]:
         """
-        三层特征融合 v3.0 — 支持运行时动态权重
+        特征融合 v4.0 — UMAP cosine 语义嵌入 + 数值特征
 
-        Layer 1: BGE 嵌入 768d → PCA → 标准化 × weight_embedding
+        Layer 1: BGE 嵌入 768d → UMAP(cosine) → 标准化 × weight_embedding
         Layer 2: 行业 one-hot × weight_industry
         Layer 3: 数值特征 × weight_numeric
-        → concat → PCA → pca_target_dim 维
+        → concat → 标准化
         """
         # 使用传入的权重，未传入则用全局默认值
         w_emb = weight_embedding if weight_embedding is not None else WEIGHT_EMBEDDING
         w_ind = weight_industry if weight_industry is not None else WEIGHT_INDUSTRY
         w_num = weight_numeric if weight_numeric is not None else WEIGHT_NUMERIC
         target_dim = pca_target_dim if pca_target_dim is not None else PCA_TARGET_DIM
-        emb_dim = embedding_pca_dim if embedding_pca_dim is not None else EMBEDDING_PCA_DIM
+        emb_dim = embedding_pca_dim if embedding_pca_dim is not None else EMBEDDING_UMAP_DIM
 
         logger.info(
-            f"🔗 执行三层特征融合 v3.0 "
+            f"🔗 执行特征融合 v4.0 "
             f"(嵌入={w_emb}, 行业={w_ind}, 数值={w_num}, "
-            f"PCA={target_dim}, 嵌入PCA={emb_dim})..."
+            f"UMAP目标={emb_dim}维)..."
         )
 
         layers = []
         feature_names = []
 
-        # Layer 1: BGE 嵌入 → 先降维
+        # Layer 1: BGE 嵌入 → UMAP(cosine) 降维（保留语义流形结构）
         X_embedding = self._precomputed.get_embeddings_for_codes(codes)
         if X_embedding is not None and w_emb > 0:
-            actual_emb_dim = min(
-                emb_dim, X_embedding.shape[1], X_embedding.shape[0] - 1
+            import umap
+
+            actual_emb_dim = min(emb_dim, X_embedding.shape[0] - 2)
+
+            emb_reducer = umap.UMAP(
+                n_components=actual_emb_dim,
+                metric='cosine',
+                n_neighbors=30,
+                min_dist=0.0,       # 紧凑聚类，不追求可视化美观
+                random_state=42,
             )
-            emb_pca = PCA(n_components=actual_emb_dim, random_state=42)
-            X_emb_reduced = emb_pca.fit_transform(X_embedding)
-            emb_var = sum(emb_pca.explained_variance_ratio_) * 100
+            X_emb_reduced = emb_reducer.fit_transform(X_embedding)
 
             emb_scaler = StandardScaler()
             X_emb_scaled = emb_scaler.fit_transform(X_emb_reduced)
@@ -515,8 +520,7 @@ class FeatureEngineer:
             )
             logger.info(
                 f"  Layer 1 — 语义嵌入: {X_embedding.shape[1]}d "
-                f"→ PCA {actual_emb_dim}d (方差 {emb_var:.1f}%) "
-                f"× {w_emb}"
+                f"→ UMAP(cosine) {actual_emb_dim}d × {w_emb}"
             )
 
         # Layer 2: 行业 one-hot（从 profiles 动态构建）
@@ -532,22 +536,27 @@ class FeatureEngineer:
                     f"  Layer 2 — 行业 one-hot: {X_industry.shape[1]} 维 × {w_ind}"
                 )
 
-        # Layer 3: 数值特征
-        X_numeric_weighted = X_numeric_scaled * w_num
-        layers.append(X_numeric_weighted)
-        feature_names.extend(
-            [f"num_{name}" for name in numeric_feature_names]
-        )
-        logger.info(
-            f"  Layer 3 — 数值特征: {X_numeric_scaled.shape[1]} 维 × {w_num}"
-        )
+        # Layer 3: 数值特征（仅当权重 > 0 时加入聚类特征空间）
+        if w_num > 0:
+            X_numeric_weighted = X_numeric_scaled * w_num
+            layers.append(X_numeric_weighted)
+            feature_names.extend(
+                [f"num_{name}" for name in numeric_feature_names]
+            )
+            logger.info(
+                f"  Layer 3 — 数值特征: {X_numeric_scaled.shape[1]} 维 × {w_num}"
+            )
+        else:
+            logger.info(
+                f"  Layer 3 — 数值特征: 跳过（权重=0，仅用于画像和Z轴）"
+            )
 
         # 拼接
         X_concat = np.hstack(layers)
         logger.info(f"  融合后总维度: {X_concat.shape[1]}")
 
-        # 最终 PCA 降维
-        if X_concat.shape[1] > target_dim:
+        # 最终 PCA 降维（仅当融合维度远超目标时使用）
+        if X_concat.shape[1] > target_dim * 1.5:
             actual_target = min(
                 target_dim, X_concat.shape[1], X_concat.shape[0] - 1
             )
@@ -560,6 +569,7 @@ class FeatureEngineer:
             logger.info(f"  PCA 解释方差: {explained_var:.1f}%")
         else:
             X_final = X_concat
+            logger.info(f"  维度={X_concat.shape[1]}，无需额外 PCA")
 
         # 最终标准化
         final_scaler = StandardScaler()

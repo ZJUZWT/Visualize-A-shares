@@ -13,7 +13,7 @@ import { useFrame, ThreeEvent } from "@react-three/fiber";
 import { Html, Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import type { StockPoint } from "@/types/terrain";
-import { formatZValue } from "@/types/terrain";
+import { formatZValue, CLUSTER_COLORS, NOISE_COLOR } from "@/types/terrain";
 import { useTerrainStore } from "@/stores/useTerrainStore";
 
 interface StockNodesProps {
@@ -498,6 +498,44 @@ function SelectedLabel({
               </span>
             )}
           </div>
+          {/* v5.0: 多归属隶属度标签 */}
+          {stock.cluster_affinities && stock.cluster_affinities.length > 1 && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "4px",
+                marginTop: "4px",
+              }}
+            >
+              {stock.cluster_affinities.map((aff) => (
+                <span
+                  key={aff.cluster_id}
+                  style={{
+                    fontSize: "9px",
+                    fontFamily: "JetBrains Mono, monospace",
+                    padding: "1px 5px",
+                    borderRadius: "8px",
+                    backgroundColor:
+                      aff.cluster_id === stock.cluster_id
+                        ? `${CLUSTER_COLORS[aff.cluster_id % CLUSTER_COLORS.length]}30`
+                        : "#F3F4F6",
+                    color:
+                      aff.cluster_id === stock.cluster_id
+                        ? CLUSTER_COLORS[aff.cluster_id % CLUSTER_COLORS.length]
+                        : "#6B7280",
+                    border: `1px solid ${
+                      aff.cluster_id === stock.cluster_id
+                        ? `${CLUSTER_COLORS[aff.cluster_id % CLUSTER_COLORS.length]}40`
+                        : "#E5E7EB"
+                    }`,
+                  }}
+                >
+                  #{aff.cluster_id} {(aff.affinity * 100).toFixed(0)}%
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </Html>
     </Billboard>

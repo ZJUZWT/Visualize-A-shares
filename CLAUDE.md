@@ -29,3 +29,10 @@
 - 使用 MCP 工具前必须先启动后端 (`cd engine && python main.py`)
 - MCP Server 通过 REST API 与后端通信，后端未启动时会降级为 DuckDB 离线快照（数据非实时）
 - `.mcp.json` 使用相对路径，clone 后可直接使用
+
+## 自验证闭环
+Claude 具备通过 MCP 工具完成开发→验证闭环的能力，修改代码后应主动验证：
+1. 启动后端: `cd engine && python3 main.py` (后台运行)
+2. 通过 MCP 工具调用 API 验证功能（如 `get_terrain_data`、`search_stock`）
+3. 检查返回数据结构、聚类质量指标、字段完整性等
+4. 不需要等用户手动测试，能自主完成端到端验证

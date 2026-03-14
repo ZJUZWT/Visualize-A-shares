@@ -46,6 +46,7 @@ class ClusterEngine:
         self._labels = None
         self._probabilities = None
         self._quality: ClusterQualityMetrics | None = None
+        self._membership_vectors: np.ndarray | None = None  # 软隶属度矩阵 (n_stocks, n_clusters)
 
     def fit(self, X: np.ndarray) -> np.ndarray:
         """
@@ -77,14 +78,31 @@ class ClusterEngine:
         self._labels = self._model.labels_
         self._probabilities = self._model.probabilities_
 
-        # 统计聚类结果
+        # 统计原始聚类结果
         n_clusters = len(set(self._labels)) - (1 if -1 in self._labels else 0)
         n_noise = int(np.sum(self._labels == -1))
-        
+
         logger.info(
-            f"HDBSCAN 聚类完成: "
+            f"HDBSCAN 原始聚类: "
             f"发现 {n_clusters} 个簇, "
             f"{n_noise} 个噪声点 ({n_noise / len(self._labels) * 100:.1f}%)"
+        )
+
+        # 噪声点软分配：用 KNN 将高置信度噪声点归入最近的簇
+        self._labels, reassigned, noise_confidences = self._reassign_noise(X, self._labels)
+
+        # 更新被回收噪声点的置信度为 KNN 投票概率
+        for idx, conf in noise_confidences.items():
+            self._probabilities[idx] = conf
+
+        # 统计最终聚类结果
+        n_clusters_final = len(set(self._labels)) - (1 if -1 in self._labels else 0)
+        n_noise_final = int(np.sum(self._labels == -1))
+        logger.info(
+            f"HDBSCAN 聚类完成（含噪声回收）: "
+            f"{n_clusters_final} 个簇, "
+            f"{n_noise_final} 个噪声点 ({n_noise_final / len(self._labels) * 100:.1f}%), "
+            f"回收 {reassigned} 个噪声点"
         )
 
         # 输出每个簇的大小
@@ -97,6 +115,9 @@ class ClusterEngine:
 
         # v2.0: 计算聚类质量评分
         self._quality = self._compute_quality(X)
+
+        # v5.0: 计算软隶属度向量
+        self._compute_membership_vectors(X)
 
         return self._labels
 
@@ -155,6 +176,144 @@ class ClusterEngine:
         )
 
         return metrics
+
+    def _compute_membership_vectors(self, X: np.ndarray) -> None:
+        """
+        计算软隶属度向量 (n_stocks, n_clusters)
+
+        优先使用 hdbscan.all_points_membership_vectors()，
+        失败时退化为基于簇中心距离的 softmax。
+        """
+        import hdbscan as hdbscan_lib
+
+        if self._model is None or self._labels is None:
+            self._membership_vectors = None
+            return
+
+        n_clusters = self.n_clusters
+        if n_clusters < 2:
+            self._membership_vectors = None
+            return
+
+        try:
+            membership = hdbscan_lib.all_points_membership_vectors(self._model)
+            self._membership_vectors = membership
+            logger.info(f"软隶属度计算完成 (HDBSCAN native): shape={membership.shape}")
+        except Exception as e:
+            logger.warning(f"HDBSCAN 软隶属度失败, 退化为 softmax: {e}")
+            self._membership_vectors = self._softmax_membership(X)
+
+    def _softmax_membership(self, X: np.ndarray) -> np.ndarray:
+        """基于簇中心距离的 softmax 软隶属度（退化方案）"""
+        from scipy.spatial.distance import cdist
+
+        unique_labels = sorted(set(self._labels) - {-1})
+        if len(unique_labels) == 0:
+            return np.zeros((len(X), 0))
+
+        # 计算每个簇的中心
+        centers = np.array([
+            X[self._labels == label].mean(axis=0) for label in unique_labels
+        ])
+
+        # 计算每个样本到每个簇中心的距离
+        dists = cdist(X, centers, metric="euclidean")
+
+        # softmax(-distance) → 隶属度概率
+        neg_dists = -dists
+        # 数值稳定性
+        neg_dists -= neg_dists.max(axis=1, keepdims=True)
+        exp_dists = np.exp(neg_dists)
+        membership = exp_dists / exp_dists.sum(axis=1, keepdims=True)
+
+        logger.info(f"软隶属度计算完成 (softmax fallback): shape={membership.shape}")
+        return membership
+
+    def get_top_affinities(self, stock_idx: int, top_k: int = 3) -> list[dict]:
+        """
+        获取指定股票的 top-k 簇隶属度
+
+        Returns:
+            [{"cluster_id": 2, "affinity": 0.65}, {"cluster_id": 5, "affinity": 0.20}, ...]
+        """
+        if self._membership_vectors is None or self._labels is None:
+            return []
+
+        if stock_idx < 0 or stock_idx >= len(self._membership_vectors):
+            return []
+
+        vec = self._membership_vectors[stock_idx]
+        if len(vec) == 0:
+            return []
+
+        # 获取实际簇 ID 映射（membership_vectors 的列对应排序后的非噪声簇 ID）
+        unique_labels = sorted(set(self._labels) - {-1})
+        if len(unique_labels) != len(vec):
+            # 长度不匹配时直接返回空
+            return []
+
+        # 按隶属度降序排列，取 top_k
+        indices = np.argsort(vec)[::-1][:top_k]
+        results = []
+        for idx in indices:
+            affinity = float(vec[idx])
+            if affinity < 0.01:  # 忽略极低隶属度
+                continue
+            results.append({
+                "cluster_id": int(unique_labels[idx]),
+                "affinity": round(affinity, 4),
+            })
+
+        return results
+
+    def _reassign_noise(self, X: np.ndarray, labels: np.ndarray, k: int = 5) -> tuple[np.ndarray, int, dict[int, float]]:
+        """
+        将噪声点通过 KNN 投票软分配到最近的簇
+
+        仅分配置信度足够高的噪声点（最高投票概率 > 0.4），
+        其余保留为噪声。
+
+        Returns:
+            new_labels: 更新后的聚类标签
+            reassigned: 被成功回收的噪声点数量
+            noise_confidences: {样本索引: KNN置信度} 被回收噪声点的置信度
+        """
+        noise_mask = labels == -1
+        n_noise = noise_mask.sum()
+        if not noise_mask.any() or noise_mask.all():
+            return labels, 0, {}
+
+        non_noise_mask = ~noise_mask
+        n_non_noise = non_noise_mask.sum()
+
+        from sklearn.neighbors import KNeighborsClassifier
+
+        actual_k = min(k, n_non_noise)
+        knn = KNeighborsClassifier(n_neighbors=actual_k, weights='distance')
+        knn.fit(X[non_noise_mask], labels[non_noise_mask])
+
+        # 预测噪声点应该属于哪个簇
+        noise_pred = knn.predict(X[noise_mask])
+        noise_proba = knn.predict_proba(X[noise_mask])
+
+        # 只分配置信度足够高的（最高概率 > 0.4）
+        max_proba = noise_proba.max(axis=1)
+        new_labels = labels.copy()
+        noise_confidences = {}
+
+        noise_indices = np.where(noise_mask)[0]
+        reassigned = 0
+        for i, idx in enumerate(noise_indices):
+            if max_proba[i] > 0.4:
+                new_labels[idx] = noise_pred[i]
+                noise_confidences[int(idx)] = float(max_proba[i])
+                reassigned += 1
+
+        logger.debug(
+            f"噪声回收: {n_noise} 个噪声点中 {reassigned} 个被分配到已有簇 "
+            f"(置信度阈值 0.4)"
+        )
+        return new_labels, reassigned, noise_confidences
 
     def get_cluster_summary(
         self,

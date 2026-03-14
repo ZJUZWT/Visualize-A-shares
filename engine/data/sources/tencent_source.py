@@ -121,8 +121,8 @@ class TencentSource(BaseDataSource):
                 "turnover_rate": self._safe_float(fields[38]) or 0,
                 "pe_ttm": self._safe_float(fields[39]) or 0,
                 "pb": self._safe_float(fields[46]) if len(fields) > 46 else 0,
-                "total_mv": (self._safe_float(fields[45]) or 0) / 1e4 if len(fields) > 45 else 0,
-                "circ_mv": (self._safe_float(fields[44]) or 0) / 1e4 if len(fields) > 44 else 0,
+                "total_mv": (self._safe_float(fields[45]) or 0) if len(fields) > 45 else 0,
+                "circ_mv": (self._safe_float(fields[44]) or 0) if len(fields) > 44 else 0,
                 "wb_ratio": wb_ratio,
             }
         except Exception:

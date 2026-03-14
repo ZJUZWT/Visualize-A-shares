@@ -46,11 +46,11 @@ def export_snapshot():
         feature_cols=None,
         grid_resolution=128,
         radius_scale=2.0,
-        weight_embedding=1.5,
-        weight_industry=0.8,
-        weight_numeric=1.0,
-        pca_target_dim=50,
-        embedding_pca_dim=32,
+        weight_embedding=None,
+        weight_industry=None,
+        weight_numeric=None,
+        pca_target_dim=None,
+        embedding_pca_dim=None,
     )
 
     # 3. 组装输出数据
