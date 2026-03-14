@@ -34,7 +34,7 @@ export default function Home() {
     }
   }, [isStaticMode, terrainData, loadSnapshot]);
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-[#EEF2F7]">
+    <main className="relative w-screen h-screen overflow-hidden bg-transparent">
       {/* Layer 0: 3D 场景 */}
       <TerrainScene />
 
@@ -47,7 +47,7 @@ export default function Home() {
       {/* Layer 2: 底部版权 */}
       <div className="overlay fixed bottom-3 right-4">
         <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
-          StockTerrain v2.0 · Data is the terrain
+          StockTerrain v3.1 · Data is the terrain
         </span>
       </div>
     </main>
