@@ -4,6 +4,10 @@
       "command": "/bin/bash",
       "args": ["-c", "cd engine && .venv/bin/python -m mcpserver"],
       "cwd": "engine"
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
     }
   }
 }
