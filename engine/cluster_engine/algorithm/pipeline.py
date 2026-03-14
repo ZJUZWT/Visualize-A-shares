@@ -71,8 +71,8 @@ class AlgorithmPipeline:
     snapshot → 特征提取 → HDBSCAN聚类 → UMAP降维 → 高斯核密度插值(多指标) → TerrainResult
     """
 
-    def __init__(self):
-        self.feature_eng = FeatureEngineer()
+    def __init__(self, profiles: dict | None = None):
+        self.feature_eng = FeatureEngineer(profiles=profiles)
         self.cluster_eng = ClusterEngine()
         self.projection_eng = ProjectionEngine()
         self.interpolation_eng = InterpolationEngine()
