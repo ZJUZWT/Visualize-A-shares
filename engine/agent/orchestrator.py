@@ -1,17 +1,20 @@
 """Orchestrator — Agent 编排入口"""
 
 import asyncio
+from datetime import datetime
 from typing import AsyncGenerator
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
 from llm.capability import LLMCapability
-from .schemas import AnalysisRequest, AgentVerdict
+from .schemas import AnalysisRequest, AgentVerdict, Blackboard
 from .personas import AGENT_PERSONAS
 from .runner import run_agent, AgentRunError
 from .aggregator import aggregate_verdicts
 from .memory import AgentMemory
 from .data_fetcher import DataFetcher
+from .debate import run_debate, persist_debate
 
 
 class Orchestrator:
@@ -109,20 +112,57 @@ class Orchestrator:
 
         yield {"event": "result", "data": {"report": report.model_dump(mode="json")}}
 
+        # 专家辩论（仅 depth=deep 且 LLM 可用时触发）
+        judge_verdict = None
+        if request.depth == "deep" and self._llm.enabled:
+            try:
+                now = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
+                blackboard = Blackboard(
+                    target=target,
+                    debate_id=f"{target}_{now.strftime('%Y%m%d%H%M%S')}",
+                    worker_verdicts=verdicts,
+                    conflicts=report.conflicts,
+                    max_rounds=3,
+                )
+                async for event in run_debate(
+                    blackboard=blackboard,
+                    llm=self._llm._provider,
+                    memory=self._memory,
+                    data_fetcher=self._data,
+                ):
+                    yield event
+                    # 捕获裁判结果用于 RAG 存储
+                    if event.get("event") == "judge_verdict":
+                        judge_verdict = event.get("data")
+            except Exception as e:
+                logger.error(f"专家辩论异常 [{target}]: {e}")
+                yield {"event": "debate_error", "data": {"error": str(e)}}
+
         # RAG 写入：将分析报告存入向量库供后续检索
         if self._rag and report:
             try:
                 from rag.schemas import ReportRecord
-                from datetime import datetime, timezone
+                now_utc = datetime.now(tz=ZoneInfo("UTC"))
                 self._rag.store(ReportRecord(
-                    report_id=f"{target}_{datetime.now(tz=timezone.utc).strftime('%Y%m%d%H%M%S')}",
+                    report_id=f"{target}_{now_utc.strftime('%Y%m%d%H%M%S')}",
                     code=target,
                     summary=report.summary,
                     signal=report.overall_signal,
                     score=report.score,
                     report_type="agent_analysis",
-                    created_at=datetime.now(tz=timezone.utc),
+                    created_at=now_utc,
                 ))
+                # 辩论裁决也存入 RAG
+                if judge_verdict and judge_verdict.get("summary"):
+                    self._rag.store(ReportRecord(
+                        report_id=judge_verdict.get("debate_id", f"{target}_debate"),
+                        code=target,
+                        summary=judge_verdict["summary"],
+                        signal=judge_verdict.get("signal"),
+                        score=judge_verdict.get("score"),
+                        report_type="debate",
+                        created_at=now_utc,
+                    ))
             except Exception as e:
                 logger.warning(f"RAG 报告存储失败 [{target}]: {e}")
 

@@ -204,7 +204,6 @@ async def fulfill_data_requests(
     """执行数据请求，结果就地写入 req.result/status。不抛出异常。"""
     for req in pending:
         try:
-            # TODO: 合并 Claude A 后 DataFetcher 已有 fetch_by_request()
             result = await data_fetcher.fetch_by_request(req)
             req.result = result
             req.status = "done"
