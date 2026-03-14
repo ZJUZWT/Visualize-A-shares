@@ -131,9 +131,10 @@ class LLMCapability:
 
 | 组件 | Memory 类型 | 存储位置 |
 |------|------------|---------|
-| 业务引擎 | LLM 调用缓存（KV） | 数据引擎 DuckDB `llm_cache` 表 |
-| 专家层 | 对话历史（Conversation） | 数据引擎 DuckDB `chat_history` 表 |
-| 专家层 | 长期记忆（RAG，远期） | 向量数据库（独立，远期） |
+| 业务引擎 | LLM 调用缓存（KV） | 数据引擎 DuckDB `shared.llm_cache` |
+| 专家层 | 对话历史（Conversation） | 数据引擎 DuckDB `shared.chat_history` |
+| 专家层 | 角色推理记忆（向量） | ChromaDB `data/chromadb/` |
+| 专家层 | 历史分析报告 RAG | ChromaDB `data/chromadb_rag/` ✅ 已完成 |
 
 ## 实施阶段
 
@@ -157,21 +158,21 @@ class LLMCapability:
 - 新增 MCP tools（查新闻、查舆情）
 - 前提：Phase 1 完成（数据引擎接口稳定）
 
-### Phase 4：LLM 基础设施 + 专家层整合
+### Phase 4：LLM 基础设施 + 专家层整合 ✅ 已完成（2026-03-14）
 
-- 实现 `LLMCapability` 统一接口
-- 数据引擎新增 `llm_cache` 和 `chat_history` 表
-- MCP Server 扩展：跨引擎组合工具
-- 结构化分析模板（基本面+消息面+技术面三维报告）
-- 前端对话面板接入 LLM API + Conversation Memory
-- 前提：Phase 2 + Phase 3 完成
+- `LLMCapability` 统一接口实现（`llm/capability.py`）— complete/classify/extract + 透明缓存
+- DuckDB 新增 `shared.llm_cache` + `shared.chat_history` 表
+- InfoEngine 重构：SentimentAnalyzer / EventAssessor 改用 `LLMCapability`
+- Agent 层适配：runner.py / orchestrator.py 改用 `LLMCapability`
+- `DataFetcher.fetch_by_request()` + `ACTION_DISPATCH` 统一路由
+- 全量测试 70 passed，LLM disabled 时所有功能正常降级
 
-### Phase 5：RAG 增强（远期）
+### Phase 5：RAG 增强 ✅ 已完成（2026-03-14）
 
-- 历史分析报告向量化存储
-- 研报/公告知识库
-- 检索增强生成
-- 前提：Phase 4 完成
+- `rag/` 模块：`RAGStore`（ChromaDB）+ `ReportRecord` schema + 单例工厂
+- `RAGConfig` 注册到 `AppConfig`，persist_dir 与 AgentMemory 隔离
+- Orchestrator 分析前检索历史报告注入 `data_map["historical_reports"]`
+- 分析完成后自动写入 RAGStore，形成自增强闭环
 
 ## 核心需求：板块资金轮动追踪
 
