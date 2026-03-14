@@ -1,1 +1,29 @@
 """信息引擎模块 — 新闻/公告/情感分析/事件评估"""
+
+from .engine import InfoEngine
+from data_engine import get_data_engine
+
+_info_engine: InfoEngine | None = None
+
+
+def get_info_engine() -> InfoEngine:
+    """获取信息引擎全局单例（依赖数据引擎，可选 LLM）"""
+    global _info_engine
+    if _info_engine is None:
+        llm_provider = None
+        try:
+            from llm.config import llm_settings
+            from llm.providers import LLMProviderFactory
+            if llm_settings.api_key:
+                llm_provider = LLMProviderFactory.create(llm_settings)
+        except Exception:
+            pass
+
+        _info_engine = InfoEngine(
+            data_engine=get_data_engine(),
+            llm_provider=llm_provider,
+        )
+    return _info_engine
+
+
+__all__ = ["InfoEngine", "get_info_engine"]
