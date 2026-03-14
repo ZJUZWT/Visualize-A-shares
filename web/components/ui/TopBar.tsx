@@ -7,6 +7,8 @@
 
 import { useState, useCallback } from "react";
 import { useTerrainStore } from "@/stores/useTerrainStore";
+import { Search, X } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import type { StockPoint } from "@/types/terrain";
 import { formatZValue } from "@/types/terrain";
 
@@ -55,23 +57,11 @@ export default function TopBar() {
     : null;
 
   return (
-    <div className="overlay fixed top-4 left-[280px] right-[260px] flex items-center gap-3">
+    <div className="overlay fixed top-4 left-[280px] right-4 flex items-center gap-3">
       {/* 搜索框 */}
       <div className="glass-panel relative">
         <div className="flex items-center px-4 py-2.5">
-          <svg
-            className="w-4 h-4 text-[var(--text-tertiary)] mr-2 flex-shrink-0"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-            />
-          </svg>
+          <Search className="w-4 h-4 text-[var(--text-tertiary)] mr-2 flex-shrink-0" />
           <input
             type="text"
             value={searchQuery}
@@ -88,44 +78,55 @@ export default function TopBar() {
               }}
               className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] ml-1"
             >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              <X className="w-3.5 h-3.5" />
             </button>
+          )}
+          {!searchQuery && (
+            <kbd className="ml-auto text-[10px] text-[var(--text-tertiary)] bg-gray-100 px-1.5 py-0.5 rounded font-mono border border-[var(--border)] flex-shrink-0">
+              ⌘K
+            </kbd>
           )}
         </div>
 
         {/* 搜索结果下拉 */}
-        {searchResults.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1.5 glass-panel py-1 max-h-[300px] overflow-y-auto">
-            {searchResults.map((stock) => (
-              <button
-                key={stock.code}
-                onClick={() => {
-                  setSelectedStock(stock);
-                  setSearchQuery("");
-                  setSearchResults([]);
-                }}
-                className="w-full px-4 py-2.5 text-left hover:bg-gray-50 transition-smooth flex items-center justify-between"
-              >
-                <div>
-                  <span className="text-sm font-medium text-[var(--text-primary)]">
-                    {stock.name}
-                  </span>
-                  <span className="text-xs text-[var(--text-tertiary)] ml-2 font-mono">
-                    {stock.code}
-                  </span>
-                </div>
-                <span
-                  className="text-xs font-mono font-semibold"
-                  style={{ color: formatZValue(stock, zMetric).color }}
+        <AnimatePresence>
+          {searchResults.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+              className="absolute top-full left-0 right-0 mt-1.5 glass-panel py-1 max-h-[300px] overflow-y-auto"
+            >
+              {searchResults.map((stock) => (
+                <button
+                  key={stock.code}
+                  onClick={() => {
+                    setSelectedStock(stock);
+                    setSearchQuery("");
+                    setSearchResults([]);
+                  }}
+                  className="w-full px-4 py-2.5 text-left hover:bg-gray-50 transition-smooth flex items-center justify-between"
                 >
-                  {formatZValue(stock, zMetric).text}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+                  <div>
+                    <span className="text-sm font-medium text-[var(--text-primary)]">
+                      {stock.name}
+                    </span>
+                    <span className="text-xs text-[var(--text-tertiary)] ml-2 font-mono">
+                      {stock.code}
+                    </span>
+                  </div>
+                  <span
+                    className="text-xs font-mono font-semibold"
+                    style={{ color: formatZValue(stock, zMetric).color }}
+                  >
+                    {formatZValue(stock, zMetric).text}
+                  </span>
+                </button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* 市场概况 */}
