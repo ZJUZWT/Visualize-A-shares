@@ -27,11 +27,19 @@
 - `engine/main.py` 会将 engine/ 加入 sys.path
 - MCP 包命名 `mcpserver` 而非 `mcp`，避免与 mcp SDK 冲突
 
+## 环境安装
+```bash
+cd engine
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]" -i https://pypi.tuna.tsinghua.edu.cn/simple
+```
+> torch + sentence-transformers 较大（~2GB），仅重建嵌入时需要，日常开发可考虑移至 optional dependencies。
+
 ## 运行
-- 后端: `cd engine && python main.py` (端口 8000)
+- 后端: `cd engine && .venv/bin/python main.py` (端口 8000)
 - 前端: `cd web && npm run dev` (端口 3000)
-- MCP: `cd engine && python -m mcpserver` (stdio, 配置见 `.mcp.json`)
-- 重建嵌入: `cd engine && python -m cluster_engine.preprocess.rebuild_bge`
+- MCP: `cd engine && .venv/bin/python -m mcpserver` (stdio, 配置见 `.mcp.json`)
+- 重建嵌入: `cd engine && .venv/bin/python -m cluster_engine.preprocess.rebuild_bge`
 
 ## MCP 使用须知
 - 使用 MCP 工具前必须先启动后端 (`cd engine && python main.py`)
