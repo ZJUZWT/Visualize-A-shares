@@ -107,6 +107,13 @@ class InfoConfig(BaseModel):
     sentiment_mode: str = "auto"  # "auto" | "llm" | "rules"
 
 
+# ─── RAG 配置 ─────────────────────────────────────────
+class RAGConfig(BaseModel):
+    """RAG 历史报告检索配置"""
+    persist_dir: str = str(DATA_DIR / "chromadb_rag")  # 与 AgentMemory 的 chromadb 隔离
+    search_top_k: int = 3                               # Orchestrator 检索时的默认 top_k
+
+
 # ─── 聚合配置 ───────────────────────────────────────────
 class AppConfig(BaseModel):
     datasource: DataSourceConfig = DataSourceConfig()
@@ -119,6 +126,7 @@ class AppConfig(BaseModel):
     quant: QuantConfig = QuantConfig()
     chromadb: ChromaDBConfig = ChromaDBConfig()
     info: InfoConfig = InfoConfig()
+    rag: RAGConfig = RAGConfig()
 
 
 # 全局单例
