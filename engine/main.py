@@ -24,6 +24,7 @@ from data_engine.routes import router as data_router
 from cluster_engine.routes import router as cluster_router
 from api.routes.chat import router as chat_router
 from quant_engine.routes import router as quant_router
+from api.routes.analysis import router as analysis_router
 
 # ─── 配置日志 ──────────────────────────────────────────
 logger.remove()
@@ -62,6 +63,7 @@ app.include_router(data_router)
 app.include_router(cluster_router)
 app.include_router(chat_router)
 app.include_router(quant_router)
+app.include_router(analysis_router)
 
 
 # ─── 启动/关闭事件 ────────────────────────────────────
@@ -131,6 +133,7 @@ async def root():
             "quant_factor_defs": "GET /api/v1/quant/factor/defs",
             "quant_backtest": "POST /api/v1/quant/factor/backtest",
             "quant_indicators": "GET /api/v1/quant/indicators/{code}",
+            "analysis": "POST /api/v1/analysis (SSE 流式)",
         },
     }
 
