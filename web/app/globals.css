@@ -71,6 +71,13 @@ html, body {
   width: 100vw;
   height: 100vh;
   z-index: 0;
+  background: radial-gradient(
+    ellipse at 30% 20%,
+    #EEF4FF 0%,
+    #F8FAFE 40%,
+    #FDF8F5 70%,
+    #F5F7FA 100%
+  );
 }
 
 /* 覆盖层 */
@@ -122,7 +129,7 @@ html, body {
   background: var(--accent);
   color: white;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 10px 16px;
   font-weight: 500;
   font-size: 13px;
@@ -149,7 +156,7 @@ html, body {
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 8px 14px;
   font-weight: 500;
   font-size: 13px;
@@ -226,7 +233,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 /* 过渡效果 */
 .transition-smooth {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.25s var(--ease-out-expo);
 }
 
 /* AI 聊天面板弹入动画 */
