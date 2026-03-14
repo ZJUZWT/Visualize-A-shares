@@ -13,7 +13,6 @@ v3.0 变更：
   - 公司概况数据改用 company_profiles.json
 """
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -24,7 +23,7 @@ from sklearn.decomposition import PCA
 
 
 # ─── 路径 ──────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 PRECOMPUTED_DIR = PROJECT_ROOT / "data" / "precomputed"
 
 
@@ -62,7 +61,7 @@ PCA_TARGET_DIM = 50     # 最终 PCA 降维目标维度
 
 
 class PrecomputedData:
-    """预计算数据加载器 v3.0"""
+    """预计算数据加载器 v3.1 — 嵌入加载 + 外部注入 profiles"""
 
     def __init__(self):
         self.available = False
@@ -70,44 +69,17 @@ class PrecomputedData:
         self.embedding_codes: np.ndarray | None = None
         self.embeddings: np.ndarray | None = None
         self.embedding_dim: int = 0
-        self._load()
+        self._load_embeddings()
 
-    def _load(self):
-        """尝试加载预计算文件"""
-        profiles_path = PRECOMPUTED_DIR / "company_profiles.json"
+    def set_profiles(self, profiles: dict):
+        """外部注入公司概况数据（由 DataEngine 提供）"""
+        self.profiles = profiles
+        logger.info(f"📋 公司概况注入: {len(profiles)} 只股票")
+
+    def _load_embeddings(self):
+        """加载预计算嵌入向量文件"""
         embedding_path = PRECOMPUTED_DIR / "stock_embeddings.npz"
 
-        # v3.0: 优先用 company_profiles.json
-        # 兼容 v2.0: 如果没有 profiles 但有 industry_mapping 也算可用
-        if profiles_path.exists():
-            try:
-                with open(profiles_path, "r", encoding="utf-8") as f:
-                    self.profiles = json.load(f)
-                logger.info(
-                    f"📋 公司概况加载: {len(self.profiles)} 只股票"
-                )
-            except Exception as e:
-                logger.warning(f"公司概况加载失败: {e}")
-        else:
-            # 兼容 v2.0 的 industry_mapping.json
-            industry_path = PRECOMPUTED_DIR / "industry_mapping.json"
-            if industry_path.exists():
-                try:
-                    with open(industry_path, "r", encoding="utf-8") as f:
-                        industry_mapping = json.load(f)
-                    # 转换为 profiles 格式
-                    for code, info in industry_mapping.items():
-                        self.profiles[code] = {
-                            "code": code,
-                            "industry": info.get("industry_name", ""),
-                        }
-                    logger.info(
-                        f"📋 兼容 v2.0 行业映射: {len(self.profiles)} 只"
-                    )
-                except Exception:
-                    pass
-
-        # 加载嵌入
         if embedding_path.exists():
             try:
                 data = np.load(embedding_path, allow_pickle=True)
@@ -129,15 +101,10 @@ class PrecomputedData:
         # 必须有嵌入数据才算可用
         if self.embeddings is not None and len(self.embeddings) > 0:
             self.available = True
-            logger.info("✅ 预计算数据加载完成 — 语义嵌入融合模式")
-        elif len(self.profiles) > 0:
-            logger.warning(
-                "⚠️ 有公司概况但无嵌入向量，退化为纯数值特征模式。"
-                "请运行: python -m preprocess.build_embeddings"
-            )
+            logger.info("✅ 预计算嵌入加载完成 — 语义嵌入融合模式")
         else:
             logger.warning(
-                "⚠️ 预计算文件不存在，使用纯数值特征模式。"
+                "⚠️ 嵌入向量文件不存在，使用纯数值特征模式。"
                 "运行 python -m preprocess.build_embeddings 生成数据。"
             )
 
@@ -242,12 +209,15 @@ class PrecomputedData:
 class FeatureEngineer:
     """特征工程引擎 v3.0 — 语义嵌入 + 数值特征融合"""
 
-    def __init__(self):
+    def __init__(self, profiles: dict | None = None):
         self._scaler = StandardScaler()
         self._pca = None
         self._fitted = False
         self._precomputed = PrecomputedData()
         self._cluster_centers_embedding: dict[int, np.ndarray] | None = None
+
+        if profiles is not None:
+            self._precomputed.set_profiles(profiles)
 
     @property
     def precomputed(self) -> PrecomputedData:
