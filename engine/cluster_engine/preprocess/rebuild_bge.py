@@ -7,7 +7,7 @@ v4.0 核心改进 — 产业链拓扑嵌入:
 - 更激进的 scope 清洗（去除所有法律/行政套话）
 - 退市股票过滤
 
-用法：cd engine && python -m preprocess.rebuild_bge
+用法：cd engine && python -m cluster_engine.preprocess.rebuild_bge
 """
 
 import sys
@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 PRECOMPUTED_DIR = PROJECT_ROOT / "data" / "precomputed"
 
 sys.path.insert(0, str(PROJECT_ROOT / "engine"))
