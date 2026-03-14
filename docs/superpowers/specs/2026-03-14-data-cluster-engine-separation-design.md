@@ -207,6 +207,8 @@ WS   /api/v1/ws/terrain             # WebSocket 实时推送
 
 `FeatureEngineer` 的构造函数改为接收 `profiles: dict` 参数，不再自己加载 JSON。
 
+相应地，`AlgorithmPipeline.__init__` 的签名也需要变化：接收 `data_engine: DataEngine` 参数，在构造 `FeatureEngineer` 时传入 `data_engine.get_profiles()`。
+
 ### 3. terrain.py 拆分
 
 当前 `terrain.py` 包含：
@@ -235,8 +237,8 @@ WS   /api/v1/ws/terrain             # WebSocket 实时推送
 from data_engine.routes import router as data_router
 from cluster_engine.routes import router as cluster_router
 
-app.include_router(data_router)
-app.include_router(cluster_router)
+app.include_router(data_router)     # 路由内部定义 prefix="/api/v1/data"
+app.include_router(cluster_router)  # 路由内部定义 prefix="/api/v1"
 
 @app.on_event("startup")
 async def startup():
@@ -278,6 +280,7 @@ from cluster_engine.algorithm.pipeline import AlgorithmPipeline
 | `ClusterInfo`, `StockPoint`, `ClusterAffinity`, `RelatedStock` | `cluster_engine/schemas.py` | 算法产物 |
 | `HistoryRequest`, `HistoryResponse`, `HistoryFrame` | `cluster_engine/schemas.py` | 历史回放是聚类层编排 |
 | `ChatRequest`, `ChatResponse`, `LLMConfigRequest`, `LLMConfigResponse` | 保留在 `api/schemas.py`（LLM 路由共享） | LLM 模块独立，不属于任一引擎 |
+| `StockSearchResult` | `cluster_engine/schemas.py` | 搜索是聚类层功能 |
 
 `data_engine/schemas.py` 新建，定义数据引擎独有的响应模型（快照查询、概况查询等）。
 
