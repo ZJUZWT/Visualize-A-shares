@@ -52,21 +52,23 @@ function LeftPanel() {
     isStaticMode,
     zMetric,
     heightScale,
-    radiusScale,
     xyScale,
-    xScaleRatio,
-    yScaleRatio,
-    gridResolution,
     computeProgress,
     setHeightScale,
-    setRadiusScale,
     setXYScale,
-    setXScaleRatio,
-    setYScaleRatio,
-    setGridResolution,
     fetchTerrain,
     refreshTerrain,
     switchMetricLocal,
+    showLabels,
+    showGrid,
+    showContours,
+    flattenBalls,
+    showDropLines,
+    toggleLabels,
+    toggleGrid,
+    toggleContours,
+    toggleFlattenBalls,
+    toggleDropLines,
   } = useTerrainStore();
 
   return (
@@ -86,7 +88,7 @@ function LeftPanel() {
             </p>
           </div>
           <span className="text-[10px] text-[var(--text-tertiary)] font-mono ml-auto bg-[var(--accent-light)] px-2 py-0.5 rounded-full flex-shrink-0">
-            v3.0
+            v3.1
           </span>
         </div>
       </div>
@@ -97,7 +99,7 @@ function LeftPanel() {
           <>
             {terrainData && (
               <div className="text-[11px] text-[var(--text-tertiary)] bg-[var(--accent-light)] rounded-lg px-3 py-2 text-center">
-                📸 展示模式 · 数据快照
+                展示模式 · 数据快照
               </div>
             )}
             {isLoading && (
@@ -122,9 +124,9 @@ function LeftPanel() {
                     : "连接服务器..."}
                 </span>
               ) : terrainData ? (
-                "🔄 刷新地形数据"
+                "刷新地形数据"
               ) : (
-                "🏔️ 生成 3D 地形"
+                "生成 3D 地形"
               )}
             </button>
 
@@ -162,7 +164,7 @@ function LeftPanel() {
 
         {error && (
           <div className="mt-2 text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2 border border-red-100">
-            ❌ {error}
+            {error}
           </div>
         )}
 
@@ -174,8 +176,8 @@ function LeftPanel() {
       </div>
 
       {/* ─── Z 轴指标 ──────────────────────── */}
-      <CollapsiblePanel title="Z 轴指标" icon="📊" defaultOpen>
-        <div className="flex flex-col gap-1">
+      <CollapsiblePanel title="Z 轴指标" icon={<BarChart3 className="w-3.5 h-3.5" />} defaultOpen>
+        <div className="grid grid-cols-2 gap-1">
           {(Object.entries(Z_METRIC_LABELS) as [ZMetric, string][]).map(
             ([key, label]) => (
               <button
@@ -187,7 +189,10 @@ function LeftPanel() {
                     : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-gray-50"
                 }`}
               >
-                <span>{Z_METRIC_ICONS[key]}</span>
+                {(() => {
+                  const IconComp = METRIC_ICON_COMPONENTS[key];
+                  return <IconComp className="w-3.5 h-3.5" />;
+                })()}
                 <span>{label}</span>
                 {zMetric === key && (
                   <span className="ml-auto text-[10px] text-[var(--accent)]">●</span>
@@ -199,7 +204,7 @@ function LeftPanel() {
       </CollapsiblePanel>
 
       {/* ─── 地形控制 ─────────────────────── */}
-      <CollapsiblePanel title="地形控制" icon="🏔️" defaultOpen>
+      <CollapsiblePanel title="地形控制" icon={<Mountain className="w-3.5 h-3.5" />} defaultOpen>
         <SliderControl
           label="高度缩放"
           value={heightScale}
@@ -209,49 +214,6 @@ function LeftPanel() {
           onChange={setHeightScale}
           displayValue={`×${heightScale.toFixed(1)}`}
         />
-
-        <div className="mt-2.5">
-          <SliderControl
-            label="核平滑半径"
-            value={radiusScale}
-            min={0.1}
-            max={6.0}
-            step={0.1}
-            onChange={setRadiusScale}
-            displayValue={`×${radiusScale.toFixed(1)}`}
-            hint="越小越尖锐(单点)·越大越平滑"
-          />
-        </div>
-
-        <div className="mt-2.5">
-          <SliderControl
-            label="网格分辨率"
-            value={gridResolution}
-            min={64}
-            max={1024}
-            step={64}
-            onChange={(v) => setGridResolution(Math.round(v))}
-            displayValue={`${gridResolution}×${gridResolution}`}
-            hint="越高越精细·计算越慢"
-          />
-        </div>
-
-        {!isStaticMode && (radiusScale !== 2.0 || gridResolution !== 512) && (
-          <button
-            onClick={fetchTerrain}
-            disabled={isLoading}
-            className="btn-secondary w-full mt-2 text-xs"
-          >
-            {isLoading ? (
-              <span className="flex items-center justify-center gap-1.5">
-                <Spinner />
-                {computeProgress
-                  ? `${computeProgress.step}/${computeProgress.totalSteps} ${computeProgress.stepName}`
-                  : "连接服务器..."}
-              </span>
-            ) : "🔄 应用核半径/分辨率"}
-          </button>
-        )}
 
         <div className="mt-2.5">
           <SliderControl
@@ -265,35 +227,11 @@ function LeftPanel() {
             hint="整体放大/缩小地形平面"
           />
         </div>
-
-        <div className="mt-2.5">
-          <SliderControl
-            label="X 轴比例"
-            value={xScaleRatio}
-            min={0.3}
-            max={3.0}
-            step={0.05}
-            onChange={setXScaleRatio}
-            displayValue={`×${xScaleRatio.toFixed(2)}`}
-          />
-        </div>
-
-        <div className="mt-2.5">
-          <SliderControl
-            label="Y 轴比例"
-            value={yScaleRatio}
-            min={0.3}
-            max={3.0}
-            step={0.05}
-            onChange={setYScaleRatio}
-            displayValue={`×${yScaleRatio.toFixed(2)}`}
-          />
-        </div>
       </CollapsiblePanel>
 
       {/* ─── 数据概览 ─────────────────────── */}
       {terrainData && (
-        <CollapsiblePanel title="数据概览" icon="📋" defaultOpen={false}>
+        <CollapsiblePanel title="数据概览" icon={<FileText className="w-3.5 h-3.5" />} defaultOpen={false}>
           <div className="grid grid-cols-2 gap-2">
             <StatItem label="股票数" value={terrainData.stock_count.toLocaleString()} />
             <StatItem label="聚类数" value={terrainData.cluster_count.toString()} />
@@ -308,13 +246,92 @@ function LeftPanel() {
           </div>
         </CollapsiblePanel>
       )}
+
+      {/* ─── 显示开关（图标行）──────────────── */}
+      {terrainData && (
+        <div className="glass-panel px-4 py-3">
+          <div className="text-xs font-medium text-[var(--text-secondary)] mb-2">显示</div>
+          <div className="flex gap-1.5">
+            <button
+              onClick={toggleLabels}
+              title="股票标签"
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-smooth ${
+                showLabels ? "bg-[var(--accent-light)] text-[var(--accent)]" : "bg-gray-50 text-[var(--text-tertiary)]"
+              }`}
+            >
+              <Tag className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={toggleGrid}
+              title="底部网格"
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-smooth ${
+                showGrid ? "bg-[var(--accent-light)] text-[var(--accent)]" : "bg-gray-50 text-[var(--text-tertiary)]"
+              }`}
+            >
+              <Grid3x3 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={toggleContours}
+              title="等高线"
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-smooth ${
+                showContours ? "bg-[var(--accent-light)] text-[var(--accent)]" : "bg-gray-50 text-[var(--text-tertiary)]"
+              }`}
+            >
+              <Waves className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={toggleFlattenBalls}
+              title="球体拍平"
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-smooth ${
+                flattenBalls ? "bg-[var(--accent-light)] text-[var(--accent)]" : "bg-gray-50 text-[var(--text-tertiary)]"
+              }`}
+            >
+              <Minimize2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={toggleDropLines}
+              title="价格垂线"
+              className={`w-8 h-8 rounded-lg flex items-center justify-center transition-smooth ${
+                showDropLines ? "bg-[var(--accent-light)] text-[var(--accent)]" : "bg-gray-50 text-[var(--text-tertiary)]"
+              }`}
+            >
+              <GripVertical className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 聚类图例 ─────────────────────── */}
+      {terrainData && terrainData.clusters.length > 0 && (
+        <CollapsiblePanel title="聚类图例" icon={<Palette className="w-3.5 h-3.5" />} defaultOpen={false}>
+          <div className="flex flex-col gap-1">
+            {terrainData.clusters
+              .filter((c) => !c.is_noise)
+              .map((cluster, i) => (
+                <ClusterLegendItem
+                  key={cluster.cluster_id}
+                  cluster={cluster}
+                  color={CLUSTER_COLORS[i % CLUSTER_COLORS.length]}
+                />
+              ))}
+            {terrainData.clusters.find((c) => c.is_noise) && (
+              <div className="flex items-center gap-2 text-xs py-1 px-2 opacity-60">
+                <div
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: NOISE_COLOR }}
+                />
+                <span>离群</span>
+                <span className="font-mono ml-auto text-[11px]">
+                  {terrainData.clusters.find((c) => c.is_noise)?.size}
+                </span>
+              </div>
+            )}
+          </div>
+        </CollapsiblePanel>
+      )}
     </div>
   );
 }
-
-/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- * 右侧面板 — 辅助设置 & 信息
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 function RightPanel() {
   const {
     terrainData,
