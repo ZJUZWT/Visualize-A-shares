@@ -1,5 +1,5 @@
 """
-MCP Tools — 18 个 Tool 实现
+MCP Tools — 22 个 Tool 实现
 
 每个 tool 返回 AI 友好的 Markdown 文本（非原始 JSON）。
 在线模式优先走 REST API，离线自动降级到 DuckDB read-only。
@@ -1135,3 +1135,139 @@ def assess_event_impact(da: "DataAccess", code: str, event_desc: str) -> str:
         return json.dumps(impact.model_dump(), ensure_ascii=False, indent=2)
     except Exception as e:
         return json.dumps({"error": f"事件评估失败: {e}"}, ensure_ascii=False)
+
+
+# TODO Phase 4: full_analysis 组合工具（预留，本次不实现）
+# def full_analysis(da: DataAccess, code: str) -> str:
+#     """并行调用三引擎数据聚合，返回结构化 Markdown 报告（不调 LLM，推理留给 MCP 调用方）"""
+#     pass
+
+
+# ─── Debate Tools ──────────────────────────────────
+
+def _get_debate_record(da: "DataAccess", debate_id: str) -> dict | None:
+    """从 DuckDB 读取辩论记录"""
+    try:
+        df = da.db_query(
+            "SELECT * FROM shared.debate_records WHERE id = ?", [debate_id]
+        )
+        if df.empty:
+            return None
+        return df.iloc[0].to_dict()
+    except Exception:
+        return None
+
+
+def start_debate(da: "DataAccess", code: str, max_rounds: int = 3) -> str:
+    """发起专家辩论"""
+    if not da.is_online():
+        return json.dumps({
+            "error": "后端未运行，无法发起辩论",
+            "hint": "请先启动 engine: `cd engine && python main.py`",
+        }, ensure_ascii=False, indent=2)
+
+    result = da.api_post(
+        "/api/v1/analysis",
+        params={
+            "trigger_type": "user",
+            "target": code,
+            "target_type": "stock",
+            "depth": "deep",
+            "max_debate_rounds": max_rounds,
+        },
+    )
+    if result and not result.get("_error"):
+        return json.dumps({
+            "status": "辩论已触发",
+            "code": code,
+            "max_rounds": max_rounds,
+            "note": "辩论通过 SSE 流式推送，使用 get_debate_status 查询进度",
+        }, ensure_ascii=False, indent=2)
+
+    return json.dumps({
+        "status": "请通过 REST API 触发辩论",
+        "hint": f"POST /api/v1/analysis with depth='deep', target='{code}'",
+    }, ensure_ascii=False, indent=2)
+
+
+def get_debate_status(da: "DataAccess", debate_id: str) -> str:
+    """查询辩论进度"""
+    record = _get_debate_record(da, debate_id)
+    if not record:
+        return json.dumps({"error": f"未找到辩论记录: {debate_id}"}, ensure_ascii=False)
+
+    bb_json = record.get("blackboard_json")
+    status_info = {
+        "debate_id": debate_id,
+        "target": record.get("target"),
+        "max_rounds": record.get("max_rounds"),
+        "rounds_completed": record.get("rounds_completed"),
+        "termination_reason": record.get("termination_reason"),
+        "created_at": str(record.get("created_at", "")),
+        "completed_at": str(record.get("completed_at", "")),
+    }
+
+    if bb_json:
+        try:
+            bb = json.loads(bb_json)
+            status_info["status"] = bb.get("status", "unknown")
+            status_info["bull_conceded"] = bb.get("bull_conceded", False)
+            status_info["bear_conceded"] = bb.get("bear_conceded", False)
+        except json.JSONDecodeError:
+            status_info["status"] = "unknown"
+
+    return json.dumps(status_info, ensure_ascii=False, indent=2)
+
+
+def get_debate_transcript(
+    da: "DataAccess", debate_id: str,
+    round: int | None = None, role: str | None = None,
+) -> str:
+    """获取辩论记录，支持按轮次和角色过滤"""
+    record = _get_debate_record(da, debate_id)
+    if not record:
+        return json.dumps({"error": f"未找到辩论记录: {debate_id}"}, ensure_ascii=False)
+
+    bb_json = record.get("blackboard_json")
+    if not bb_json:
+        return json.dumps({"error": "辩论记录无 Blackboard 数据"}, ensure_ascii=False)
+
+    try:
+        bb = json.loads(bb_json)
+    except json.JSONDecodeError:
+        return json.dumps({"error": "Blackboard JSON 解析失败"}, ensure_ascii=False)
+
+    transcript = bb.get("transcript", [])
+
+    # 过滤
+    if round is not None:
+        transcript = [e for e in transcript if e.get("round") == round]
+    if role is not None:
+        transcript = [e for e in transcript if e.get("role") == role]
+
+    return json.dumps({
+        "debate_id": debate_id,
+        "target": record.get("target"),
+        "total_entries": len(transcript),
+        "transcript": transcript,
+    }, ensure_ascii=False, indent=2)
+
+
+def get_judge_verdict(da: "DataAccess", debate_id: str) -> str:
+    """获取裁判最终总结"""
+    record = _get_debate_record(da, debate_id)
+    if not record:
+        return json.dumps({"error": f"未找到辩论记录: {debate_id}"}, ensure_ascii=False)
+
+    verdict_json = record.get("judge_verdict_json")
+    if not verdict_json:
+        return json.dumps({
+            "error": "辩论尚未完成或无裁判总结",
+            "debate_id": debate_id,
+        }, ensure_ascii=False)
+
+    try:
+        verdict = json.loads(verdict_json)
+        return json.dumps(verdict, ensure_ascii=False, indent=2)
+    except json.JSONDecodeError:
+        return json.dumps({"error": "JudgeVerdict JSON 解析失败"}, ensure_ascii=False)

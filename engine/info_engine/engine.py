@@ -19,15 +19,12 @@ from .event_assessor import EventAssessor
 class InfoEngine:
     """消息面引擎 — 新闻/公告/事件评估的门面"""
 
-    def __init__(self, data_engine, llm_provider=None):
-        from config import settings
-
+    def __init__(self, data_engine, llm_capability=None):
         self._data = data_engine
-        self._sentiment = SentimentAnalyzer(llm_provider)
-        self._assessor = EventAssessor(llm_provider)
+        self._sentiment = SentimentAnalyzer(llm_capability=llm_capability)
+        self._assessor = EventAssessor(llm_capability=llm_capability)
         self._store = data_engine.store
-        self._config = settings.info
-        self._llm = llm_provider
+        self._config = None
 
     # ── 新闻 ──
 
@@ -117,10 +114,14 @@ class InfoEngine:
     # ── 健康检查 ──
 
     def health_check(self) -> dict:
+        llm_available = (
+            self._sentiment._llm is not None
+            and self._sentiment._llm.enabled
+        )
         return {
             "status": "ok",
-            "sentiment_mode": "llm" if self._llm else "rules",
-            "llm_available": self._llm is not None,
+            "sentiment_mode": "llm" if llm_available else "rules",
+            "llm_available": llm_available,
         }
 
     # ── 缓存操作（私有方法）──
