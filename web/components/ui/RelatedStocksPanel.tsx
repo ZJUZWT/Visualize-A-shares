@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import { useTerrainStore } from "@/stores/useTerrainStore";
+import { Link as LinkIcon, Pin } from "lucide-react";
 import type { RelatedStock, SimilarStock } from "@/types/terrain";
 
 export default function RelatedStocksPanel() {
@@ -32,8 +33,8 @@ export default function RelatedStocksPanel() {
       <div className="glass-panel px-4 py-3 max-h-[420px] flex flex-col">
         {/* 标题 */}
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
-            🔗 关联股票
+          <h3 className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider flex items-center gap-1.5">
+            <LinkIcon className="w-3.5 h-3.5" /> 关联股票
           </h3>
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-medium text-[var(--text-primary)]">
@@ -43,7 +44,7 @@ export default function RelatedStocksPanel() {
               {activeStock.cluster_id === -1 ? "离群" : `簇 #${activeStock.cluster_id}`}
             </span>
             {isSelected && (
-              <span className="text-[10px] text-[var(--accent)]">📌</span>
+              <Pin className="w-3 h-3 text-[var(--accent)]" />
             )}
           </div>
         </div>
