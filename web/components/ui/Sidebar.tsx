@@ -1,12 +1,12 @@
 "use client";
 
 /**
- * Sidebar v3.0 — 双侧面板布局
+ * Sidebar v3.1 — 单左侧栏 + 底部浮动工具栏
  *
- * v3.0 更新：
- * - 拆分为左侧面板（核心操作）+ 右侧面板（辅助信息/设置）
- * - 所有面板可折叠
- * - 两侧均可独立滚动
+ * v3.1 更新：
+ * - 单左侧面板（核心操作 + 显示开关 + 聚类图例）
+ * - 底部浮动工具栏 + 弹出面板（历史回放 / 高级设置 / 质量）
+ * - Lucide 图标 + framer-motion 动画
  */
 
 import { useState } from "react";
@@ -35,7 +35,7 @@ export default function Sidebar() {
   return (
     <>
       <LeftPanel />
-      <RightPanel />
+      <BottomToolbar />
     </>
   );
 }
@@ -332,6 +332,499 @@ function LeftPanel() {
     </div>
   );
 }
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * 底部浮动工具栏 + 弹出面板
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+function BottomToolbar() {
+  const {
+    terrainData,
+    isStaticMode,
+    isLoading,
+    // 历史回放
+    playbackFrames, playbackIndex, isPlaying, playbackSpeed, playbackLoading, fetchProgress,
+    fetchHistory, setPlaybackIndex, togglePlayback, setPlaybackSpeed, stopPlayback,
+    // 聚类权重
+    weightEmbedding, weightIndustry, weightNumeric, pcaTargetDim, embeddingPcaDim,
+    setWeightEmbedding, setWeightIndustry, setWeightNumeric, setPcaTargetDim, setEmbeddingPcaDim,
+    // 高级地形参数
+    radiusScale, gridResolution, xScaleRatio, yScaleRatio,
+    setRadiusScale, setGridResolution, setXScaleRatio, setYScaleRatio,
+    fetchTerrain, computeProgress,
+  } = useTerrainStore();
+
+  const [activePopup, setActivePopup] = useState<"playback" | "settings" | "quality" | null>(null);
+
+  if (!terrainData || isStaticMode) return null;
+
+  const togglePopup = (panel: typeof activePopup) => {
+    setActivePopup((prev) => (prev === panel ? null : panel));
+  };
+
+  return (
+    <>
+      {/* 弹出面板 */}
+      <AnimatePresence>
+        {activePopup && (
+          <motion.div
+            key={activePopup}
+            initial={{ opacity: 0, y: 12, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="overlay fixed bottom-16 left-[280px] w-[360px] z-30"
+          >
+            <div className="glass-panel p-4 max-h-[400px] overflow-y-auto scrollbar-thin">
+              {activePopup === "playback" && (
+                <PlaybackPopup
+                  playbackFrames={playbackFrames}
+                  playbackIndex={playbackIndex}
+                  isPlaying={isPlaying}
+                  playbackSpeed={playbackSpeed}
+                  playbackLoading={playbackLoading}
+                  fetchProgress={fetchProgress}
+                  isLoading={isLoading}
+                  onFetchHistory={() => fetchHistory(7)}
+                  onSetPlaybackIndex={setPlaybackIndex}
+                  onTogglePlayback={togglePlayback}
+                  onSetPlaybackSpeed={setPlaybackSpeed}
+                  onStopPlayback={stopPlayback}
+                />
+              )}
+              {activePopup === "settings" && (
+                <SettingsPopup
+                  weightEmbedding={weightEmbedding}
+                  weightIndustry={weightIndustry}
+                  weightNumeric={weightNumeric}
+                  pcaTargetDim={pcaTargetDim}
+                  embeddingPcaDim={embeddingPcaDim}
+                  radiusScale={radiusScale}
+                  gridResolution={gridResolution}
+                  xScaleRatio={xScaleRatio}
+                  yScaleRatio={yScaleRatio}
+                  isLoading={isLoading}
+                  computeProgress={computeProgress}
+                  onSetWeightEmbedding={setWeightEmbedding}
+                  onSetWeightIndustry={setWeightIndustry}
+                  onSetWeightNumeric={setWeightNumeric}
+                  onSetPcaTargetDim={setPcaTargetDim}
+                  onSetEmbeddingPcaDim={setEmbeddingPcaDim}
+                  onSetRadiusScale={setRadiusScale}
+                  onSetGridResolution={(v: number) => setGridResolution(Math.round(v))}
+                  onSetXScaleRatio={setXScaleRatio}
+                  onSetYScaleRatio={setYScaleRatio}
+                  onFetchTerrain={fetchTerrain}
+                />
+              )}
+              {activePopup === "quality" && terrainData.cluster_quality && (
+                <ClusterQualityPanel quality={terrainData.cluster_quality} />
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 底部工具栏 */}
+      <div className="overlay fixed bottom-4 left-[280px] right-4 flex justify-center z-20">
+        <div className="glass-panel px-4 py-2 flex items-center gap-1">
+          <button
+            onClick={() => togglePopup("playback")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-smooth ${
+              activePopup === "playback"
+                ? "bg-[var(--accent-light)] text-[var(--accent)] font-medium"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-gray-50"
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            历史回放
+          </button>
+          <div className="w-px h-4 bg-[var(--border)]" />
+          <button
+            onClick={() => togglePopup("settings")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-smooth ${
+              activePopup === "settings"
+                ? "bg-[var(--accent-light)] text-[var(--accent)] font-medium"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-gray-50"
+            }`}
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            高级设置
+          </button>
+          <div className="w-px h-4 bg-[var(--border)]" />
+          <button
+            onClick={() => togglePopup("quality")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-smooth ${
+              activePopup === "quality"
+                ? "bg-[var(--accent-light)] text-[var(--accent)] font-medium"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-gray-50"
+            }`}
+            disabled={!terrainData.cluster_quality}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            质量
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * 弹出面板：历史回放
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+function PlaybackPopup({
+  playbackFrames,
+  playbackIndex,
+  isPlaying,
+  playbackSpeed,
+  playbackLoading,
+  fetchProgress,
+  isLoading,
+  onFetchHistory,
+  onSetPlaybackIndex,
+  onTogglePlayback,
+  onSetPlaybackSpeed,
+  onStopPlayback,
+}: {
+  playbackFrames: import("@/stores/useTerrainStore").PlaybackFrame[] | null;
+  playbackIndex: number;
+  isPlaying: boolean;
+  playbackSpeed: number;
+  playbackLoading: boolean;
+  fetchProgress: import("@/stores/useTerrainStore").FetchProgress | null;
+  isLoading: boolean;
+  onFetchHistory: () => void;
+  onSetPlaybackIndex: (i: number) => void;
+  onTogglePlayback: () => void;
+  onSetPlaybackSpeed: (s: number) => void;
+  onStopPlayback: () => void;
+}) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-[var(--text-secondary)] flex items-center gap-2 mb-3">
+        <History className="w-3.5 h-3.5" /> 历史回放
+      </div>
+
+      {!playbackFrames ? (
+        <>
+          <button
+            onClick={onFetchHistory}
+            disabled={playbackLoading || isLoading}
+            className="btn-secondary w-full"
+          >
+            {playbackLoading ? (
+              <span className="flex items-center justify-center gap-2">
+                <Spinner />
+                {fetchProgress
+                  ? fetchProgress.phase === "fetching"
+                    ? `拉取行情 ${fetchProgress.done}/${fetchProgress.total}`
+                    : fetchProgress.phase === "computing"
+                      ? `计算地形 ${fetchProgress.done}/${fetchProgress.total}`
+                      : fetchProgress.message || "检查数据..."
+                  : "连接服务器..."}
+              </span>
+            ) : (
+              "加载历史回放"
+            )}
+          </button>
+
+          {/* 实时进度显示 */}
+          {playbackLoading && fetchProgress ? (
+            <div className="mt-2 space-y-1.5">
+              {/* 进度条 */}
+              {fetchProgress.total > 0 && (
+                <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-[var(--accent)] h-full rounded-full transition-all duration-300 ease-out"
+                    style={{
+                      width: `${Math.min(100, (fetchProgress.done / fetchProgress.total) * 100)}%`,
+                    }}
+                  />
+                </div>
+              )}
+              {/* 进度文字 */}
+              <div className="text-[10px] text-[var(--text-tertiary)] text-center">
+                {fetchProgress.message}
+              </div>
+              {/* 详细信息 */}
+              {fetchProgress.phase === "fetching" && fetchProgress.total > 0 && (
+                <div className="flex justify-between text-[10px] text-[var(--text-tertiary)] font-mono">
+                  <span>{fetchProgress.done}/{fetchProgress.total}</span>
+                  <span>
+                    {fetchProgress.elapsed ? `${fetchProgress.elapsed}s` : ""}
+                    {fetchProgress.done > 0 && fetchProgress.elapsed
+                      ? ` · 预计${Math.round(
+                          ((fetchProgress.total - fetchProgress.done) / fetchProgress.done) *
+                            fetchProgress.elapsed
+                        )}s`
+                      : ""}
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : !playbackLoading ? (
+            <div className="text-[10px] text-[var(--text-tertiary)] mt-1.5 text-center">
+              首次加载需拉取全市场数据
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <>
+          {/* 日期显示 */}
+          <div className="text-center mb-2">
+            <span className="font-mono text-sm font-semibold text-[var(--text-primary)]">
+              {playbackFrames[playbackIndex]?.date ?? ""}
+            </span>
+            <span className="text-[10px] text-[var(--text-tertiary)] ml-2">
+              {playbackIndex + 1}/{playbackFrames.length}
+            </span>
+          </div>
+
+          {/* 时间轴滑块 */}
+          <input
+            type="range"
+            min={0}
+            max={playbackFrames.length - 1}
+            step={1}
+            value={playbackIndex}
+            onChange={(e) => onSetPlaybackIndex(parseInt(e.target.value))}
+            className="w-full"
+          />
+
+          {/* 播放控制按钮 */}
+          <div className="flex items-center gap-1.5 mt-2">
+            <button
+              onClick={() => onSetPlaybackIndex(Math.max(0, playbackIndex - 1))}
+              className="btn-secondary flex-1 text-xs py-1.5"
+              disabled={playbackIndex === 0}
+            >
+              ⏮
+            </button>
+            <button
+              onClick={onTogglePlayback}
+              className="btn-primary flex-1 text-xs py-1.5"
+            >
+              {isPlaying ? "⏸" : "▶"}
+            </button>
+            <button
+              onClick={() => onSetPlaybackIndex(Math.min(playbackFrames.length - 1, playbackIndex + 1))}
+              className="btn-secondary flex-1 text-xs py-1.5"
+              disabled={playbackIndex === playbackFrames.length - 1}
+            >
+              ⏭
+            </button>
+          </div>
+
+          {/* 速度控制 */}
+          <div className="mt-2">
+            <SliderControl
+              label="速度"
+              value={playbackSpeed}
+              min={0.5}
+              max={5}
+              step={0.5}
+              onChange={onSetPlaybackSpeed}
+              displayValue={`${playbackSpeed.toFixed(1)}s`}
+            />
+          </div>
+
+          {/* 退出回放 */}
+          <button
+            onClick={onStopPlayback}
+            className="btn-secondary w-full mt-2 text-xs"
+          >
+            退出回放
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * 弹出面板：高级设置
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+function SettingsPopup({
+  weightEmbedding,
+  weightIndustry,
+  weightNumeric,
+  pcaTargetDim,
+  embeddingPcaDim,
+  radiusScale,
+  gridResolution,
+  xScaleRatio,
+  yScaleRatio,
+  isLoading,
+  computeProgress,
+  onSetWeightEmbedding,
+  onSetWeightIndustry,
+  onSetWeightNumeric,
+  onSetPcaTargetDim,
+  onSetEmbeddingPcaDim,
+  onSetRadiusScale,
+  onSetGridResolution,
+  onSetXScaleRatio,
+  onSetYScaleRatio,
+  onFetchTerrain,
+}: {
+  weightEmbedding: number;
+  weightIndustry: number;
+  weightNumeric: number;
+  pcaTargetDim: number;
+  embeddingPcaDim: number;
+  radiusScale: number;
+  gridResolution: number;
+  xScaleRatio: number;
+  yScaleRatio: number;
+  isLoading: boolean;
+  computeProgress: import("@/stores/useTerrainStore").ComputeProgress | null;
+  onSetWeightEmbedding: (v: number) => void;
+  onSetWeightIndustry: (v: number) => void;
+  onSetWeightNumeric: (v: number) => void;
+  onSetPcaTargetDim: (v: number) => void;
+  onSetEmbeddingPcaDim: (v: number) => void;
+  onSetRadiusScale: (v: number) => void;
+  onSetGridResolution: (v: number) => void;
+  onSetXScaleRatio: (v: number) => void;
+  onSetYScaleRatio: (v: number) => void;
+  onFetchTerrain: () => void;
+}) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-[var(--text-secondary)] flex items-center gap-2 mb-3">
+        <Settings2 className="w-3.5 h-3.5" /> 高级设置
+      </div>
+
+      {/* ─── 地形参数 ──────────────────────── */}
+      <div className="text-[10px] text-[var(--text-tertiary)] mb-2 font-medium">地形参数</div>
+      <SliderControl
+        label="核平滑半径"
+        value={radiusScale}
+        min={0.1}
+        max={6.0}
+        step={0.1}
+        onChange={onSetRadiusScale}
+        displayValue={`×${radiusScale.toFixed(1)}`}
+        hint="越小越尖锐(单点)·越大越平滑"
+      />
+      <div className="mt-2.5">
+        <SliderControl
+          label="网格分辨率"
+          value={gridResolution}
+          min={64}
+          max={1024}
+          step={64}
+          onChange={onSetGridResolution}
+          displayValue={`${gridResolution}×${gridResolution}`}
+          hint="越高越精细·计算越慢"
+        />
+      </div>
+      <div className="mt-2.5">
+        <SliderControl
+          label="X 轴比例"
+          value={xScaleRatio}
+          min={0.3}
+          max={3.0}
+          step={0.05}
+          onChange={onSetXScaleRatio}
+          displayValue={`×${xScaleRatio.toFixed(2)}`}
+        />
+      </div>
+      <div className="mt-2.5">
+        <SliderControl
+          label="Y 轴比例"
+          value={yScaleRatio}
+          min={0.3}
+          max={3.0}
+          step={0.05}
+          onChange={onSetYScaleRatio}
+          displayValue={`×${yScaleRatio.toFixed(2)}`}
+        />
+      </div>
+
+      {/* ─── 聚类权重 ──────────────────────── */}
+      <div className="text-[10px] text-[var(--text-tertiary)] mb-2 mt-4 font-medium">聚类权重</div>
+      <SliderControl
+        label="嵌入权重"
+        value={weightEmbedding}
+        min={0}
+        max={3}
+        step={0.1}
+        onChange={onSetWeightEmbedding}
+        displayValue={weightEmbedding.toFixed(1)}
+        hint="BGE 语义嵌入层权重"
+      />
+      <div className="mt-2.5">
+        <SliderControl
+          label="行业权重"
+          value={weightIndustry}
+          min={0}
+          max={2}
+          step={0.1}
+          onChange={onSetWeightIndustry}
+          displayValue={weightIndustry.toFixed(1)}
+          hint="行业 one-hot 层权重"
+        />
+      </div>
+      <div className="mt-2.5">
+        <SliderControl
+          label="数值权重"
+          value={weightNumeric}
+          min={0}
+          max={3}
+          step={0.1}
+          onChange={onSetWeightNumeric}
+          displayValue={weightNumeric.toFixed(1)}
+          hint="财务/交易特征层权重"
+        />
+      </div>
+      <div className="mt-2.5">
+        <SliderControl
+          label="PCA 维度"
+          value={pcaTargetDim}
+          min={10}
+          max={100}
+          step={5}
+          onChange={onSetPcaTargetDim}
+          displayValue={pcaTargetDim.toString()}
+          hint="最终降维目标维度"
+        />
+      </div>
+      <div className="mt-2.5">
+        <SliderControl
+          label="嵌入 PCA"
+          value={embeddingPcaDim}
+          min={8}
+          max={64}
+          step={4}
+          onChange={onSetEmbeddingPcaDim}
+          displayValue={embeddingPcaDim.toString()}
+          hint="嵌入预降维维度"
+        />
+      </div>
+
+      {/* ─── 应用按钮 ──────────────────────── */}
+      <button
+        onClick={onFetchTerrain}
+        disabled={isLoading}
+        className="btn-primary w-full mt-3 text-xs"
+      >
+        {isLoading ? (
+          <span className="flex items-center justify-center gap-1.5">
+            <Spinner />
+            {computeProgress
+              ? `${computeProgress.step}/${computeProgress.totalSteps} ${computeProgress.stepName}`
+              : "连接服务器..."}
+          </span>
+        ) : "应用并重算"}
+      </button>
+    </div>
+  );
+}
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * 右侧面板（保留，不再挂载）
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 function RightPanel() {
   const {
     terrainData,
