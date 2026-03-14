@@ -59,6 +59,15 @@ class BaseDataSource(ABC):
             logger.warning(f"[{self.name}] health check failed: {e}")
             return False
 
+    # ─── 新闻/公告（可选实现）────────────────────────────
+    def get_stock_news(self, code: str, limit: int = 50) -> pd.DataFrame:
+        """获取个股新闻 — 子类可选实现"""
+        raise NotImplementedError
+
+    def get_announcements(self, code: str, limit: int = 20) -> pd.DataFrame:
+        """获取公司公告 — 子类可选实现"""
+        raise NotImplementedError
+
     # ─── 统一字段映射 ──────────────────────────────────
     UNIFIED_QUOTE_COLUMNS = [
         "code",
