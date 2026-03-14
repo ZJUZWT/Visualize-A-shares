@@ -142,6 +142,50 @@ class DuckDBStore:
             )
         """)
 
+        # ── InfoEngine schema ──
+        self._conn.execute("CREATE SCHEMA IF NOT EXISTS info")
+
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS info.news_articles (
+                id              INTEGER PRIMARY KEY,
+                code            VARCHAR NOT NULL,
+                title           VARCHAR NOT NULL,
+                content         VARCHAR,
+                source          VARCHAR,
+                publish_time    VARCHAR,
+                url             VARCHAR,
+                sentiment       VARCHAR,
+                sentiment_score DOUBLE,
+                analyzed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS info.announcements (
+                id              INTEGER PRIMARY KEY,
+                code            VARCHAR NOT NULL,
+                title           VARCHAR NOT NULL,
+                type            VARCHAR,
+                date            VARCHAR,
+                url             VARCHAR,
+                sentiment       VARCHAR,
+                analyzed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS info.event_impacts (
+                id              INTEGER PRIMARY KEY,
+                code            VARCHAR NOT NULL,
+                event_desc      VARCHAR NOT NULL,
+                impact          VARCHAR,
+                magnitude       VARCHAR,
+                reasoning       VARCHAR,
+                affected_factors VARCHAR,
+                assessed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         logger.info("数据表初始化完成")
 
         # ─── 迁移：为已有表添加新列 ────────────────────
