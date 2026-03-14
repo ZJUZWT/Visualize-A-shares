@@ -164,3 +164,52 @@ class AKShareSource(BaseDataSource):
         except Exception as e:
             logger.error(f"[AKShare] 股票列表获取失败: {e}")
             return pd.DataFrame(columns=["code", "name"])
+
+    def get_stock_news(self, code: str, limit: int = 50) -> pd.DataFrame:
+        """获取个股新闻（东方财富）
+        底层接口: ak.stock_news_em(symbol=code)
+        注意: AKShare API 名称可能随版本变动
+        """
+        try:
+            df = self._ak.stock_news_em(symbol=code)
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            column_map = {
+                "新闻标题": "title",
+                "新闻内容": "content",
+                "发布时间": "publish_time",
+                "文章来源": "source",
+                "新闻链接": "url",
+            }
+            df = df.rename(columns=column_map)
+            available = [c for c in ["title", "content", "publish_time", "source", "url"] if c in df.columns]
+            df = df[available].head(limit)
+            return df
+        except Exception as e:
+            logger.warning(f"[AKShare] 个股新闻获取失败 {code}: {e}")
+            return pd.DataFrame()
+
+    def get_announcements(self, code: str, limit: int = 20) -> pd.DataFrame:
+        """获取公司公告（东方财富）
+        底层接口: ak.stock_notice_report_em(symbol=code)
+        注意: AKShare API 名称可能随版本变动
+        """
+        try:
+            df = self._ak.stock_notice_report_em(symbol=code)
+            if df is None or df.empty:
+                return pd.DataFrame()
+
+            column_map = {
+                "公告标题": "title",
+                "公告类型": "type",
+                "公告日期": "date",
+                "公告链接": "url",
+            }
+            df = df.rename(columns=column_map)
+            available = [c for c in ["title", "type", "date", "url"] if c in df.columns]
+            df = df[available].head(limit)
+            return df
+        except Exception as e:
+            logger.warning(f"[AKShare] 公司公告获取失败 {code}: {e}")
+            return pd.DataFrame()
