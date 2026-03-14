@@ -25,6 +25,7 @@ from cluster_engine.routes import router as cluster_router
 from api.routes.chat import router as chat_router
 from quant_engine.routes import router as quant_router
 from api.routes.analysis import router as analysis_router
+from info_engine.routes import router as info_router
 
 # ─── 配置日志 ──────────────────────────────────────────
 logger.remove()
@@ -64,6 +65,7 @@ app.include_router(cluster_router)
 app.include_router(chat_router)
 app.include_router(quant_router)
 app.include_router(analysis_router)
+app.include_router(info_router)
 
 
 # ─── 启动/关闭事件 ────────────────────────────────────
@@ -76,6 +78,7 @@ async def startup():
     logger.info(f"   算法: HDBSCAN + UMAP + RBF")
     logger.info(f"   预测: v2.0 (MAD去极值 + 正交化 + ICIR自适应权重)")
     logger.info(f"   量化引擎: 已加载 (13因子 + 技术指标)")
+    logger.info(f"   信息引擎: 已加载 (新闻+公告+情感分析)")
     logger.info(f"   LLM: {'已配置 (' + llm_settings.provider + '/' + llm_settings.model + ')' if llm_settings.api_key else '未配置 (可在设置中启用)'}")
     logger.info(f"   端口: {settings.server.port}")
     logger.info(f"   API 文档: http://localhost:{settings.server.port}/docs")
@@ -134,6 +137,10 @@ async def root():
             "quant_backtest": "POST /api/v1/quant/factor/backtest",
             "quant_indicators": "GET /api/v1/quant/indicators/{code}",
             "analysis": "POST /api/v1/analysis (SSE 流式)",
+            "info_health": "GET /api/v1/info/health",
+            "info_news": "GET /api/v1/info/news/{code}",
+            "info_announcements": "GET /api/v1/info/announcements/{code}",
+            "info_assess": "POST /api/v1/info/assess",
         },
     }
 
