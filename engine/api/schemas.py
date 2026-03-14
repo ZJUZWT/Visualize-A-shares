@@ -16,6 +16,12 @@ class RelatedStock(BaseModel):
     pct_chg: float = 0.0
 
 
+class ClusterAffinity(BaseModel):
+    """簇隶属度（多归属关系）"""
+    cluster_id: int = Field(..., description="簇 ID")
+    affinity: float = Field(..., description="隶属度 (0~1)")
+
+
 class StockPoint(BaseModel):
     """单只股票在 3D 空间中的表示"""
 
@@ -40,6 +46,11 @@ class StockPoint(BaseModel):
     # v3.1: 同簇关联股票
     related_stocks: list[RelatedStock] = Field(
         default_factory=list, description="同簇相关股票(按距离排序)"
+    )
+
+    # v5.0: 多归属隶属度
+    cluster_affinities: list[ClusterAffinity] = Field(
+        default_factory=list, description="簇隶属度(top-k, 降序)"
     )
 
 
@@ -115,11 +126,11 @@ class ComputeRequest(BaseModel):
     radius_scale: float = Field(2.0, ge=0.1, le=8.0, description="影响半径缩放因子")
 
     # v4.0: 聚类权重参数（默认值与 features.py 同步）
-    weight_embedding: float = Field(2.0, ge=0.0, le=5.0, description="嵌入权重")
+    weight_embedding: float = Field(1.0, ge=0.0, le=5.0, description="嵌入权重")
     weight_industry: float = Field(0.0, ge=0.0, le=2.0, description="行业权重")
-    weight_numeric: float = Field(0.5, ge=0.0, le=3.0, description="数值权重")
-    pca_target_dim: int = Field(50, ge=10, le=100, description="PCA 维度")
-    embedding_pca_dim: int = Field(50, ge=8, le=128, description="嵌入 PCA 维度")
+    weight_numeric: float = Field(0.0, ge=0.0, le=3.0, description="数值特征权重（0=不参与聚类）")
+    pca_target_dim: int = Field(30, ge=10, le=100, description="最终 PCA 维度（仅高维时触发）")
+    embedding_pca_dim: int = Field(15, ge=2, le=128, description="嵌入 UMAP 降维维度")
 
 
 class StockSearchResult(BaseModel):

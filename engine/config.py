@@ -39,19 +39,19 @@ class UMAPConfig(BaseModel):
 
 
 class HDBSCANConfig(BaseModel):
-    min_cluster_size: int = 15     # 降低: 允许发现更小的子板块
-    min_samples: int = 5           # 降低: 对稀疏板块更敏感
+    min_cluster_size: int = 50     # 降低阈值: 允许30-50只的子行业独立成簇 (~25-30 个簇)
+    min_samples: int = 3           # 降低核心点密度要求, 配合更小的 min_cluster_size
     metric: str = "euclidean"
-    cluster_selection_method: str = "leaf"  # leaf: 产生更多细粒度簇（vs eom 合并大簇）
+    cluster_selection_method: str = "eom"  # EOM: 合并层次树中子簇，减少碎片化
 
 
 class FeatureFusionConfig(BaseModel):
-    """三层特征融合配置"""
+    """特征融合配置 v4.0 — UMAP 嵌入驱动聚类"""
     enabled: bool = True  # 是否启用融合（需要预计算数据）
     weight_industry: float = 0.0   # 行业 one-hot 权重（v4.0: 去掉）
-    weight_embedding: float = 2.0  # BGE 语义嵌入权重
-    weight_numeric: float = 0.5    # 数值特征权重
-    pca_target_dim: int = 50       # PCA 降维目标
+    weight_embedding: float = 1.0  # BGE 语义嵌入权重（UMAP 降维后直接聚类）
+    weight_numeric: float = 0.0    # 数值特征不参与聚类（保留用于画像和Z轴）
+    pca_target_dim: int = 30       # 保留兼容性
 
 
 class InterpolationConfig(BaseModel):

@@ -388,6 +388,10 @@ class AlgorithmPipeline:
             # 附带所有指标的原始值
             for metric in Z_METRICS:
                 stock[f"z_{metric}"] = float(z_dict[metric][i])
+            # v5.0: 多归属隶属度
+            affinities = self.cluster_eng.get_top_affinities(i, top_k=3)
+            if affinities:
+                stock["cluster_affinities"] = affinities
             stocks_list.append(stock)
 
         # 给聚类摘要添加行业分布
