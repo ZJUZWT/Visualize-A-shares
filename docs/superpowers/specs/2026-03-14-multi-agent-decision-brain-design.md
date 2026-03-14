@@ -64,7 +64,7 @@ AGENT_PERSONAS = {
         "perspective": "价值投资视角，关注财务健康、盈利质量、估值合理性",
         "bias": "偏保守，高 P/E 会降低信心",
         "risk_tolerance": 0.3,         # 0-1，越低越保守
-        "confidence_calibration": 0.8, # 历史准确率校准系数（动态更新）
+        "confidence_calibration": 0.8, # 初始种子值，无历史数据时的默认权重
         "forbidden_factors": ["舆情", "技术指标", "资金流向"],
     },
     "info": {
@@ -72,7 +72,7 @@ AGENT_PERSONAS = {
         "perspective": "事件驱动视角，关注信息不对称和市场预期差",
         "bias": "对利空敏感，宁可错杀不可放过",
         "risk_tolerance": 0.5,
-        "confidence_calibration": 0.6,
+        "confidence_calibration": 0.6, # 消息面先天不确定性高，初始权重偏低
         "forbidden_factors": ["PE", "ROE", "MACD"],
     },
     "quant": {
@@ -80,10 +80,18 @@ AGENT_PERSONAS = {
         "perspective": "纯数据驱动，关注统计规律和动量",
         "bias": "中性，只看数字",
         "risk_tolerance": 0.7,
-        "confidence_calibration": 0.7,
+        "confidence_calibration": 0.7, # 量化信号中等可靠，初始权重居中
         "forbidden_factors": ["新闻", "公告", "行业政策"],
     },
 }
+```
+
+**校准系数更新机制：** `confidence_calibration` 的初始值为人工设定的种子值（基于各分析维度的先天可靠性评估）。当 `shared.agent_performance` 中积累了 ≥ 30 条记录后，切换为动态计算：
+
+```python
+# 滚动 30 天准确率，指数衰减加权（近期权重更高）
+calibration = sum(was_correct[i] * decay^(days_ago[i]) for i in records) / sum(decay^(days_ago[i]))
+# decay = 0.95，即每天衰减 5%
 ```
 
 ### 2.3 人格稳定性三板斧
@@ -137,9 +145,19 @@ class PreScreenResult:
     fast_verdict: AggregatedReport | None  # 短路时的快速报告
 ```
 
+**短路时的 fast_verdict 说明：** 当 PreScreen 短路时，三个分析 Agent 未运行，`fast_verdict.verdicts` 为空列表 `[]`。`overall_signal` 和 `summary` 由 PreScreen Agent 直接基于重大事件生成。前端渲染时检查 `verdicts` 是否为空来区分短路报告和完整报告。
+
 ### 3.2 Agent 输出规范
 
 每个分析 Agent 的 Verdict 必须**同时包含多头和空头论据**（取代独立牛熊辩论机制）。`evidence` 列表中，`impact: "positive"` 为看多因素，`impact: "negative"` 为看空因素。Aggregator 通过对比各 Agent 的 signal 方向和 confidence 进行冲突检测。
+
+### 3.3 depth 字段语义
+
+| depth | 行为 |
+|-------|------|
+| `quick` | 跳过 PreScreen，三 Agent 并行，Aggregator 输出简要 summary（≤100 字） |
+| `standard` | 完整流程：PreScreen → 并行 → 聚合，标准报告 |
+| `deep` | 完整流程 + 自动触发 Expert Agent 深度解读 |
 
 ## 4. Memory 与存储架构
 
@@ -148,6 +166,12 @@ class PreScreenResult:
 - **逻辑隔离，物理共享** — 一个 DuckDB 文件用 schema 隔离，一个 ChromaDB 实例用 collection 隔离
 - 好处：部署简单（单文件），但各引擎/Agent 数据互不干扰
 - 聚合层只读取各引擎的输出表，不碰引擎内部 Memory
+
+**DuckDB Schema 迁移策略：** 现有表（`stock_daily`、`stock_snapshot` 等）使用默认 `main` schema，无前缀。迁移策略为**渐进式**：
+1. 新建的表（`info.*`、`quant.*`、`shared.*`）使用 schema 前缀
+2. 现有表保持在 `main` schema 不动，DataEngine 和 ClusterEngine 的查询不需要改动
+3. 对外接口（MCP tools）屏蔽 schema 差异 — 引擎内部知道自己查哪个 schema，调用方不感知
+4. 未来如果需要统一，可通过 `ALTER TABLE ... RENAME TO data.stock_daily` 一次性迁移，但这不在当前 spec 范围内
 
 ### 4.2 DuckDB Schema 布局
 
@@ -183,6 +207,12 @@ ChromaDB (embedded, persist_directory="data/chromadb/")
 ├── memory_aggregator            # 聚合 Agent 决策记忆
 └── memory_expert                # 专家 Agent 深度分析记忆
 ```
+
+**为什么用 ChromaDB 而非 DuckDB 全文搜索：** Agent 推理记忆的核心操作是"根据当前分析语境，召回最相关的历史推理"——这是语义相似度检索，不是关键词匹配。DuckDB 的全文搜索只支持 BM25 词频匹配，无法理解"上次分析贵州茅台时对白酒行业政策的担忧"和"酒类监管收紧"之间的语义关联。ChromaDB 使用 embedding 向量做相似度检索，天然适合这个场景。
+
+**部署方式：** `pip install chromadb`，纯 embedded 模式（`chromadb.PersistentClient`），无需额外服务进程，数据持久化到 `data/chromadb/` 目录。
+
+**记忆保留策略：** 每个 collection 保留最近 90 天的记忆。超过 90 天的记录在每日维护任务中清理。
 
 每条记忆的 metadata 结构：
 
@@ -221,6 +251,21 @@ CREATE TABLE shared.agent_performance (
 
 Aggregator 每次聚合时读取各 Agent 近 30 天 `calibration_score`，作为加权系数。准确率低的 Agent 权重自动降低。
 
+**正确性判定规则：**
+
+| signal | actual_return_1d | was_correct |
+|--------|-----------------|-------------|
+| bullish | > +1% | True |
+| bullish | < -1% | False |
+| bullish | -1% ~ +1% | None（不计入校准） |
+| bearish | < -1% | True |
+| bearish | > +1% | False |
+| bearish | -1% ~ +1% | None |
+| neutral | -1% ~ +1% | True |
+| neutral | > +1% 或 < -1% | False |
+
+±1% 为中性区间阈值，可在配置中调整。
+
 ## 5. Engine 接口与 MCP 扩展
 
 ### 5.1 引擎统一基类
@@ -235,6 +280,8 @@ class BaseEngine:
         """拉取/更新数据，返回 {updated: int, failed: int}"""
 ```
 
+**与现有引擎的关系：** `BaseEngine` 仅用于新建的 InfoEngine 和 QuantEngine。现有 DataEngine 和 ClusterEngine 保持各自的构造函数和接口不变（DataEngine 内部创建 DuckDBStore，ClusterEngine 依赖 DataEngine）。`BaseEngine` 不是强制基类，而是新引擎的推荐模板。Orchestrator 通过 MCP Tool 层与所有引擎交互，不直接调用引擎方法，因此引擎内部实现的差异不影响编排层。
+
 ### 5.2 四引擎查询接口
 
 ```
@@ -248,10 +295,13 @@ ClusterEngine (cluster.*)
 ├── get_cluster_members(cluster_id) → 同类股票
 └── get_terrain_data() → 3D地形全量
 
-InfoEngine (info.*)                ← 新建
+InfoEngine (info.*)                ← 新建（Phase 2 实现）
 ├── get_news(code, days) → 相关新闻
+│   数据源: 财联社/东方财富 API 爬取，具体选型在 Phase 2 子 spec 中确定
 ├── get_announcements(code, days) → 公司公告
+│   数据源: 巨潮资讯网公告 API
 └── assess_event_impact(code, event) → 事件影响评估
+    实现方式: LLM 推理（非数据库查询），读取事件内容 + 个股基本面后由 LLM 评估影响
 
 QuantEngine (quant.*)              ← 新建
 ├── get_technical_indicators(code) → MACD/RSI/布林等
@@ -308,7 +358,7 @@ orchestrator.analyze(request: AnalysisRequest)
 │     输出: PreScreenResult
 │     if not should_continue → 直接返回 fast_verdict, 结束
 │
-├─ 3. 并行分析（asyncio.gather）
+├─ 3. 并行分析（asyncio.gather, return_exceptions=True）
 │     ┌─ Fundamental Agent
 │     │   注入: persona + calibration_weight + 专属 tools
 │     │   读: data.* + memory_fundamental
@@ -321,11 +371,21 @@ orchestrator.analyze(request: AnalysisRequest)
 │         注入: persona + calibration_weight + 专属 tools
 │         读: quant.* + memory_quant
 │         输出: AgentVerdict
+│     错误处理: 若某个 Agent 超时(30s)或返回异常，
+│       该 Agent 的 Verdict 标记为缺失，聚合时用剩余 Agent 的结果。
+│       至少 1 个 Agent 成功即可聚合；全部失败则返回错误。
 │
 ├─ 4. 聚合
 │     Aggregator 接收三份 AgentVerdict
-│     加权: score × confidence × calibration_weight
-│     冲突检测: 若多空分歧 > 阈值 → 标记 conflicts
+│     加权公式:
+│       weighted_score[i] = score[i] × confidence[i] × calibration[i]
+│       overall_score = sum(weighted_score) / sum(confidence[i] × calibration[i])
+│       overall_score 范围 [-1, 1]
+│     信号判定:
+│       overall_score > 0.2  → bullish
+│       overall_score < -0.2 → bearish
+│       否则                  → neutral
+│     冲突检测: 若任意两个 Agent 的 signal 方向相反且双方 confidence > 0.6 → 标记 conflicts
 │     输出: AggregatedReport
 │
 ├─ 5. 持久化
