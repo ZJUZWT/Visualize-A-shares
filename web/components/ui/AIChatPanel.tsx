@@ -13,6 +13,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { MessageCircle, X, Key, Sparkles, Lightbulb, EyeOff, Eye } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useChatStore, PROVIDER_PRESETS } from "@/stores/useChatStore";
 import type { ChatMessage, LLMConfig } from "@/stores/useChatStore";
 
@@ -27,11 +29,24 @@ export default function AIChatPanel() {
         className="overlay fixed bottom-6 right-6 w-12 h-12 rounded-full bg-gradient-to-br from-[#4F8EF7] to-[#7B68EE] shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center text-white text-xl z-50 hover:scale-105 active:scale-95"
         title="AI 智能分析"
       >
-        {isPanelOpen ? "✕" : "🤖"}
+        {isPanelOpen ? <X className="w-5 h-5" /> : <MessageCircle className="w-5 h-5" />}
       </button>
 
       {/* 聊天面板 */}
-      {isPanelOpen && <ChatWindow />}
+      <AnimatePresence>
+        {isPanelOpen && (
+          <motion.div
+            key="chat-window"
+            initial={{ opacity: 0, y: 12, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            className="overlay fixed bottom-20 right-6 w-[400px] h-[560px] flex flex-col glass-panel shadow-2xl z-40 overflow-hidden"
+          >
+            <ChatWindowContent />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
@@ -39,7 +54,7 @@ export default function AIChatPanel() {
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  * 聊天窗口
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
-function ChatWindow() {
+function ChatWindowContent() {
   const {
     messages,
     isStreaming,
@@ -79,11 +94,11 @@ function ChatWindow() {
   const hasApiKey = !!llmConfig.apiKey;
 
   return (
-    <div className="overlay fixed bottom-20 right-6 w-[400px] h-[560px] flex flex-col glass-panel shadow-2xl z-40 overflow-hidden animate-in">
+    <>
       {/* ─── 顶栏 ─────────────────── */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
         <div className="flex items-center gap-2">
-          <span className="text-base">🤖</span>
+          <MessageCircle className="w-4 h-4 text-[var(--accent)]" />
           <span className="text-sm font-semibold text-[var(--text-primary)]">
             AI 智能分析
           </span>
@@ -187,7 +202,7 @@ function ChatWindow() {
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }
 
@@ -324,8 +339,8 @@ function EmptyState({ hasApiKey }: { hasApiKey: boolean }) {
   if (!hasApiKey) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-6">
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#4F8EF7]/10 to-[#7B68EE]/10 flex items-center justify-center text-3xl mb-4">
-          🔑
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#4F8EF7]/10 to-[#7B68EE]/10 flex items-center justify-center mb-4">
+          <Key className="w-8 h-8 text-[var(--accent)]" />
         </div>
         <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-2">
           配置 LLM 服务
@@ -350,8 +365,8 @@ function EmptyState({ hasApiKey }: { hasApiKey: boolean }) {
 
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-4">
-      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#4F8EF7]/10 to-[#7B68EE]/10 flex items-center justify-center text-2xl mb-4">
-        🤖
+      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#4F8EF7]/10 to-[#7B68EE]/10 flex items-center justify-center mb-4">
+        <Sparkles className="w-7 h-7 text-[var(--accent)]" />
       </div>
       <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-1">
         AI 分析助手
@@ -364,9 +379,9 @@ function EmptyState({ hasApiKey }: { hasApiKey: boolean }) {
           <button
             key={s}
             onClick={() => sendMessage(s)}
-            className="w-full text-left px-3 py-2 rounded-xl text-xs text-[var(--text-secondary)] bg-gray-50 hover:bg-[var(--accent-light)] hover:text-[var(--accent)] transition-colors"
+            className="w-full text-left px-3 py-2 rounded-xl text-xs text-[var(--text-secondary)] bg-gray-50 hover:bg-[var(--accent-light)] hover:text-[var(--accent)] transition-colors flex items-center"
           >
-            💡 {s}
+            <Lightbulb className="w-3 h-3 inline mr-1.5 text-[var(--text-tertiary)]" />{s}
           </button>
         ))}
       </div>
@@ -444,7 +459,7 @@ function ConfigPanel() {
             onClick={() => setShowKey(!showKey)}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
           >
-            {showKey ? "🙈" : "👁️"}
+            {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
@@ -525,7 +540,7 @@ function ConfigPanel() {
           disabled={saving}
           className="btn-primary flex-1 text-xs"
         >
-          {saving ? "保存中..." : "✓ 保存配置"}
+          {saving ? "保存中..." : "保存配置"}
         </button>
         <button
           onClick={toggleConfig}
@@ -537,9 +552,9 @@ function ConfigPanel() {
 
       {/* 提示信息 */}
       <div className="text-[10px] text-[var(--text-tertiary)] bg-gray-50 rounded-lg px-3 py-2 space-y-1">
-        <p>💡 API Key 仅存储在你的浏览器本地，不会上传到任何第三方。</p>
+        <p>API Key 仅存储在你的浏览器本地，不会上传到任何第三方。</p>
         <p>
-          📡 请求通过后端中转发送到 LLM 厂商。如需直接前端调用（无后端），
+          请求通过后端中转发送到 LLM 厂商。如需直接前端调用（无后端），
           请使用「自定义」模式。
         </p>
       </div>
