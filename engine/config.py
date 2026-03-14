@@ -90,6 +90,13 @@ class QuantConfig(BaseModel):
     min_history_days: int = 5            # 自动校准最少需要的历史天数
 
 
+# ─── ChromaDB 配置 ────────────────────────────────────
+class ChromaDBConfig(BaseModel):
+    """ChromaDB 嵌入式向量数据库配置"""
+    persist_dir: str = str(DATA_DIR / "chromadb")
+    retention_days: int = 90
+
+
 # ─── 聚合配置 ───────────────────────────────────────────
 class AppConfig(BaseModel):
     datasource: DataSourceConfig = DataSourceConfig()
@@ -100,6 +107,7 @@ class AppConfig(BaseModel):
     server: ServerConfig = ServerConfig()
     redis: RedisConfig = RedisConfig()
     quant: QuantConfig = QuantConfig()
+    chromadb: ChromaDBConfig = ChromaDBConfig()
 
 
 # 全局单例
