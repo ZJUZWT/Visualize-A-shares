@@ -152,6 +152,8 @@ class LLMCapability:
         try:
             model = getattr(self._provider, "config", None)
             model_name = getattr(model, "model", "") if model else ""
+            if not isinstance(model_name, str):
+                model_name = ""
             self._cache.set_llm_cache(key, prompt_hash, result_json, model=model_name)
         except Exception as e:
             logger.warning(f"llm_cache 写入异常: {e}")
