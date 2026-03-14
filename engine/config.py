@@ -82,6 +82,14 @@ class RedisConfig(BaseModel):
     db: int = 0
 
 
+# ─── 量化引擎配置 ─────────────────────────────────────
+class QuantConfig(BaseModel):
+    """量化引擎配置"""
+    icir_rolling_window: int = 20        # ICIR 滚动窗口天数
+    auto_inject_on_startup: bool = True  # 启动时自动注入 ICIR 权重
+    min_history_days: int = 5            # 自动校准最少需要的历史天数
+
+
 # ─── 聚合配置 ───────────────────────────────────────────
 class AppConfig(BaseModel):
     datasource: DataSourceConfig = DataSourceConfig()
@@ -91,6 +99,7 @@ class AppConfig(BaseModel):
     interpolation: InterpolationConfig = InterpolationConfig()
     server: ServerConfig = ServerConfig()
     redis: RedisConfig = RedisConfig()
+    quant: QuantConfig = QuantConfig()
 
 
 # 全局单例

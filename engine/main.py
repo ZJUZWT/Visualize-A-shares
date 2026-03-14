@@ -23,6 +23,7 @@ from config import settings
 from data_engine.routes import router as data_router
 from cluster_engine.routes import router as cluster_router
 from api.routes.chat import router as chat_router
+from quant_engine.routes import router as quant_router
 
 # ─── 配置日志 ──────────────────────────────────────────
 logger.remove()
@@ -60,6 +61,7 @@ app.add_middleware(
 app.include_router(data_router)
 app.include_router(cluster_router)
 app.include_router(chat_router)
+app.include_router(quant_router)
 
 
 # ─── 启动/关闭事件 ────────────────────────────────────
@@ -71,17 +73,29 @@ async def startup():
     logger.info(f"   数据源: AKShare(主力) + BaoStock(备选)")
     logger.info(f"   算法: HDBSCAN + UMAP + RBF")
     logger.info(f"   预测: v2.0 (MAD去极值 + 正交化 + ICIR自适应权重)")
+    logger.info(f"   量化引擎: 已加载 (13因子 + 技术指标)")
     logger.info(f"   LLM: {'已配置 (' + llm_settings.provider + '/' + llm_settings.model + ')' if llm_settings.api_key else '未配置 (可在设置中启用)'}")
     logger.info(f"   端口: {settings.server.port}")
     logger.info(f"   API 文档: http://localhost:{settings.server.port}/docs")
     logger.info("=" * 60)
 
-    # 自动尝试 ICIR 权重校准（静默失败）
-    try:
-        from cluster_engine import get_cluster_engine
-        get_cluster_engine().try_auto_inject_icir_weights()
-    except Exception as e:
-        logger.warning(f"⚠️ ICIR 自动校准跳过: {e}")
+    # 自动尝试 ICIR 权重校准（通过 QuantEngine）
+    if settings.quant.auto_inject_on_startup:
+        try:
+            from quant_engine import get_quant_engine
+            qe = get_quant_engine()
+            qe.try_auto_inject_icir_weights()
+            # 同步到 ClusterEngine 的 pipeline（单独 try 避免掩盖 ClusterEngine 初始化错误）
+            if qe.predictor._icir_weights is not None:
+                try:
+                    from cluster_engine import get_cluster_engine
+                    get_cluster_engine().pipeline.predictor_v2.set_icir_weights(
+                        qe.predictor._icir_weights
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ ICIR 权重同步到 ClusterEngine 失败: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ ICIR 自动校准跳过: {e}")
 
 
 @app.on_event("shutdown")
@@ -112,6 +126,11 @@ async def root():
             "data_snapshot": "GET /api/v1/data/snapshot",
             "data_daily": "GET /api/v1/data/daily/{code}",
             "data_profiles": "GET /api/v1/data/profiles",
+            "quant_health": "GET /api/v1/quant/health",
+            "quant_factor_weights": "GET /api/v1/quant/factor/weights",
+            "quant_factor_defs": "GET /api/v1/quant/factor/defs",
+            "quant_backtest": "POST /api/v1/quant/factor/backtest",
+            "quant_indicators": "GET /api/v1/quant/indicators/{code}",
         },
     }
 
