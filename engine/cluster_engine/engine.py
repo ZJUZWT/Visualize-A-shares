@@ -9,7 +9,6 @@ import pandas as pd
 from loguru import logger
 
 from .algorithm.pipeline import AlgorithmPipeline, TerrainResult
-from .algorithm.factor_backtest import run_ic_backtest_from_store
 
 
 class ClusterEngine:
@@ -47,21 +46,15 @@ class ClusterEngine:
         return results
 
     def try_auto_inject_icir_weights(self):
-        """启动时自动从历史数据计算 ICIR 权重并注入预测器"""
+        """启动时自动从历史数据计算 ICIR 权重并注入预测器（委托 QuantEngine）"""
         try:
-            dates = self._data.get_snapshot_daily_dates()
-            if len(dates) >= 5:
-                logger.info(f"🔄 检测到 {len(dates)} 天历史快照，自动运行 IC 回测...")
-                result = run_ic_backtest_from_store(self._data.store, rolling_window=20)
-                if result.icir_weights:
-                    self._pipeline.predictor_v2.set_icir_weights(result.icir_weights)
-                    logger.info("✅ 启动时 ICIR 权重自动注入成功")
-                else:
-                    logger.info("ℹ️ IC 回测无显著权重，使用默认权重")
-            else:
-                logger.info(
-                    f"ℹ️ 历史快照仅 {len(dates)} 天（<5天），跳过 ICIR 自动校准。"
-                    f"多次「生成3D地形」积累数据后将自动启用。"
+            from quant_engine import get_quant_engine
+            qe = get_quant_engine()
+            qe.try_auto_inject_icir_weights()
+            # 同步 ICIR 权重到 pipeline 中的预测器实例
+            if qe.predictor._icir_weights is not None:
+                self._pipeline.predictor_v2.set_icir_weights(
+                    qe.predictor._icir_weights
                 )
         except Exception as e:
             logger.warning(f"⚠️ 启动时 ICIR 自动校准跳过: {e}")
