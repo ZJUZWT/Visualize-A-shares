@@ -88,8 +88,24 @@ class LLMCapability:
 
     async def complete(self, prompt: str, system: str = "", cache_key: str | None = None) -> str:
         """无状态文本补全（带可选缓存）
-        - cache_key 为 None 时自动用 prompt 内容的 hash 作为 key
-        - 未配置 LLM 时返回空字符串
+
+        Prompt 构造（发给 LLM 的 messages）：
+            [ChatMessage("system", system), ChatMessage("user", prompt)]
+            system 为空字符串时不包含 system message
+
+        缓存：
+            cache_key 为 None 时自动用 hash(prompt) 作为 key
+            未配置 LLM 时返回 ""
+
+        实现伪代码：
+            key = cache_key or self._cache_key(prompt)
+            cached = await self._get_cache(key)
+            if cached: return cached
+            messages = [ChatMessage("system", system)] if system else []
+            messages.append(ChatMessage("user", prompt))
+            result = await self._provider.chat(messages)
+            await self._set_cache(key, self._cache_key(prompt), result)
+            return result
         """
 
     async def classify(
@@ -97,12 +113,23 @@ class LLMCapability:
         text: str,
         categories: list[str],
         system: str = "",
-        extra_schema: dict | None = None,
     ) -> dict:
         """分类任务，返回 {"label": <category>, "score": float, "reason": str}
-        - 要求 LLM 输出 JSON，解析失败时返回 {"label": categories[0], "score": 0.0, "reason": "parse_error"}
-        - 未配置 LLM 时返回 {"label": categories[0], "score": 0.0, "reason": "llm_disabled"}
-        - 自动缓存（key = hash(text + str(categories))）
+
+        Prompt 构造（user message）：
+            f\"\"\"请对以下文本进行分类，从 {categories} 中选择最合适的类别。
+
+            文本：{text}
+
+            请严格输出 JSON（不含 markdown 代码块）：
+            {{"label": "<类别>", "score": <0.0-1.0置信度>, "reason": "<简短理由>"}}\"\"\"
+
+        降级行为：
+            - 未配置 LLM：返回 {"label": categories[0], "score": 0.0, "reason": "llm_disabled"}
+            - LLM 返回非 JSON 或字段缺失：返回 {"label": categories[0], "score": 0.0, "reason": "parse_error"}
+            - label 不在 categories 中：替换为 categories[0]
+
+        缓存：key = hash(text + "||" + str(categories))，永久缓存
         """
 
     async def extract(
@@ -111,10 +138,21 @@ class LLMCapability:
         schema: dict,
         system: str = "",
     ) -> dict:
-        """结构化提取，schema 描述期望的 JSON 结构
-        - 返回符合 schema 的 dict，解析失败时返回 {}
-        - 未配置 LLM 时返回 {}
-        - 自动缓存（key = hash(text + str(schema))）
+        """结构化提取，返回符合 schema 描述的 dict
+
+        Prompt 构造（user message）：
+            f\"\"\"请从以下文本中提取结构化信息。
+
+            文本：{text}
+
+            请严格按照以下 JSON schema 输出（不含 markdown 代码块）：
+            {json.dumps(schema, ensure_ascii=False)}\"\"\"
+
+        降级行为：
+            - 未配置 LLM：返回 {}
+            - LLM 返回非 JSON 或解析失败：返回 {}
+
+        缓存：key = hash(text + "||" + str(schema))，永久缓存
         """
 
     def _cache_key(self, *parts: str) -> str:
@@ -123,10 +161,14 @@ class LLMCapability:
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
     async def _get_cache(self, key: str) -> str | None:
-        """从 llm_cache 查找缓存，返回 result_json 或 None"""
+        """从 DuckDBStore.get_llm_cache(key) 查找缓存，返回 result_json 或 None
+        cache_store 为 None 时直接返回 None（不报错）
+        """
 
     async def _set_cache(self, key: str, prompt_hash: str, result_json: str) -> None:
-        """写入 llm_cache，失败时只记录 warning 不抛出"""
+        """调用 DuckDBStore.set_llm_cache(key, prompt_hash, result_json)
+        cache_store 为 None 或写入失败时只记录 warning，不抛出异常
+        """
 ```
 
 ### 3.2 缓存策略
@@ -168,8 +210,9 @@ CREATE TABLE IF NOT EXISTS shared.llm_cache (
 );
 
 -- 对话历史（供后续前端对话面板使用）
+CREATE SEQUENCE IF NOT EXISTS shared.chat_history_id_seq;
 CREATE TABLE IF NOT EXISTS shared.chat_history (
-    id           INTEGER PRIMARY KEY,
+    id           INTEGER PRIMARY KEY DEFAULT NEXTVAL('shared.chat_history_id_seq'),
     session_id   VARCHAR NOT NULL,      -- 会话 ID（前端生成 UUID）
     role         VARCHAR NOT NULL,      -- "user" | "assistant" | "system"
     content      TEXT NOT NULL,
@@ -290,7 +333,26 @@ def get_info_engine() -> InfoEngine:
     return _info_engine
 ```
 
-`InfoEngine.__init__` 签名从 `llm_provider` 改为 `llm_capability`，对应传给 `SentimentAnalyzer` 和 `EventAssessor`。
+`InfoEngine.__init__` 签名从接受 `llm_provider: BaseLLMProvider | None` 改为接受 `llm_capability: LLMCapability | None`，对应传给 `SentimentAnalyzer` 和 `EventAssessor`：
+
+```python
+class InfoEngine:
+    def __init__(self, data_engine, llm_capability: LLMCapability | None = None):
+        self._data = data_engine
+        self._sentiment = SentimentAnalyzer(llm_capability)
+        self._assessor = EventAssessor(llm_capability)
+        self._store = data_engine.store
+        self._config = None
+
+    def health_check(self) -> dict:
+        # 改为检查 llm_capability.enabled
+        llm_available = self._sentiment._llm is not None and self._sentiment._llm.enabled
+        return {
+            "status": "ok",
+            "sentiment_mode": "llm" if llm_available else "rules",
+            "llm_available": llm_available,
+        }
+```
 
 ---
 
@@ -304,15 +366,20 @@ def get_info_engine() -> InfoEngine:
 # engine/agent/data_fetcher.py 新增
 
 ACTION_DISPATCH: dict[str, tuple[str, str, bool]] = {
-    # action_name → (engine_getter, method_name, is_async)
-    "get_stock_info":           ("data_engine.get_data_engine",   "get_profile",           False),
-    "get_daily_history":        ("data_engine.get_data_engine",   "get_daily_history",     False),
-    "get_technical_indicators": ("quant_engine.get_quant_engine", "compute_indicators",    False),
-    "get_factor_scores":        ("quant_engine.get_quant_engine", "get_factor_scores",     False),
-    "get_news":                 ("info_engine.get_info_engine",   "get_news",              True),   # async
-    "get_announcements":        ("info_engine.get_info_engine",   "get_announcements",     True),   # async
+    # action_name → (engine_getter_import_path, method_name, is_async)
+    # is_async=True: 直接 await method(**params)
+    # is_async=False: await asyncio.to_thread(method, **params)
+    "get_stock_info":           ("data_engine.get_data_engine",       "get_profile",           False),
+    "get_daily_history":        ("data_engine.get_data_engine",       "get_daily_history",     False),
+    "get_technical_indicators": ("quant_engine.get_quant_engine",     "compute_indicators",    False),
+    "get_factor_scores":        ("quant_engine.get_quant_engine",     "get_factor_scores",     False),
+    "get_news":                 ("info_engine.get_info_engine",       "get_news",              True),
+    "get_announcements":        ("info_engine.get_info_engine",       "get_announcements",     True),
     "get_cluster_for_stock":    ("cluster_engine.get_cluster_engine", "get_cluster_for_stock", False),
 }
+
+# 注：辩论 spec（2026-03-14-expert-debate-system-design.md Section 3.2）的 ACTION_DISPATCH
+# 定义为 2-tuple，以本 spec 的 3-tuple 定义为准（辩论系统实现时直接复用此表）
 
 async def fetch_by_request(self, req) -> Any:
     """按 DataRequest 路由到对应引擎方法
@@ -354,7 +421,7 @@ class Orchestrator:
         self._rag = rag_store
 ```
 
-`run_agent()` 内部调 `LLMCapability.complete()` 替换直接调 `BaseLLMProvider.chat()`。
+`run_agent()` 内部调 `LLMCapability.complete()` 替换直接调 `BaseLLMProvider.chat()`。因此 `runner.py` 中 `run_agent()` 的签名同步更新：从接受 `llm_provider: BaseLLMProvider` 改为接受 `llm_capability: LLMCapability`，内部调用改为 `await llm_capability.complete(prompt=user_prompt, system=system_prompt)`。
 
 RAG 注入点：在 `analyze()` 的并行分析阶段前，检索历史报告注入 `data_map`：
 
