@@ -61,15 +61,26 @@ class DataFetcher:
             logger.warning(f"获取量化数据失败 [{target}]: {e}")
             return {}
 
-    def get_info_data(self, target: str) -> dict:
-        """获取消息面数据 — Phase 1 返回空（InfoEngine 在 Phase 2 实现）"""
-        return {"news": [], "announcements": [], "note": "InfoEngine 尚未实现，消息面数据为空"}
+    async def get_info_data(self, target: str) -> dict:
+        """获取消息面数据（InfoEngine）"""
+        try:
+            from info_engine import get_info_engine
+            ie = get_info_engine()
+            news = await ie.get_news(target, limit=20)
+            announcements = await ie.get_announcements(target, limit=10)
+            return {
+                "news": [n.model_dump() for n in news],
+                "announcements": [a.model_dump() for a in announcements],
+            }
+        except Exception as e:
+            logger.warning(f"获取消息面数据失败 [{target}]: {e}")
+            return {"news": [], "announcements": [], "error": str(e)}
 
     async def fetch_all(self, target: str) -> dict[str, dict]:
-        """异步获取所有引擎数据（避免阻塞事件循环）"""
+        """异步获取所有引擎数据"""
         fund_data, info_data, quant_data = await asyncio.gather(
             asyncio.to_thread(self.get_stock_data, target),
-            asyncio.to_thread(self.get_info_data, target),
+            self.get_info_data(target),  # now async, no need for to_thread
             asyncio.to_thread(self.get_quant_data, target),
         )
         return {

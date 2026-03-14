@@ -1,5 +1,5 @@
 """
-MCP Tools — 15 个 Tool 实现
+MCP Tools — 18 个 Tool 实现
 
 每个 tool 返回 AI 友好的 Markdown 文本（非原始 JSON）。
 在线模式优先走 REST API，离线自动降级到 DuckDB read-only。
@@ -1064,3 +1064,74 @@ def get_signal_history(da: "DataAccess", code: str, days: int = 30) -> str:
         "signals": [],
         "note": "历史信号记录将在 Phase 2 QuantEngine DuckDB 持久化后实现",
     }, ensure_ascii=False, indent=2)
+
+
+# ─── InfoEngine Tools ──────────────────────────────
+
+def _run_async(coro):
+    """安全运行 async 协程 — 处理 MCP server 已有事件循环的情况"""
+    import asyncio
+    try:
+        asyncio.get_running_loop()
+        # 已在事件循环中（MCP stdio transport），用新线程运行
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result(timeout=60)
+    except RuntimeError:
+        # 无运行中的事件循环，直接 asyncio.run
+        return asyncio.run(coro)
+
+
+def get_news(da: "DataAccess", code: str, limit: int = 20) -> str:
+    """获取个股新闻 + 情感分析"""
+    try:
+        from info_engine import get_info_engine
+        ie = get_info_engine()
+        news = _run_async(ie.get_news(code, limit))
+
+        if not news:
+            return json.dumps({"code": code, "news": [], "note": "暂无新闻数据"}, ensure_ascii=False)
+
+        summary = {"positive": 0, "negative": 0, "neutral": 0}
+        news_list = []
+        for n in news:
+            if n.sentiment in summary:
+                summary[n.sentiment] += 1
+            news_list.append(n.model_dump())
+
+        return json.dumps({
+            "code": code,
+            "news": news_list,
+            "sentiment_summary": summary,
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": f"新闻获取失败: {e}"}, ensure_ascii=False)
+
+
+def get_announcements(da: "DataAccess", code: str, limit: int = 10) -> str:
+    """获取公司公告 + 情感分析"""
+    try:
+        from info_engine import get_info_engine
+        ie = get_info_engine()
+        anns = _run_async(ie.get_announcements(code, limit))
+
+        if not anns:
+            return json.dumps({"code": code, "announcements": [], "note": "暂无公告数据"}, ensure_ascii=False)
+
+        return json.dumps({
+            "code": code,
+            "announcements": [a.model_dump() for a in anns],
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": f"公告获取失败: {e}"}, ensure_ascii=False)
+
+
+def assess_event_impact(da: "DataAccess", code: str, event_desc: str) -> str:
+    """评估事件对个股的影响"""
+    try:
+        from info_engine import get_info_engine
+        ie = get_info_engine()
+        impact = _run_async(ie.assess_event_impact(code, event_desc))
+        return json.dumps(impact.model_dump(), ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": f"事件评估失败: {e}"}, ensure_ascii=False)
