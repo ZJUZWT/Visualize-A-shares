@@ -1,7 +1,7 @@
 """Agent 接口契约 — 请求、响应、中间数据结构"""
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -53,3 +53,82 @@ class PreScreenResult(BaseModel):
     reason: str | None = None
     critical_events: list[dict] = Field(default_factory=list)
     fast_verdict: AggregatedReport | None = None
+
+
+# ── 专家辩论系统数据结构 ─────────────────────────────────────
+
+
+class DataRequest(BaseModel):
+    """专家向引擎下发的数据补充请求"""
+    requested_by: str                    # 提出请求的角色 ID
+    engine: str                          # "data" | "quant" | "info"
+    action: str                          # 具体操作名
+    params: dict = Field(default_factory=dict)
+    result: Any = None                   # 执行结果，初始 None
+    status: Literal["pending", "done", "failed"] = "pending"
+    round: int = 0                       # 提出请求时的轮次
+
+
+class DebateEntry(BaseModel):
+    """单条辩论发言"""
+    role: str                            # bull_expert / bear_expert / retail_investor / smart_money
+    round: int
+
+    # 辩论者专属（观察员为 None）
+    stance: Literal["insist", "partial_concede", "concede"] | None = None
+
+    # 观察员专属
+    speak: bool = True                   # False = 本轮选择沉默
+
+    # 发言内容
+    argument: str = ""
+    challenges: list[str] = Field(default_factory=list)
+    data_requests: list[DataRequest] = Field(default_factory=list)
+    confidence: float = 0.5
+    retail_sentiment_score: float | None = None  # 仅 retail_investor：+1极度乐观，-1极度悲观
+
+
+class Blackboard(BaseModel):
+    """辩论共享状态 — 所有参与者读写的中心桌面"""
+    target: str
+    debate_id: str                       # "{target}_{YYYYMMDDHHMMSS}"
+
+    # 事实层（Phase 2/3 产出，只读）
+    facts: dict[str, Any] = Field(default_factory=dict)
+    worker_verdicts: list[AgentVerdict] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+
+    # 辩论层
+    transcript: list[DebateEntry] = Field(default_factory=list)
+
+    # 数据请求层
+    data_requests: list[DataRequest] = Field(default_factory=list)
+
+    # 控制层
+    round: int = 0
+    max_rounds: int = 3
+    bull_conceded: bool = False
+    bear_conceded: bool = False
+    status: Literal["debating", "final_round", "judging", "completed"] = "debating"
+    termination_reason: Literal[
+        "bull_conceded", "bear_conceded", "both_conceded", "max_rounds"
+    ] | None = None
+
+
+class JudgeVerdict(BaseModel):
+    """裁判最终总结"""
+    target: str
+    debate_id: str
+    summary: str
+    signal: Literal["bullish", "bearish", "neutral"] | None = None
+    score: float | None = None
+
+    key_arguments: list[str]
+    bull_core_thesis: str
+    bear_core_thesis: str
+    retail_sentiment_note: str
+    smart_money_note: str
+    risk_warnings: list[str]
+    debate_quality: Literal["consensus", "strong_disagreement", "one_sided"]
+    termination_reason: str
+    timestamp: datetime
