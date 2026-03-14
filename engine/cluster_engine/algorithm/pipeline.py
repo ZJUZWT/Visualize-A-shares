@@ -25,7 +25,7 @@ from .clustering import ClusterEngine
 from .projection import ProjectionEngine
 from .interpolation import InterpolationEngine
 from .predictor import StockPredictor
-from .predictor_v2 import StockPredictorV2
+from quant_engine.predictor import StockPredictorV2
 
 
 # 所有可用的 Z 轴指标
