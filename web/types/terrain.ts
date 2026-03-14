@@ -20,6 +20,12 @@ export interface SimilarStock {
   cluster_id: number;
 }
 
+/** 簇隶属度（多归属关系）*/
+export interface ClusterAffinity {
+  cluster_id: number;
+  affinity: number;
+}
+
 /** 单只股票在 3D 空间中的表示 */
 export interface StockPoint {
   code: string;
@@ -45,6 +51,8 @@ export interface StockPoint {
   related_stocks?: RelatedStock[];
   // v4.0: 跨簇相似股票
   similar_stocks?: SimilarStock[];
+  // v5.0: 多归属隶属度
+  cluster_affinities?: ClusterAffinity[];
 }
 
 /** 聚类簇信息 */
@@ -116,7 +124,7 @@ export const Z_METRIC_LABELS: Record<ZMetric, string> = {
   pe_ttm: "市盈率(TTM)",
   pb: "市净率",
   wb_ratio: "委比 %",
-  rise_prob: "🔮 明日上涨概率",
+  rise_prob: "明日上涨概率",
 };
 
 /** Z 轴指标图标 */
@@ -131,7 +139,7 @@ export const Z_METRIC_ICONS: Record<ZMetric, string> = {
   rise_prob: "🔮",
 };
 
-/** v2.0 清爽简约配色方案 */
+/** v2.0 清爽简约配色方案 (30色，支持更多子行业簇) */
 export const CLUSTER_COLORS = [
   "#4F8EF7", // 天蓝
   "#FF7E67", // 珊瑚
@@ -148,6 +156,21 @@ export const CLUSTER_COLORS = [
   "#87CEEB", // 天空蓝
   "#F0E68C", // 卡其
   "#B0C4DE", // 淡钢蓝
+  "#E6735A", // 赤陶
+  "#5FB3B3", // 水鸭青
+  "#C5A3FF", // 淡紫
+  "#F4A460", // 沙棕
+  "#76D7C4", // 薄荷
+  "#FF8C94", // 鲑鱼粉
+  "#7EC8E3", // 冰蓝
+  "#D4E157", // 黄绿
+  "#CE93D8", // 兰花紫
+  "#FFB74D", // 琥珀
+  "#81C784", // 柔绿
+  "#64B5F6", // 矢车菊蓝
+  "#E57373", // 淡红
+  "#AED581", // 浅草绿
+  "#BA68C8", // 紫兰
 ];
 
 /** 噪声聚类颜色 */
