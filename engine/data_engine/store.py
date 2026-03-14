@@ -186,6 +186,38 @@ class DuckDBStore:
             )
         """)
 
+        # shared schema
+        self._conn.execute("CREATE SCHEMA IF NOT EXISTS shared")
+
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS shared.llm_cache (
+                cache_key    VARCHAR PRIMARY KEY,
+                prompt_hash  VARCHAR NOT NULL,
+                result_json  TEXT NOT NULL,
+                model        VARCHAR DEFAULT '',
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        self._conn.execute("""
+            CREATE SEQUENCE IF NOT EXISTS shared.chat_history_id_seq
+        """)
+
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS shared.chat_history (
+                id           INTEGER PRIMARY KEY DEFAULT NEXTVAL('shared.chat_history_id_seq'),
+                session_id   VARCHAR NOT NULL,
+                role         VARCHAR NOT NULL,
+                content      TEXT NOT NULL,
+                created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        self._conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chat_history_session
+            ON shared.chat_history(session_id, created_at)
+        """)
+
         logger.info("数据表初始化完成")
 
         # ─── 迁移：为已有表添加新列 ────────────────────
@@ -392,6 +424,54 @@ class DuckDBStore:
         """获取股票数量"""
         result = self._conn.execute("SELECT COUNT(DISTINCT code) FROM stock_snapshot").fetchone()
         return result[0] if result else 0
+
+    def get_llm_cache(self, cache_key: str) -> str | None:
+        """查询 LLM 结果缓存，返回 result_json 或 None"""
+        try:
+            row = self._conn.execute(
+                "SELECT result_json FROM shared.llm_cache WHERE cache_key = ?",
+                [cache_key],
+            ).fetchone()
+            return row[0] if row else None
+        except Exception as e:
+            logger.warning(f"llm_cache 查询失败: {e}")
+            return None
+
+    def set_llm_cache(self, cache_key: str, prompt_hash: str, result_json: str, model: str = "") -> None:
+        """写入 LLM 结果缓存（INSERT OR REPLACE）"""
+        try:
+            self._conn.execute("""
+                INSERT OR REPLACE INTO shared.llm_cache
+                    (cache_key, prompt_hash, result_json, model)
+                VALUES (?, ?, ?, ?)
+            """, [cache_key, prompt_hash, result_json, model])
+        except Exception as e:
+            logger.warning(f"llm_cache 写入失败: {e}")
+
+    def append_chat_history(self, session_id: str, role: str, content: str) -> None:
+        """追加一条对话历史"""
+        try:
+            self._conn.execute("""
+                INSERT INTO shared.chat_history (session_id, role, content)
+                VALUES (?, ?, ?)
+            """, [session_id, role, content])
+        except Exception as e:
+            logger.warning(f"chat_history 写入失败: {e}")
+
+    def get_chat_history(self, session_id: str, limit: int = 50) -> list[dict]:
+        """获取指定会话的历史消息，按时间正序"""
+        try:
+            rows = self._conn.execute("""
+                SELECT role, content, created_at
+                FROM shared.chat_history
+                WHERE session_id = ?
+                ORDER BY created_at ASC
+                LIMIT ?
+            """, [session_id, limit]).fetchall()
+            return [{"role": r[0], "content": r[1], "created_at": str(r[2])} for r in rows]
+        except Exception as e:
+            logger.warning(f"chat_history 查询失败: {e}")
+            return []
 
     def close(self):
         self._conn.close()

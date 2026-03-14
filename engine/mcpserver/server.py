@@ -48,7 +48,7 @@ server = FastMCP(
 _da = DataAccess()
 
 
-# ─── 注册 18 个 Tool ──────────────────────────────────
+# ─── 注册 22 个 Tool ──────────────────────────────────
 
 @server.tool()
 def query_market_overview() -> str:
@@ -167,6 +167,32 @@ def submit_analysis(code: str, depth: str = "standard") -> str:
 def get_analysis_history(code: str, limit: int = 5) -> str:
     """查询个股的历史 AI 分析报告。返回最近 N 条分析结果。"""
     return tools.get_analysis_history(code, limit)
+
+
+# ─── Debate Tools ────────────────────────────────────
+
+@server.tool()
+def start_debate(code: str, max_rounds: int = 3) -> str:
+    """发起专家辩论（多头 vs 空头 + 散户/主力观察员 + 裁判）。需要后端在线且配置 LLM API Key。code 示例: '600519'"""
+    return tools.start_debate(_da, code, max_rounds)
+
+
+@server.tool()
+def get_debate_status(debate_id: str) -> str:
+    """查询辩论进度。返回当前轮次、状态、是否有一方认输等信息。debate_id 格式: '{code}_{YYYYMMDDHHMMSS}'"""
+    return tools.get_debate_status(_da, debate_id)
+
+
+@server.tool()
+def get_debate_transcript(debate_id: str, round: int | None = None, role: str | None = None) -> str:
+    """获取辩论记录，支持按轮次和角色过滤。role 可选: bull_expert, bear_expert, retail_investor, smart_money"""
+    return tools.get_debate_transcript(_da, debate_id, round, role)
+
+
+@server.tool()
+def get_judge_verdict(debate_id: str) -> str:
+    """获取裁判最终总结。返回综合信号、多空核心论点、风险提示、辩论质量评估等。"""
+    return tools.get_judge_verdict(_da, debate_id)
 
 
 # ─── 入口 ─────────────────────────────────────────────
