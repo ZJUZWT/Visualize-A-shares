@@ -14,6 +14,7 @@ import Sidebar from "@/components/ui/Sidebar";
 import TopBar from "@/components/ui/TopBar";
 import RelatedStocksPanel from "@/components/ui/RelatedStocksPanel";
 import AIChatPanel from "@/components/ui/AIChatPanel";
+import AnalysisPanel from "@/components/ui/AnalysisPanel";
 import { useTerrainStore } from "@/stores/useTerrainStore";
 
 const TerrainScene = dynamic(
@@ -43,6 +44,7 @@ export default function Home() {
       <TopBar />
       <RelatedStocksPanel />
       <AIChatPanel />
+      <AnalysisPanel />
 
       {/* Layer 2: 底部版权 */}
       <div className="overlay fixed bottom-3 right-4">
