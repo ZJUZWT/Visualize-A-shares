@@ -137,6 +137,34 @@ class DataCollector:
                 status[source.name] = False
         return status
 
+    def get_stock_news(self, code: str, limit: int = 50) -> pd.DataFrame:
+        """获取个股新闻 — 逐级降级"""
+        for source in self._sources:
+            try:
+                df = source.get_stock_news(code, limit)
+                if df is not None and not df.empty:
+                    logger.debug(f"✅ {code} 新闻: {source.name} ({len(df)} 条)")
+                    return df
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"⚠️ {source.name} {code} 新闻获取失败: {e}")
+        return pd.DataFrame()
+
+    def get_announcements(self, code: str, limit: int = 20) -> pd.DataFrame:
+        """获取公司公告 — 逐级降级"""
+        for source in self._sources:
+            try:
+                df = source.get_announcements(code, limit)
+                if df is not None and not df.empty:
+                    logger.debug(f"✅ {code} 公告: {source.name} ({len(df)} 条)")
+                    return df
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"⚠️ {source.name} {code} 公告获取失败: {e}")
+        return pd.DataFrame()
+
     @property
     def available_sources(self) -> list[str]:
         return [s.name for s in self._sources]
