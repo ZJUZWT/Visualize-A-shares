@@ -159,9 +159,21 @@ class DataFetcher:
                 return {"error": f"无财务数据: {code}"}
             row = df.iloc[-1]
             result: dict = {"code": code, "report_date": str(row.get("日期", ""))}
-            for col in ["净资产收益率", "总资产净利率", "营业收入", "净利润", "资产负债率"]:
-                if col in row.index:
-                    result[col] = str(row[col])
+            KEY_COLS = {
+                "摊薄每股收益(元)": "每股收益",
+                "每股净资产_调整后(元)": "每股净资产",
+                "净资产收益率(%)": "净资产收益率(%)",
+                "总资产净利润率(%)": "总资产净利率(%)",
+                "营业利润率(%)": "营业利润率(%)",
+                "销售净利率(%)": "销售净利率(%)",
+                "资产负债率(%)": "资产负债率(%)",
+                "流动比率": "流动比率",
+                "主营业务收入增长率(%)": "营收增长率(%)",
+                "净利润增长率(%)": "净利润增长率(%)",
+            }
+            for col, label in KEY_COLS.items():
+                if col in row.index and pd.notna(row[col]):
+                    result[label] = str(row[col])
             return result
         except Exception as e:
             logger.warning(f"get_financials 失败 [{code}]: {e}")
