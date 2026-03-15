@@ -215,8 +215,8 @@ async def start_debate(code: str, max_rounds: int = 2) -> str:
 ```
 
 - 调用 `POST /api/v1/debate`（已有端点，路由注册于 `engine/api/routes/debate.py`，prefix `/api/v1`），消费 SSE 流
-- 只返回最终 `judge_verdict` 的 `summary` 字段作为工具结果
-- 辩论过程的 SSE 事件不透传给前端（避免嵌套流复杂度），只在 `tool_result` 中返回摘要
+- 只返回最终 `judge_verdict` 的 `summary` 字段，截断至 500 字后作为工具结果（`tools.py` 中显式截断：`summary[:500]`）
+- 调用需设置 `asyncio.wait_for` 超时为 180 秒，防止辩论流程过长导致 expert chat 请求挂起
 
 ---
 
