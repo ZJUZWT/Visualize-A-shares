@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/v1", tags=["debate"])
 class DebateRequest(BaseModel):
     code: str = Field(description="股票代码，如 '001896'")
     max_rounds: int = Field(default=3, ge=1, le=5)
+    mode: str = Field(default="standard", description="辩论模式: standard | fast")
 
 
 @router.post("/debate")
@@ -40,6 +41,7 @@ async def start_debate(req: DebateRequest):
         target=req.code,
         debate_id=f"{req.code}_{now.strftime('%Y%m%d%H%M%S')}",
         max_rounds=req.max_rounds,
+        mode=req.mode if req.mode in ("standard", "fast") else "standard",
     )
 
     async def event_stream():
