@@ -54,6 +54,18 @@ def _extract_json(text: str) -> str:
     return text.strip()
 
 
+def _parse_sentiment_score(value) -> float | None:
+    """将 LLM 返回的情感分数转为 float，支持数字和字符串格式"""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 async def extract_structure(
     argument: str,
     role: str,
@@ -96,10 +108,11 @@ async def extract_structure(
                 )
                 for dr in parsed.get("data_requests", [])
             ],
-            "retail_sentiment_score": float(score) if isinstance(score, (int, float)) else None,
+            "retail_sentiment_score": _parse_sentiment_score(score),
             "speak": parsed.get("speak", True),
         }
-    except Exception:
+    except Exception as e:
+        logger.warning(f"extract_structure 解析失败，使用默认值: {e}")
         return {
             "stance": "insist", "confidence": 0.5,
             "challenges": [], "data_requests": [],
@@ -586,7 +599,11 @@ async def _extract_judge_verdict(
     data["debate_id"] = blackboard.debate_id
     data["termination_reason"] = blackboard.termination_reason or "max_rounds"
     data["timestamp"] = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
-    return JudgeVerdict(**data)
+    try:
+        return JudgeVerdict(**data)
+    except Exception as e:
+        logger.warning(f"JudgeVerdict 构建失败: {e}，data keys: {list(data.keys())}")
+        raise
 
 
 async def persist_debate(
