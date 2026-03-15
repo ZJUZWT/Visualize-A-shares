@@ -25,7 +25,7 @@ _engine_dir = str(Path(__file__).resolve().parent.parent)
 if _engine_dir not in sys.path:
     sys.path.insert(0, _engine_dir)
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
 
 from .data_access import DataAccess
 from . import tools
@@ -172,9 +172,9 @@ def get_analysis_history(code: str, limit: int = 5) -> str:
 # ─── Debate Tools ────────────────────────────────────
 
 @server.tool()
-def start_debate(code: str | int, max_rounds: int = 3) -> str:
+async def start_debate(code: str | int, max_rounds: int = 3, ctx: Context = None) -> str:
     """发起专家辩论（多头 vs 空头 + 散户/主力观察员 + 裁判）。需要后端在线且配置 LLM API Key。code 示例: '600519'"""
-    return tools.start_debate(_da, str(code), max_rounds)
+    return await tools.start_debate_async(_da, str(code), max_rounds, ctx)
 
 
 @server.tool()
@@ -198,7 +198,10 @@ def get_judge_verdict(debate_id: str) -> str:
 # ─── 入口 ─────────────────────────────────────────────
 
 def main():
-    server.run(transport="stdio")
+    import os
+    server.settings.host = os.getenv("MCP_HOST", "0.0.0.0")
+    server.settings.port = int(os.getenv("MCP_PORT", "8001"))
+    server.run(transport="streamable-http")
 
 
 if __name__ == "__main__":

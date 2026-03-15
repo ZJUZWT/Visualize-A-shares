@@ -1,9 +1,7 @@
 {
   "mcpServers": {
     "stockterrain": {
-      "command": "/bin/bash",
-      "args": ["-c", "cd engine && .venv/bin/python -m mcpserver"],
-      "cwd": "engine"
+      "url": "http://localhost:8001/mcp"
     },
     "memory": {
       "command": "npx",
