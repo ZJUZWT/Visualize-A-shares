@@ -1,45 +1,67 @@
 @import "tailwindcss";
 
-:root {
-  --bg-primary: #F8FAFE;
-  --bg-secondary: #FFFFFF;
-  --bg-card: #FFFFFF;
-  --border: #E8ECF4;
-  --border-hover: #D0D8E8;
-  --text-primary: #0F172A;
-  --text-secondary: #6B7280;
-  --text-tertiary: #9CA3AF;
-  --accent: #4F8EF7;
-  --accent-light: #EBF2FF;
-  --accent-hover: #3B7DE6;
-  --red-stock: #EF4444;
-  --red-light: #FEF2F2;
-  --green-stock: #10B981;
-  --green-light: #ECFDF5;
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
-  --shadow-sm: 0 2px 4px -1px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 8px 24px -4px rgba(0, 0, 0, 0.08);
-  --shadow-xl: 0 16px 48px -8px rgba(0, 0, 0, 0.10);
-  --radius: 12px;
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-}
+@layer base {
+  :root {
+    --bg-primary: #F8FAFE;
+    --bg-secondary: #FFFFFF;
+    --bg-card: #FFFFFF;
+    --border: #E8ECF4;
+    --border-hover: #D0D8E8;
+    --text-primary: #0F172A;
+    --text-secondary: #6B7280;
+    --text-tertiary: #9CA3AF;
+    --accent: #4F8EF7;
+    --accent-light: #EBF2FF;
+    --accent-hover: #3B7DE6;
+    --red-stock: #EF4444;
+    --red-light: #FEF2F2;
+    --green-stock: #10B981;
+    --green-light: #ECFDF5;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.03);
+    --shadow-sm: 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 8px 24px -4px rgba(0, 0, 0, 0.08);
+    --shadow-xl: 0 16px 48px -8px rgba(0, 0, 0, 0.10);
+    --radius: 12px;
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+  .debate-dark {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-card: #1e293b;
+    --border: #334155;
+    --border-hover: #475569;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-tertiary: #64748b;
+    --accent: #60a5fa;
+    --accent-light: rgba(96, 165, 250, 0.1);
+    --accent-hover: #3b82f6;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 24px -4px rgba(0, 0, 0, 0.5);
+    --shadow-xl: 0 16px 48px -8px rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
 
-html, body {
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
 /* 数据字体 */
@@ -229,34 +251,6 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .scrollbar-thin {
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.1) transparent;
-}
-
-/* 辩论页深色主题 */
-.debate-dark {
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-card: #1e293b;
-  --border: #334155;
-  --border-hover: #475569;
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-tertiary: #64748b;
-  --accent: #60a5fa;
-  --accent-light: rgba(96, 165, 250, 0.1);
-  --accent-hover: #3b82f6;
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-sm: 0 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 24px -4px rgba(0, 0, 0, 0.5);
-  --shadow-xl: 0 16px 48px -8px rgba(0, 0, 0, 0.6);
-  color-scheme: dark;
-}
-
-.debate-dark ::-webkit-scrollbar-thumb {
-  background: #475569;
-}
-.debate-dark ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
 }
 
 /* 过渡效果 */
