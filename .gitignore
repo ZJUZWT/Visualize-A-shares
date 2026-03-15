@@ -51,3 +51,4 @@ logs/
 # Claude Code
 .claude/
 .worktrees/
+.worktrees/
