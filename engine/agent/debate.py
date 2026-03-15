@@ -469,6 +469,125 @@ async def judge_summarize(
     return verdict
 
 
+async def judge_summarize_stream(
+    blackboard: Blackboard,
+    llm: BaseLLMProvider,
+    memory: AgentMemory,
+) -> AsyncGenerator[dict, None]:
+    """流式裁判总结：逐 token 推送 judge_token，最后推送 judge_verdict"""
+    memory_ctx = memory.recall("judge", f"辩论 {blackboard.target}", top_k=3)
+    memory_text = ""
+    if memory_ctx:
+        memory_text = "\n## 历史裁决参考\n" + "\n".join(
+            f"- {m.get('content', '')}" for m in memory_ctx[:3]
+        )
+
+    context = _build_context_for_role(blackboard)
+    judge_stream_prompt = (
+        f"你是一位专业的股票辩论裁判。请对以下辩论做出总结评价，"
+        f"直接用自然语言阐述你的裁决。\n\n{context}{memory_text}"
+    )
+    messages = [
+        ChatMessage(role="system", content=JUDGE_SYSTEM_PROMPT),
+        ChatMessage(role="user", content=judge_stream_prompt),
+    ]
+
+    # Phase 1: 流式输出 summary
+    tokens: list[str] = []
+    token_buf: list[str] = []
+    seq = 0
+    try:
+        async for token in llm.chat_stream(messages):
+            tokens.append(token)
+            token_buf.append(token)
+            if len(token_buf) >= 5 or token in ("。", "\n", ".", "！", "？", "；"):
+                yield sse("judge_token", {
+                    "role": "judge", "round": None,
+                    "tokens": "".join(token_buf), "seq": seq,
+                })
+                seq += 1
+                token_buf = []
+        if token_buf:
+            yield sse("judge_token", {
+                "role": "judge", "round": None,
+                "tokens": "".join(token_buf), "seq": seq,
+            })
+    except Exception as e:
+        logger.warning(f"裁判流式中断: {e}")
+        tokens.append("(裁决中断)")
+
+    summary_text = "".join(tokens)
+
+    # Phase 2: 提取结构化裁决
+    try:
+        verdict = await asyncio.wait_for(
+            _extract_judge_verdict(summary_text, blackboard, llm),
+            timeout=30.0,
+        )
+    except Exception as e:
+        logger.error(f"裁判结构化提取失败: {e}，生成降级 verdict")
+        verdict = JudgeVerdict(
+            target=blackboard.target,
+            debate_id=blackboard.debate_id,
+            summary=summary_text or f"裁判总结暂时不可用（{e}）",
+            signal=None, score=None,
+            key_arguments=[],
+            bull_core_thesis="（不可用）",
+            bear_core_thesis="（不可用）",
+            retail_sentiment_note="（不可用）",
+            smart_money_note="（不可用）",
+            risk_warnings=["裁判服务异常，请谨慎参考"],
+            debate_quality="strong_disagreement",
+            termination_reason=blackboard.termination_reason or "max_rounds",
+            timestamp=datetime.now(tz=ZoneInfo("Asia/Shanghai")),
+        )
+
+    # 存储裁判记忆
+    try:
+        memory.store(
+            agent_role="judge",
+            target=blackboard.target,
+            content=f"裁决: {verdict.debate_quality}, signal={verdict.signal}",
+            metadata={"debate_id": blackboard.debate_id, "signal": str(verdict.signal)},
+        )
+    except Exception as e:
+        logger.warning(f"裁判记忆存储失败: {e}")
+
+    yield sse("judge_verdict", verdict.model_dump(mode="json"))
+
+
+async def _extract_judge_verdict(
+    summary: str, blackboard: Blackboard, llm: BaseLLMProvider
+) -> JudgeVerdict:
+    """从 summary 文本提取结构化 JudgeVerdict"""
+    extract_prompt = f"""请从以下裁判总结中提取结构化裁决，只返回 JSON，不要其他内容。
+
+{summary}
+
+返回格式:
+{{
+  "summary": "总结文本",
+  "signal": "bullish" | "bearish" | "neutral",
+  "score": -1.0到1.0,
+  "key_arguments": ["关键论据1", ...],
+  "bull_core_thesis": "多头核心论点",
+  "bear_core_thesis": "空头核心论点",
+  "retail_sentiment_note": "散户情绪说明",
+  "smart_money_note": "主力资金说明",
+  "risk_warnings": ["风险1", ...],
+  "debate_quality": "strong_disagreement" | "moderate_disagreement" | "consensus"
+}}"""
+
+    raw = await llm.chat([ChatMessage(role="user", content=extract_prompt)])
+    json_str = _extract_json(raw)
+    data = json.loads(json_str)
+    data["target"] = blackboard.target
+    data["debate_id"] = blackboard.debate_id
+    data["termination_reason"] = blackboard.termination_reason or "max_rounds"
+    data["timestamp"] = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
+    return JudgeVerdict(**data)
+
+
 async def persist_debate(
     blackboard: Blackboard,
     judge_verdict: JudgeVerdict,
@@ -550,43 +669,81 @@ async def run_debate(
             "is_final": is_final,
         })
 
-        # 1. 多头发言
-        bull_entry = await speak("bull_expert", blackboard, llm, memory, is_final)
-        blackboard.transcript.append(bull_entry)
-        if bull_entry.stance == "concede":
-            blackboard.bull_conceded = True
-        yield sse("debate_entry", bull_entry.model_dump(mode="json"))
+        # 1. 多头发言（流式）
+        last_bull: dict | None = None
+        async for event in speak_stream("bull_expert", blackboard, llm, memory, is_final):
+            yield event
+            if event["event"] == "debate_entry_complete":
+                last_bull = event["data"]
 
-        # 2. 空头发言
-        bear_entry = await speak("bear_expert", blackboard, llm, memory, is_final)
-        blackboard.transcript.append(bear_entry)
-        if bear_entry.stance == "concede":
-            blackboard.bear_conceded = True
-        yield sse("debate_entry", bear_entry.model_dump(mode="json"))
+        # 2. 空头发言（流式）
+        last_bear: dict | None = None
+        async for event in speak_stream("bear_expert", blackboard, llm, memory, is_final):
+            yield event
+            if event["event"] == "debate_entry_complete":
+                last_bear = event["data"]
 
-        # 3. 观察员
+        # 3. 观察员（沉默时不推送 token）
         for observer in OBSERVERS:
-            entry = await speak(observer, blackboard, llm, memory, is_final)
-            blackboard.transcript.append(entry)
-            if entry.speak:
-                yield sse("debate_entry", entry.model_dump(mode="json"))
+            buf: list[dict] = []
+            async for event in speak_stream(observer, blackboard, llm, memory, is_final):
+                buf.append(event)
+                if event["event"] == "debate_entry_complete":
+                    if event["data"].get("speak", True):
+                        for e in buf:
+                            yield e
+                    buf = []
 
-        # 4. 执行数据请求
+        # 4. concede 检查
+        if last_bull and last_bull.get("stance") == "concede":
+            blackboard.bull_conceded = True
+        if last_bear and last_bear.get("stance") == "concede":
+            blackboard.bear_conceded = True
+
+        # 5. 数据请求逐个事件化
+        import time
         pending = [r for r in blackboard.data_requests if r.status == "pending"]
         if pending and not is_final:
+            success = 0
+            failed = 0
             for req in pending:
-                yield sse("data_fetching", {
+                t0 = time.monotonic()
+                req_id = f"{req.requested_by}_{req.action}_{req.round}"
+                yield sse("data_request_start", {
                     "requested_by": req.requested_by,
                     "engine": req.engine,
                     "action": req.action,
+                    "params": req.params,
+                    "request_id": req_id,
                 })
-            await fulfill_data_requests(pending, data_fetcher)
-            yield sse("data_ready", {
-                "count": len(pending),
-                "result_summary": f"已获取 {len(pending)} 条补充数据",
+                try:
+                    result = await data_fetcher.fetch_by_request(req)
+                    req.result = result
+                    req.status = "done"
+                    success += 1
+                    yield sse("data_request_done", {
+                        "request_id": req_id, "engine": req.engine,
+                        "action": req.action, "status": "done",
+                        "result_summary": str(result)[:200] if result else "",
+                        "duration_ms": int((time.monotonic() - t0) * 1000),
+                    })
+                except Exception as e:
+                    req.status = "failed"
+                    failed += 1
+                    yield sse("data_request_done", {
+                        "request_id": req_id, "engine": req.engine,
+                        "action": req.action, "status": "failed",
+                        "result_summary": str(e)[:200],
+                        "duration_ms": int((time.monotonic() - t0) * 1000),
+                    })
+            yield sse("data_batch_complete", {
+                "round": blackboard.round,
+                "total": len(pending),
+                "success": success,
+                "failed": failed,
             })
 
-        # 5. 轮次控制
+        # 6. 轮次控制
         if blackboard.bull_conceded and blackboard.bear_conceded:
             blackboard.termination_reason = "both_conceded"
             break
@@ -600,16 +757,23 @@ async def run_debate(
             blackboard.termination_reason = "max_rounds"
             break
 
-    # 6. 裁判总结
+    # 7. 裁判总结
     blackboard.status = "judging"
     yield sse("debate_end", {
         "reason": blackboard.termination_reason,
         "rounds_completed": blackboard.round,
     })
 
-    judge_verdict = await judge_summarize(blackboard, llm, memory)
+    judge_verdict = None
+    async for event in judge_summarize_stream(blackboard, llm, memory):
+        yield event
+        if event["event"] == "judge_verdict":
+            from agent.schemas import JudgeVerdict as _JV
+            judge_verdict = _JV(**{
+                k: v for k, v in event["data"].items()
+            })
     blackboard.status = "completed"
-    yield sse("judge_verdict", judge_verdict.model_dump(mode="json"))
 
-    # 7. 持久化
-    await persist_debate(blackboard, judge_verdict)
+    # 8. 持久化
+    if judge_verdict:
+        await persist_debate(blackboard, judge_verdict)
