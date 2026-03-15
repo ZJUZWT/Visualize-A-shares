@@ -141,7 +141,6 @@ _DEBATER_SYSTEM_TEMPLATE = """{stance_desc}
 ## 行为规范
 - 论据必须基于数据和金融逻辑，不允许无根据的{bias}
 - 每轮必须针对对方上一轮的核心论点提出具体反驳
-- 如果需要更多数据支撑论点，可通过 data_requests 请求（最后一轮除外）
 - partial_concede 表示承认对方某个具体论点，但整体立场不变
 
 ## 输出要求
@@ -150,7 +149,6 @@ _DEBATER_SYSTEM_TEMPLATE = """{stance_desc}
 1. 开头明确你的立场（坚持原有观点 / 部分让步 / 认输）
 2. 详细展开你的核心论点，用数据和金融逻辑支撑
 3. 在论述末尾，用"【质疑】"标记对对方的质疑（每条一行）
-4. 如需补充数据，用"【数据请求】"标记（每条一行，格式：引擎.动作(参数)）
 {final_round_note}"""
 
 _OBSERVER_SYSTEM_TEMPLATE = """{observer_desc}
@@ -242,3 +240,37 @@ def build_debate_system_prompt(role: str, target: str, is_final_round: bool) -> 
         return JUDGE_SYSTEM_PROMPT
     else:
         raise ValueError(f"未知辩论角色: {role}")
+
+
+_DATA_REQUEST_TEMPLATE = """你是{role_desc}，正在参与关于 {target} 的专家辩论（第 {round} 轮）。
+
+## 当前辩论状态
+{context}
+
+## 你的任务
+在发言之前，你需要决定本轮需要哪些数据来支撑你的论点。
+只输出 JSON 数组，不要任何其他内容。如果不需要数据，输出空数组 []。
+
+## 可用数据动作
+{allowed_actions}
+
+## 输出格式（严格 JSON 数组）
+[
+  {{"engine": "data", "action": "get_daily_history", "params": {{"code": "{target}"}}}},
+  {{"engine": "info", "action": "get_news", "params": {{"code": "{target}"}}}}
+]
+
+注意：params 中 code 字段必须填写股票代码 {target}。最多请求 {max_requests} 条。"""
+
+
+def build_data_request_prompt(role: str, target: str, round: int, context: str) -> str:
+    """构建数据请求专用 prompt"""
+    allowed = DEBATE_DATA_WHITELIST.get(role, [])
+    allowed_str = "\n".join(f"- {a}" for a in allowed)
+    persona = DEBATE_PERSONAS.get(role, {})
+    role_desc = persona.get("role", role)
+    return _DATA_REQUEST_TEMPLATE.format(
+        role_desc=role_desc, target=target, round=round,
+        context=context, allowed_actions=allowed_str,
+        max_requests=MAX_DATA_REQUESTS_PER_ROLE_PER_ROUND,
+    )
