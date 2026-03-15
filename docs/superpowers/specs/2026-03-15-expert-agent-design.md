@@ -120,7 +120,7 @@ memory.store(
 
 - `target`：从 `graph_recall` 阶段提取的第一个股票代码；若无股票则为 `"general"`
 - `content`：用户消息 + 专家完整回复的拼接文本，**不需要额外 LLM 调用**生成摘要
-- `memory_recall` 阶段调用 `memory.recall(agent_role="expert", target=target, query=user_message, top_k=5)`
+- `memory_recall` 阶段调用 `memory.recall(agent_role="expert", query=user_message, top_k=5)`（`recall` 不接受 `target` 参数，仅 `store` 接受）
 
 专家可调用的引擎：
 
