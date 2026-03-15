@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "stockterrain": {
-      "command": "/Users/swannzhang/Workspace/AIProjects/A_Claude/engine/.venv/bin/python",
+      "command": "./engine/.venv/bin/python",
       "args": ["-m", "mcpserver"],
-      "cwd": "/Users/swannzhang/Workspace/AIProjects/A_Claude/engine"
+      "cwd": "./engine"
     },
     "memory": {
       "command": "npx",
