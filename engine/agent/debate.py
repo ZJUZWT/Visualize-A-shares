@@ -438,6 +438,54 @@ async def fulfill_data_requests(
             req.status = "failed"
 
 
+async def fetch_initial_data(
+    blackboard: Blackboard,
+    data_fetcher: DataFetcher,
+) -> AsyncGenerator[dict, None]:
+    """拉取公用初始数据，推送 blackboard_update 事件"""
+    INITIAL_ACTIONS = [
+        ("get_stock_info",    "data", "股票基本信息"),
+        ("get_daily_history", "data", "日线行情"),
+        ("get_news",          "info", "最新新闻"),
+    ]
+    success = 0
+    failed = 0
+    for action, engine, title in INITIAL_ACTIONS:
+        req_id = f"public_{action}"
+        yield sse("blackboard_update", {
+            "request_id": req_id, "source": "public",
+            "engine": engine, "action": action, "title": title,
+            "status": "pending", "result_summary": "", "round": 0,
+        })
+        req = DataRequest(
+            requested_by="public", engine=engine,
+            action=action, params={"code": blackboard.target}, round=0,
+        )
+        try:
+            result = await asyncio.wait_for(
+                data_fetcher.fetch_by_request(req), timeout=15.0
+            )
+            summary = str(result)[:300] if result else ""
+            blackboard.facts[action] = result
+            success += 1
+            yield sse("blackboard_update", {
+                "request_id": req_id, "source": "public",
+                "engine": engine, "action": action, "title": title,
+                "status": "done", "result_summary": summary, "round": 0,
+            })
+        except Exception as e:
+            logger.warning(f"公用数据拉取失败 [{action}]: {e}")
+            failed += 1
+            yield sse("blackboard_update", {
+                "request_id": req_id, "source": "public",
+                "engine": engine, "action": action, "title": title,
+                "status": "failed", "result_summary": str(e)[:200], "round": 0,
+            })
+    yield sse("initial_data_complete", {
+        "total": len(INITIAL_ACTIONS), "success": success, "failed": failed,
+    })
+
+
 async def judge_summarize(
     blackboard: Blackboard,
     llm: BaseLLMProvider,
