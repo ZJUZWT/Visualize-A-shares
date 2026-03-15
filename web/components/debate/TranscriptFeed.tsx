@@ -181,9 +181,9 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
     return (
       <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] px-5 py-4">
         <span className="text-xs font-semibold mb-2 block" style={{ color }}>裁判</span>
-        <div className="prose-sm text-[var(--text-primary)] leading-7">
-          <MarkdownContent content={item.tokens} />
-          <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+        <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]">
+          <Loader2 size={14} className="animate-spin" />
+          <span>裁判正在综合各方观点，生成裁决...</span>
         </div>
       </div>
     );
@@ -303,38 +303,57 @@ function VerdictCard({ verdict }: { verdict: JudgeVerdict }) {
   const color = verdict.signal ? SIGNAL_COLOR[verdict.signal] : "#9CA3AF";
   const label = verdict.signal ? SIGNAL_LABEL[verdict.signal] : "中性";
 
+  const QUALITY_LABEL: Record<string, string> = {
+    consensus: "共识", strong_disagreement: "激烈分歧", one_sided: "一边倒",
+  };
+
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden mt-4">
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden mt-6">
       <div className="h-1.5" style={{ backgroundColor: color }} />
-      <div className="px-5 py-4 space-y-4">
+      <div className="px-6 py-5 space-y-5">
         <div className="flex items-center gap-3">
           <span className="text-xl font-bold" style={{ color }}>{label}</span>
           {verdict.score !== null && (
             <span className="text-sm text-[var(--text-tertiary)]">评分 {verdict.score}</span>
           )}
+          <span className="text-xs text-[var(--text-tertiary)] ml-auto px-2.5 py-1 rounded bg-[var(--bg-primary)]">
+            {QUALITY_LABEL[verdict.debate_quality] ?? verdict.debate_quality}
+          </span>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="p-3 rounded-lg text-sm bg-red-500/5 border-l-2 border-red-500">
-            <div className="font-medium text-[var(--text-secondary)] mb-1.5">多头核心论点</div>
-            <p className="text-[var(--text-primary)] leading-relaxed">{verdict.bull_core_thesis}</p>
+
+        <div className="text-[13px] text-[var(--text-primary)] leading-7">
+          <MarkdownContent content={verdict.summary} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div className="p-4 rounded-xl text-[13px] bg-[var(--bg-primary)] border-l-2 border-red-500">
+            <div className="font-medium text-[var(--text-secondary)] mb-2">多头核心论点</div>
+            <div className="text-[var(--text-primary)] leading-7">
+              <MarkdownContent content={verdict.bull_core_thesis} />
+            </div>
           </div>
-          <div className="p-3 rounded-lg text-sm bg-emerald-500/5 border-l-2 border-emerald-500">
-            <div className="font-medium text-[var(--text-secondary)] mb-1.5">空头核心论点</div>
-            <p className="text-[var(--text-primary)] leading-relaxed">{verdict.bear_core_thesis}</p>
+          <div className="p-4 rounded-xl text-[13px] bg-[var(--bg-primary)] border-l-2 border-emerald-500">
+            <div className="font-medium text-[var(--text-secondary)] mb-2">空头核心论点</div>
+            <div className="text-[var(--text-primary)] leading-7">
+              <MarkdownContent content={verdict.bear_core_thesis} />
+            </div>
           </div>
         </div>
+
         {verdict.risk_warnings.length > 0 && (
-          <ul className="space-y-1.5">
+          <ul className="space-y-2">
             {verdict.risk_warnings.map((w, i) => (
-              <li key={i} className="text-sm text-[var(--text-secondary)] flex gap-2">
+              <li key={i} className="text-[13px] text-[var(--text-secondary)] flex gap-2 leading-relaxed">
                 <span className="text-yellow-500 shrink-0">⚠</span>{w}
               </li>
             ))}
           </ul>
         )}
-        <p className="text-base text-[var(--text-primary)] leading-relaxed border-t border-[var(--border)] pt-4">
-          {verdict.summary}
-        </p>
+
+        <div className="text-xs text-[var(--text-tertiary)] border-t border-[var(--border)] pt-4 flex gap-6">
+          <span>散户情绪：{verdict.retail_sentiment_note}</span>
+          <span>主力资金：{verdict.smart_money_note}</span>
+        </div>
       </div>
     </div>
   );
