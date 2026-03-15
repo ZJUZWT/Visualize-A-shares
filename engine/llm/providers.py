@@ -183,7 +183,7 @@ class AnthropicProvider(BaseLLMProvider):
             return data["content"][0]["text"]
 
     async def chat_stream(self, messages: list[ChatMessage]) -> AsyncGenerator[str, None]:
-        url = f"{self._get_base_url()}/v1/messages"
+        url = f"{self.config.base_url.rstrip('/')}/v1/messages"
         headers = {
             "x-api-key": self.config.api_key,
             "anthropic-version": self.ANTHROPIC_VERSION,
