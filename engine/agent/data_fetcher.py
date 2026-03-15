@@ -122,15 +122,10 @@ class DataFetcher:
             mod = importlib.import_module(module_name)
             engine = getattr(mod, getter_fn)()
             method = getattr(engine, method_name)
-            # 限制新闻/公告条数，避免情感分析超时
-            params = dict(req.params)
-            if req.action in ("get_news", "get_announcements"):
-                params.setdefault("limit", 10)
-                params["limit"] = min(params["limit"], 10)
             if is_async:
-                return await method(**params)
+                return await method(**req.params)
             else:
-                return await asyncio.to_thread(method, **params)
+                return await asyncio.to_thread(method, **req.params)
         elif req.action in SELF_DISPATCH:
             method = getattr(self, req.action)
             result = await asyncio.to_thread(method, **req.params)

@@ -5,6 +5,7 @@
 数据源通过 DataEngine，分析结果缓存在 DataEngine 的 DuckDB info.* schema。
 """
 
+import asyncio
 import datetime
 import json
 
@@ -30,7 +31,7 @@ class InfoEngine:
     # ── 新闻 ──
 
     async def get_news(self, code: str, limit: int = 50) -> list[NewsArticle]:
-        """获取个股新闻 + 情感分析"""
+        """获取个股新闻 + 情感分析（并发）"""
         cached = self._get_cached_news(code, limit)
         if cached:
             return cached
@@ -39,23 +40,37 @@ class InfoEngine:
         if raw_df.empty:
             return []
 
-        articles = []
+        # 预提取行数据
+        rows_data = []
         for _, row in raw_df.iterrows():
             title = str(row.get("title", ""))
             content = str(row.get("content", "")) if pd.notna(row.get("content")) else None
+            rows_data.append({
+                "title": title,
+                "content": content,
+                "source": str(row.get("source", "")),
+                "publish_time": str(row.get("publish_time", "")),
+                "url": str(row.get("url", "")) if pd.notna(row.get("url")) else None,
+            })
 
-            sentiment_result = await self._sentiment.analyze(title, content)
+        # 并发情感分析
+        sentiment_tasks = [
+            self._sentiment.analyze(r["title"], r["content"]) for r in rows_data
+        ]
+        sentiment_results = await asyncio.gather(*sentiment_tasks, return_exceptions=True)
 
-            article = NewsArticle(
-                title=title,
-                content=content,
-                source=str(row.get("source", "")),
-                publish_time=str(row.get("publish_time", "")),
-                url=str(row.get("url", "")) if pd.notna(row.get("url")) else None,
-                sentiment=sentiment_result.sentiment,
-                sentiment_score=sentiment_result.score,
-            )
-            articles.append(article)
+        articles = []
+        for r, sr in zip(rows_data, sentiment_results):
+            if isinstance(sr, Exception):
+                logger.debug(f"情感分析异常: {sr}")
+                sentiment, score = "neutral", 0.0
+            else:
+                sentiment, score = sr.sentiment, sr.score
+            articles.append(NewsArticle(
+                title=r["title"], content=r["content"],
+                source=r["source"], publish_time=r["publish_time"], url=r["url"],
+                sentiment=sentiment, sentiment_score=score,
+            ))
 
         self._cache_news(code, articles)
         return articles
@@ -63,7 +78,7 @@ class InfoEngine:
     # ── 公告 ──
 
     async def get_announcements(self, code: str, limit: int = 20) -> list[Announcement]:
-        """获取公司公告 + 情感分析"""
+        """获取公司公告 + 情感分析（并发）"""
         cached = self._get_cached_announcements(code, limit)
         if cached:
             return cached
@@ -72,19 +87,25 @@ class InfoEngine:
         if raw_df.empty:
             return []
 
-        announcements = []
+        rows_data = []
         for _, row in raw_df.iterrows():
-            title = str(row.get("title", ""))
-            sentiment_result = await self._sentiment.analyze(title)
+            rows_data.append({
+                "title": str(row.get("title", "")),
+                "type": str(row.get("type", "")),
+                "date": str(row.get("date", "")),
+                "url": str(row.get("url", "")) if pd.notna(row.get("url")) else None,
+            })
 
-            ann = Announcement(
-                title=title,
-                type=str(row.get("type", "")),
-                date=str(row.get("date", "")),
-                url=str(row.get("url", "")) if pd.notna(row.get("url")) else None,
-                sentiment=sentiment_result.sentiment,
-            )
-            announcements.append(ann)
+        sentiment_tasks = [self._sentiment.analyze(r["title"]) for r in rows_data]
+        sentiment_results = await asyncio.gather(*sentiment_tasks, return_exceptions=True)
+
+        announcements = []
+        for r, sr in zip(rows_data, sentiment_results):
+            sentiment = sr.sentiment if not isinstance(sr, Exception) else "neutral"
+            announcements.append(Announcement(
+                title=r["title"], type=r["type"], date=r["date"],
+                url=r["url"], sentiment=sentiment,
+            ))
 
         self._cache_announcements(code, announcements)
         return announcements
