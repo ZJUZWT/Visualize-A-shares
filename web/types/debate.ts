@@ -16,7 +16,23 @@ export interface DebateEntry {
   argument: string;
   challenges: string[];
   confidence: number;
+  inner_confidence: number | null;
   retail_sentiment_score: number | null;
+}
+
+export interface RoundEvalSide {
+  self_confidence: number;
+  inner_confidence: number;
+  judge_confidence: number;
+}
+
+export interface RoundEval {
+  round: number;
+  bull: RoundEvalSide;
+  bear: RoundEvalSide;
+  bull_reasoning: string;
+  bear_reasoning: string;
+  data_utilization: Record<string, string[]>;
 }
 
 export interface JudgeVerdict {
@@ -82,6 +98,8 @@ export interface ObserverState {
 export interface RoleState {
   stance: Stance | null;
   confidence: number;
+  inner_confidence: number | null;
+  judge_confidence: number | null;
   conceded: boolean;
 }
 
