@@ -221,7 +221,7 @@ class DataFetcher:
             df = de.get_daily_history(code, self._start_date(days), self.end_date)
             if not isinstance(df, pd.DataFrame) or df.empty:
                 return {"error": f"无日线数据: {code}"}
-            rows = df.tail(10).to_dict(orient="records")
+            rows = df.tail(20).to_dict(orient="records")
             return {"code": code, "days": len(df), "recent": rows, "as_of_date": self.end_date}
         except Exception as e:
             logger.warning(f"get_daily_history 失败 [{code}]: {e}")

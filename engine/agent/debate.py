@@ -265,6 +265,31 @@ def _build_context_for_role(blackboard: Blackboard) -> str:
     if blackboard.as_of_date:
         parts.append(f"## 辩论时间基准\n当前讨论基于 {blackboard.as_of_date} 收盘后的市场环境。所有数据截止到该日期。\n")
 
+    # 公用初始数据（facts）
+    if blackboard.facts:
+        parts.append("## 初始数据")
+        for action, data in blackboard.facts.items():
+            label = ACTION_TITLE_MAP.get(action, action)
+            parts.append(f"\n### {label}")
+            if isinstance(data, dict):
+                # 日线数据特殊处理：展示全部 recent 记录
+                if action == "get_daily_history" and "recent" in data:
+                    parts.append(f"共 {data.get('days', '?')} 个交易日，最近 {len(data['recent'])} 条：")
+                    for row in data["recent"]:
+                        date_str = str(row.get("date", ""))[:10]
+                        parts.append(
+                            f"  {date_str} 开:{row.get('open','')} 高:{row.get('high','')} "
+                            f"低:{row.get('low','')} 收:{row.get('close','')} "
+                            f"涨跌:{row.get('pct_chg','')}% 换手:{row.get('turnover_rate','')}%"
+                        )
+                else:
+                    # 其他 facts：截断到 800 字符
+                    parts.append(str(data)[:800])
+            elif isinstance(data, list):
+                parts.append(str(data)[:800])
+            else:
+                parts.append(str(data)[:800])
+
     # Worker 初步判断
     if blackboard.worker_verdicts:
         parts.append("## Worker 分析师初步判断")
@@ -295,7 +320,7 @@ def _build_context_for_role(blackboard: Blackboard) -> str:
     if done_reqs:
         parts.append("\n## 补充数据")
         for r in done_reqs:
-            parts.append(f"- {r.action} ({r.requested_by} 请求): {str(r.result)[:200]}")
+            parts.append(f"- {r.action} ({r.requested_by} 请求): {str(r.result)[:600]}")
 
     return "\n".join(parts)
 
