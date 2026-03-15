@@ -261,6 +261,10 @@ def _build_context_for_role(blackboard: Blackboard) -> str:
     """将 Blackboard 核心内容序列化为 LLM 可读的上下文"""
     parts = []
 
+    # 时间锚点
+    if blackboard.as_of_date:
+        parts.append(f"## 辩论时间基准\n当前讨论基于 {blackboard.as_of_date} 收盘后的市场环境。所有数据截止到该日期。\n")
+
     # Worker 初步判断
     if blackboard.worker_verdicts:
         parts.append("## Worker 分析师初步判断")
@@ -961,6 +965,37 @@ def resolve_stock_code(target: str) -> str:
     return ""
 
 
+def _resolve_as_of_date(code: str) -> str:
+    """确定辩论时间锚点 — 最新可用交易日
+
+    优先从日线数据取最新交易日，fallback 到快照日期，最后用 today。
+    """
+    import datetime as _dt
+    today = _dt.date.today().strftime("%Y-%m-%d")
+    if not code:
+        return today
+    try:
+        from data_engine import get_data_engine
+        de = get_data_engine()
+        # 尝试从日线历史取最新交易日
+        start = (_dt.date.today() - _dt.timedelta(days=10)).strftime("%Y-%m-%d")
+        df = de.get_daily_history(code, start, today)
+        if hasattr(df, "empty") and not df.empty:
+            # 日线数据中 trade_date 或 date 列的最大值
+            for col in ("trade_date", "date"):
+                if col in df.columns:
+                    latest = str(df[col].max())[:10]
+                    if latest:
+                        return latest
+        # fallback: 快照日期
+        dates = de.store.get_snapshot_daily_dates()
+        if dates:
+            return dates[0]  # 已按 DESC 排序
+    except Exception as e:
+        logger.warning(f"_resolve_as_of_date 失败: {e}")
+    return today
+
+
 async def run_debate(
     blackboard: Blackboard,
     llm: BaseLLMProvider,
@@ -977,9 +1012,18 @@ async def run_debate(
         else:
             logger.info(f"target '{blackboard.target}' 未匹配到股票代码，数据拉取将降级")
 
+    # 确定辩论时间锚点（最新可用交易日）
+    if not blackboard.as_of_date:
+        blackboard.as_of_date = _resolve_as_of_date(blackboard.code)
+        logger.info(f"辩论时间锚点: {blackboard.as_of_date}")
+
+    # 同步时间锚点到 DataFetcher
+    data_fetcher._as_of_date = blackboard.as_of_date
+
     yield sse("debate_start", {
         "debate_id": blackboard.debate_id,
         "target": blackboard.target,
+        "as_of_date": blackboard.as_of_date,
         "max_rounds": blackboard.max_rounds,
         "participants": ["bull_expert", "bear_expert", "retail_investor", "smart_money", "judge"],
     })
