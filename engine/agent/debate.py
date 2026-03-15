@@ -486,6 +486,82 @@ async def fetch_initial_data(
     })
 
 
+ACTION_TITLE_MAP = {
+    "get_stock_info": "股票基本信息", "get_daily_history": "日线行情",
+    "get_news": "最新新闻", "get_announcements": "公告",
+    "get_factor_scores": "因子评分", "get_technical_indicators": "技术指标",
+    "get_money_flow": "资金流向", "get_northbound_holding": "北向持仓",
+    "get_margin_balance": "融资融券", "get_turnover_rate": "换手率",
+    "get_cluster_for_stock": "聚类分析", "get_financials": "财务数据",
+    "get_restrict_stock_unlock": "限售解禁", "get_signal_history": "信号历史",
+}
+
+
+async def request_data_for_round(
+    role: str,
+    blackboard: Blackboard,
+    llm: BaseLLMProvider,
+    data_fetcher: DataFetcher,
+) -> AsyncGenerator[dict, None]:
+    """专家本轮数据请求：LLM 决策 → fetch → 推送 blackboard_update"""
+    from agent.personas import build_data_request_prompt
+    context = _build_context_for_role(blackboard)
+    prompt = build_data_request_prompt(role, blackboard.target, blackboard.round, context)
+
+    try:
+        raw = await asyncio.wait_for(
+            llm.chat([ChatMessage(role="user", content=prompt)]),
+            timeout=15.0,
+        )
+        parsed = json.loads(_extract_json(raw))
+        if not isinstance(parsed, list):
+            parsed = []
+    except Exception as e:
+        logger.warning(f"[{role}] 数据请求 LLM 调用失败: {e}，跳过")
+        return
+
+    requests = [
+        DataRequest(
+            requested_by=role, engine=dr.get("engine", "data"),
+            action=dr.get("action", ""), params=dr.get("params", {}),
+            round=blackboard.round,
+        )
+        for dr in parsed if dr.get("action")
+    ]
+    requests = validate_data_requests(role, requests)
+
+    for req in requests:
+        req_id = f"{role}_{req.action}_{blackboard.round}"
+        title = ACTION_TITLE_MAP.get(req.action, req.action)
+        yield sse("blackboard_update", {
+            "request_id": req_id, "source": role,
+            "engine": req.engine, "action": req.action, "title": title,
+            "status": "pending", "result_summary": "", "round": blackboard.round,
+        })
+        try:
+            result = await asyncio.wait_for(
+                data_fetcher.fetch_by_request(req), timeout=15.0
+            )
+            req.result = result
+            req.status = "done"
+            blackboard.data_requests.append(req)
+            yield sse("blackboard_update", {
+                "request_id": req_id, "source": role,
+                "engine": req.engine, "action": req.action, "title": title,
+                "status": "done", "result_summary": str(result)[:300] if result else "",
+                "round": blackboard.round,
+            })
+        except Exception as e:
+            logger.warning(f"[{role}] 数据请求失败 [{req.action}]: {e}")
+            req.status = "failed"
+            yield sse("blackboard_update", {
+                "request_id": req_id, "source": role,
+                "engine": req.engine, "action": req.action, "title": title,
+                "status": "failed", "result_summary": str(e)[:200],
+                "round": blackboard.round,
+            })
+
+
 async def judge_summarize(
     blackboard: Blackboard,
     llm: BaseLLMProvider,
@@ -757,6 +833,10 @@ async def run_debate(
         "participants": ["bull_expert", "bear_expert", "retail_investor", "smart_money", "judge"],
     })
 
+    # 公用初始数据
+    async for event in fetch_initial_data(blackboard, data_fetcher):
+        yield event
+
     while blackboard.round < blackboard.max_rounds:
         blackboard.round += 1
         is_final = (blackboard.round == blackboard.max_rounds)
@@ -769,72 +849,37 @@ async def run_debate(
             "is_final": is_final,
         })
 
-        # 1. 多头发言（流式）
+        # 1. 专家数据请求（发言前，最终轮跳过）
+        if not is_final:
+            async for event in request_data_for_round("bull_expert", blackboard, llm, data_fetcher):
+                yield event
+            async for event in request_data_for_round("bear_expert", blackboard, llm, data_fetcher):
+                yield event
+
+        # 2. 多头发言（流式）
         last_bull: dict | None = None
         async for event in speak_stream("bull_expert", blackboard, llm, memory, is_final):
             yield event
             if event["event"] == "debate_entry_complete":
                 last_bull = event["data"]
 
-        # 2. 空头发言（流式）
+        # 3. 空头发言（流式）
         last_bear: dict | None = None
         async for event in speak_stream("bear_expert", blackboard, llm, memory, is_final):
             yield event
             if event["event"] == "debate_entry_complete":
                 last_bear = event["data"]
 
-        # 3. 观察员（直接流式输出，不再缓冲）
+        # 4. 观察员（直接流式输出，不再缓冲）
         for observer in OBSERVERS:
             async for event in speak_stream(observer, blackboard, llm, memory, is_final):
                 yield event
 
-        # 4. concede 检查
+        # 5. concede 检查
         if last_bull and last_bull.get("stance") == "concede":
             blackboard.bull_conceded = True
         if last_bear and last_bear.get("stance") == "concede":
             blackboard.bear_conceded = True
-
-        # 5. 数据请求逐个事件化
-        pending = [r for r in blackboard.data_requests if r.status == "pending"]
-        if pending and not is_final:
-            success = 0
-            failed = 0
-            for req in pending:
-                t0 = time.monotonic()
-                req_id = f"{req.requested_by}_{req.action}_{req.round}"
-                yield sse("data_request_start", {
-                    "requested_by": req.requested_by,
-                    "engine": req.engine,
-                    "action": req.action,
-                    "params": req.params,
-                    "request_id": req_id,
-                })
-                try:
-                    result = await data_fetcher.fetch_by_request(req)
-                    req.result = result
-                    req.status = "done"
-                    success += 1
-                    yield sse("data_request_done", {
-                        "request_id": req_id, "engine": req.engine,
-                        "action": req.action, "status": "done",
-                        "result_summary": str(result)[:200] if result else "",
-                        "duration_ms": int((time.monotonic() - t0) * 1000),
-                    })
-                except Exception as e:
-                    req.status = "failed"
-                    failed += 1
-                    yield sse("data_request_done", {
-                        "request_id": req_id, "engine": req.engine,
-                        "action": req.action, "status": "failed",
-                        "result_summary": str(e)[:200],
-                        "duration_ms": int((time.monotonic() - t0) * 1000),
-                    })
-            yield sse("data_batch_complete", {
-                "round": blackboard.round,
-                "total": len(pending),
-                "success": success,
-                "failed": failed,
-            })
 
         # 6. 轮次控制
         if blackboard.bull_conceded and blackboard.bear_conceded:
