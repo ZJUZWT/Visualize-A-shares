@@ -53,11 +53,13 @@ DataFetcher / QuantEngine / ClusterEngine (已有)
 
 | 类型 | 字段 | 说明 |
 |------|------|------|
-| `stock` | code, name | 股票，如 300750 宁德时代 |
-| `sector` | name | 行业板块，如 新能源 |
-| `event` | name, date, description | 市场事件，如 储能补贴政策 2024Q3 |
-| `belief` | content, confidence, created_at | 专家信念，如 "政策驱动比基本面更重要" |
-| `stance` | target, signal, score, confidence, created_at | 对某标的的看法 |
+| `stock` | id (UUID), code, name | 股票，如 300750 宁德时代 |
+| `sector` | id (UUID), name | 行业板块，如 新能源 |
+| `event` | id (UUID), name, date, description | 市场事件，如 储能补贴政策 2024Q3 |
+| `belief` | id (UUID), content, confidence, created_at | 专家信念，如 "政策驱动比基本面更重要" |
+| `stance` | id (UUID), target, signal, score, confidence, created_at | 对某标的的看法 |
+
+所有节点均有 `id` 字段，使用 `uuid.uuid4()` 在创建时生成，持久化到 JSON 中。`graph_recall` 返回的节点对象和 `think` 步骤的 LLM 上下文中均包含 `id`，使 LLM 能在 `belief_update` 输出中引用 `old_belief_id`。
 
 ### 3.2 边类型
 
@@ -89,10 +91,36 @@ DataFetcher / QuantEngine / ClusterEngine (已有)
 4. tool_calls     — 按需调用引擎（可多次，串行）
 5. reply_stream   — 流式生成回复
 6. belief_update  — 对话结束后，LLM 判断图谱是否需要更新（见 4.4）
-7. memory_store   — 将本轮对话摘要存入 ChromaDB（agent_role="expert"）
+7. memory_store   — 将本轮对话摘要存入 ChromaDB（agent_role="expert"，见 4.6）
+8. history_store  — 将本轮完整记录写入 DuckDB expert.conversation_log（见 6）
 ```
 
-### 4.1 工具调用能力
+### 4.0 graph_recall 算法
+
+`graph_recall` 从用户消息中提取关键词，在图谱中匹配相关节点，返回最多 10 个节点：
+
+1. **股票代码匹配**：用正则 `\d{6}` 提取消息中的6位数字，匹配 `stock` 节点的 `code` 字段
+2. **股票名称匹配**：对消息做分词（jieba），匹配 `stock.name`、`sector.name`、`event.name`
+3. **信念关键词匹配**：消息中出现"政策"/"基本面"/"情绪"等词时，召回对应 `belief` 节点（按 `confidence` 降序取 top 3）
+4. **1-hop 扩展**：对匹配到的节点，遍历其直接邻居节点，加入召回集合（去重）
+5. 最终按节点类型优先级（stock > belief > stance > event > sector）排序，截取前 10 个
+
+### 4.6 memory_store 步骤
+
+`reply_stream` 完成后，将本轮对话存入 ChromaDB，调用 `AgentMemory.store()`：
+
+```python
+memory.store(
+    agent_role="expert",
+    target=stock_code if stock_code else "general",  # 消息中提到的股票代码，否则 "general"
+    content=f"用户: {user_message}\n专家: {expert_reply}",  # 直接拼接，不额外调用 LLM
+    metadata={"tools_used": tools_used, "belief_changed": belief_changed}
+)
+```
+
+- `target`：从 `graph_recall` 阶段提取的第一个股票代码；若无股票则为 `"general"`
+- `content`：用户消息 + 专家完整回复的拼接文本，**不需要额外 LLM 调用**生成摘要
+- `memory_recall` 阶段调用 `memory.recall(agent_role="expert", target=target, query=user_message, top_k=5)`
 
 专家可调用的引擎：
 
@@ -121,6 +149,21 @@ General 风格，写入初始图谱节点：
 ```
 
 ### 4.3 think 步骤：LLM 输出契约
+
+`think` 步骤使用 `personas.py` 中定义的 `THINK_SYSTEM_PROMPT`，内容如下：
+
+```
+你是一位理性、多元视角的A股投资专家。你有自己的投资哲学和信念体系。
+当用户提问时，你需要判断是否需要查询实时数据才能给出有价值的回答。
+
+你的当前信念（知识图谱召回）：
+{graph_context}
+
+相关历史对话：
+{memory_context}
+
+请以 JSON 格式输出你的决策，不要输出任何其他内容：
+```
 
 `think` 步骤向 LLM 发送系统 prompt + 用户消息 + 图谱召回上下文，要求返回如下 JSON：
 
@@ -171,7 +214,7 @@ async def start_debate(code: str, max_rounds: int = 2) -> str:
     """触发专家辩论，消费完整 SSE 流，返回裁判裁决摘要文本"""
 ```
 
-- 调用 `POST /api/v1/debate`（已有端点），消费 SSE 流
+- 调用 `POST /api/v1/debate`（已有端点，路由注册于 `engine/api/routes/debate.py`，prefix `/api/v1`），消费 SSE 流
 - 只返回最终 `judge_verdict` 的 `summary` 字段作为工具结果
 - 辩论过程的 SSE 事件不透传给前端（避免嵌套流复杂度），只在 `tool_result` 中返回摘要
 
@@ -186,7 +229,7 @@ async def start_debate(code: str, max_rounds: int = 2) -> str:
 | `thinking_start` | `{}` | 开始思考 |
 | `graph_recall` | `{nodes: [{id, type, label, confidence?}]}` | 召回的图谱节点列表 |
 | `tool_call` | `{engine, action, params}` | 调用引擎 |
-| `tool_result` | `{engine, action, summary}` | 引擎返回摘要（截断至200字） |
+| `tool_result` | `{engine, action, summary}` | 引擎返回摘要（截断至200字；`debate.start` 工具返回裁判裁决摘要，不截断，最长500字） |
 | `reply_token` | `{token, seq}` | 流式回复 token |
 | `reply_complete` | `{full_text}` | 回复完整文本 |
 | `belief_updated` | `{old: {id, content, confidence}, new: {id, content, confidence}, reason}` | 图谱信念更新 |
@@ -227,6 +270,8 @@ app.include_router(expert_router)
 | `GET` | `/api/v1/expert/history` | 返回对话历史摘要（从 DuckDB `expert.conversation_log` 表读取，按时间倒序） |
 
 **对话历史持久化：** 每轮对话结束后写入 DuckDB `expert.conversation_log` 表（与 `shared.debate_records` 同库），字段：`id`、`user_message`、`expert_reply`、`belief_changes`（JSON）、`tools_used`（JSON）、`created_at`。ChromaDB 仅用于语义召回，DuckDB 用于有序历史展示。
+
+**DuckDB 表初始化：** `routes.py` 中注册 FastAPI `startup` 事件，在应用启动时执行 `CREATE TABLE IF NOT EXISTS expert.conversation_log (...)` 建表，保证首次安装即可用，无需手动迁移。
 
 ---
 
@@ -291,12 +336,15 @@ web/store/expertStore.ts  # Zustand store，管理消息列表和 SSE 状态
 
 ## 9. 实现顺序
 
-1. `knowledge_graph.py` + `schemas.py` — 图谱核心，可独立测试
-2. `tools.py` — 引擎调用适配层
-3. `agent.py` — 对话流程（依赖 1+2）
-4. `routes.py` — API 端点（依赖 3）
-5. 前端 `expertStore.ts` + `ChatArea` + `MessageBubble` + `ThinkingPanel`
-6. 前端 `InputBar` + `page.tsx` 组装
+1. `schemas.py` — 数据结构定义（Node, Edge, BeliefUpdate 等），无依赖
+2. `knowledge_graph.py` — 图谱核心（依赖 schemas.py），可独立测试
+3. `personas.py` — 初始人格 + THINK_SYSTEM_PROMPT 定义
+4. `tools.py` — 引擎调用适配层（依赖 httpx，无内部依赖）
+5. `agent.py` — 对话流程（依赖 1+2+3+4）
+6. `routes.py` — API 端点（依赖 5），含 startup 事件建 DuckDB 表
+7. `engine/main.py` — 注册 expert_router
+8. 前端 `expertStore.ts` + `ChatArea` + `MessageBubble` + `ThinkingPanel`
+9. 前端 `InputBar` + `page.tsx` 组装
 
 ---
 
