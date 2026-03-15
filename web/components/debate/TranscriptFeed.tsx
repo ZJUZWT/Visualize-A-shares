@@ -178,9 +178,9 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
     return (
       <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] px-5 py-4">
         <span className="text-xs font-semibold mb-2 block" style={{ color }}>裁判</span>
-        <div className="prose-sm text-[var(--text-primary)] leading-7">
-          <MarkdownContent content={item.tokens} />
-          <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+        <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]">
+          <Loader2 size={14} className="animate-spin" />
+          <span>裁判正在综合各方观点，生成裁决...</span>
         </div>
       </div>
     );
