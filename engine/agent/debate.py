@@ -46,6 +46,66 @@ def sse(event: str, data: dict) -> dict:
 # ── 辅助函数 ──────────────────────────────────────────
 
 
+def _extract_json(text: str) -> str:
+    """从 LLM 输出提取 JSON（处理 markdown 代码块）"""
+    match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
+
+
+async def extract_structure(
+    argument: str,
+    role: str,
+    blackboard: Blackboard,
+    llm: BaseLLMProvider,
+) -> dict:
+    """从 argument 正文提取结构化字段，返回可解包到 DebateEntry 的 dict。"""
+    extract_prompt = f"""请从以下辩论发言中提取结构化信息，只返回 JSON，不要其他内容。
+
+角色: {role}
+发言内容:
+{argument}
+
+返回格式:
+{{
+  "stance": "insist" | "partial_concede" | "concede",
+  "confidence": 0.0-1.0,
+  "challenges": ["对对方的质疑1", "质疑2"],
+  "data_requests": [{{"engine": "quant|data|info", "action": "动作名", "params": {{}}}}],
+  "retail_sentiment_score": null,
+  "speak": true
+}}"""
+
+    try:
+        raw = await asyncio.wait_for(
+            llm.chat([ChatMessage(role="user", content=extract_prompt)]),
+            timeout=10.0,
+        )
+        parsed = json.loads(_extract_json(raw))
+        return {
+            "stance": parsed.get("stance", "insist"),
+            "confidence": float(parsed.get("confidence", 0.5)),
+            "challenges": parsed.get("challenges", []),
+            "data_requests": [
+                DataRequest(
+                    requested_by=role, round=blackboard.round,
+                    status="pending", engine=dr.get("engine", ""),
+                    action=dr.get("action", ""), params=dr.get("params", {}),
+                )
+                for dr in parsed.get("data_requests", [])
+            ],
+            "retail_sentiment_score": parsed.get("retail_sentiment_score"),
+            "speak": parsed.get("speak", True),
+        }
+    except Exception:
+        return {
+            "stance": "insist", "confidence": 0.5,
+            "challenges": [], "data_requests": [],
+            "retail_sentiment_score": None, "speak": True,
+        }
+
+
 def validate_data_requests(role: str, requests: list[DataRequest]) -> list[DataRequest]:
     """白名单过滤 + 数量截断。不抛出异常。"""
     allowed = DEBATE_DATA_WHITELIST.get(role, [])
