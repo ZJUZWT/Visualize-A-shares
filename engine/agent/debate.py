@@ -91,6 +91,7 @@ async def extract_structure(
 {{
   "stance": "insist" | "partial_concede" | "concede",
   "confidence": 0.0-1.0,
+  "inner_confidence": 0.0-1.0,
   "challenges": ["对对方的质疑1", "质疑2"],
   "data_requests": [{{"engine": "quant|data|info", "action": "动作名", "params": {{"code": "<股票代码>"}}}}],
   "retail_sentiment_score": null,
@@ -98,6 +99,8 @@ async def extract_structure(
 }}
 
 重要约束：
+- confidence 是你的公开立场（可以嘴硬）
+- inner_confidence 是你内心的真实想法——如果对方的某个论据确实让你动摇了，这里要诚实反映
 - data_requests 中的 action 必须且只能从以下列表中选择：{allowed_actions_str}
 - action 必须是英文字符串，严禁使用中文或自造名称，不在列表中的一律不填
 - 如果发言中没有明确的数据请求，或所需 action 不在列表中，data_requests 填空数组 []
@@ -114,6 +117,7 @@ async def extract_structure(
         return {
             "stance": parsed.get("stance", "insist"),
             "confidence": float(parsed.get("confidence", 0.5)),
+            "inner_confidence": float(parsed.get("inner_confidence", parsed.get("confidence", 0.5))),
             "challenges": parsed.get("challenges", []),
             "data_requests": [
                 DataRequest(
@@ -130,6 +134,7 @@ async def extract_structure(
         logger.warning(f"extract_structure 解析失败，使用默认值: {e}")
         return {
             "stance": "insist", "confidence": 0.5,
+            "inner_confidence": None,
             "challenges": [], "data_requests": [],
             "retail_sentiment_score": None, "speak": True,
         }
