@@ -14,14 +14,12 @@ from loguru import logger
 SELF_DISPATCH: set[str] = {
     "get_financials", "get_money_flow", "get_northbound_holding",
     "get_margin_balance", "get_turnover_rate", "get_restrict_stock_unlock",
+    "get_daily_history", "get_technical_indicators", "get_factor_scores",
 }
 
 ACTION_DISPATCH: dict[str, tuple[str, str, str, bool]] = {
     # action → (module_name, getter_fn, method_name, is_async)
     "get_stock_info":           ("data_engine",    "get_data_engine",    "get_profile",           False),
-    "get_daily_history":        ("data_engine",    "get_data_engine",    "get_daily_history",     False),
-    "get_technical_indicators": ("quant_engine",   "get_quant_engine",   "compute_indicators",    False),
-    "get_factor_scores":        ("quant_engine",   "get_quant_engine",   "get_factor_scores",     False),
     "get_news":                 ("info_engine",    "get_info_engine",    "get_news",              True),
     "get_announcements":        ("info_engine",    "get_info_engine",    "get_announcements",     True),
     "get_cluster_for_stock":    ("cluster_engine", "get_cluster_engine", "get_cluster_for_stock", False),
@@ -166,6 +164,73 @@ class DataFetcher:
             }
         except Exception as e:
             logger.warning(f"get_money_flow 失败 [{code}]: {e}")
+            return {"error": str(e)}
+
+    def get_daily_history(self, code: str, days: int = 60) -> dict:
+        """获取日线行情（最近 N 天）"""
+        try:
+            import datetime
+            from data_engine import get_data_engine
+            de = get_data_engine()
+            end = datetime.date.today().strftime("%Y-%m-%d")
+            start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            df = de.get_daily_history(code, start, end)
+            if df is None or df.empty:
+                return {"error": f"无日线数据: {code}"}
+            rows = df.tail(10).to_dict(orient="records")
+            return {"code": code, "days": len(df), "recent": rows}
+        except Exception as e:
+            logger.warning(f"get_daily_history 失败 [{code}]: {e}")
+            return {"error": str(e)}
+
+    def get_technical_indicators(self, code: str, days: int = 60) -> dict:
+        """获取技术指标（RSI/MACD/布林带）"""
+        try:
+            import datetime
+            from data_engine import get_data_engine
+            from quant_engine import get_quant_engine
+            de = get_data_engine()
+            end = datetime.date.today().strftime("%Y-%m-%d")
+            start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            df = de.get_daily_history(code, start, end)
+            if df is None or df.empty:
+                return {"error": f"无日线数据: {code}"}
+            qe = get_quant_engine()
+            indicators = qe.compute_indicators(df)
+            return {"code": code, **indicators}
+        except Exception as e:
+            logger.warning(f"get_technical_indicators 失败 [{code}]: {e}")
+            return {"error": str(e)}
+
+    def get_factor_scores(self, code: str) -> dict:
+        """获取多因子评分"""
+        try:
+            import datetime
+            from data_engine import get_data_engine
+            from quant_engine import get_quant_engine
+            de = get_data_engine()
+            end = datetime.date.today().strftime("%Y-%m-%d")
+            start = (datetime.date.today() - datetime.timedelta(days=90)).strftime("%Y-%m-%d")
+            df = de.get_daily_history(code, start, end)
+            if df is None or df.empty:
+                return {"error": f"无日线数据: {code}"}
+            qe = get_quant_engine()
+            result = qe.predict(code, df)
+            weights, weight_source = qe.get_factor_weights()
+            factor_defs = [
+                {"name": f.name, "direction": f.direction, "weight": weights.get(f.name, f.default_weight)}
+                for f in qe.get_factor_defs()
+            ]
+            return {
+                "code": code,
+                "signal": result.signal,
+                "score": result.score,
+                "confidence": result.confidence,
+                "factor_defs": factor_defs,
+                "weight_source": weight_source,
+            }
+        except Exception as e:
+            logger.warning(f"get_factor_scores 失败 [{code}]: {e}")
             return {"error": str(e)}
 
     def get_northbound_holding(self, code: str) -> dict:
