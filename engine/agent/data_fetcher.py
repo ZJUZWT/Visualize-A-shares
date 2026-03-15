@@ -34,6 +34,20 @@ class DataFetcher:
     Phase 2+: 通过 MCP Tool 调用。
     """
 
+    def __init__(self, as_of_date: str = ""):
+        # 辩论时间锚点，空字符串时 fallback 到 today
+        self._as_of_date = as_of_date
+
+    @property
+    def end_date(self) -> str:
+        """数据拉取的截止日期"""
+        return self._as_of_date or datetime.date.today().strftime("%Y-%m-%d")
+
+    def _start_date(self, days: int = 90) -> str:
+        """从 end_date 往前推 N 天"""
+        end = datetime.date.fromisoformat(self.end_date)
+        return (end - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+
     def get_stock_data(self, target: str) -> dict:
         """获取基本面数据（DataEngine + ClusterEngine）"""
         try:
@@ -60,9 +74,7 @@ class DataFetcher:
             from data_engine import get_data_engine
 
             de = get_data_engine()
-            end = datetime.date.today().strftime("%Y-%m-%d")
-            start = (datetime.date.today() - datetime.timedelta(days=90)).strftime("%Y-%m-%d")
-            daily = de.get_daily_history(target, start, end)
+            daily = de.get_daily_history(target, self._start_date(90), self.end_date)
 
             qe = get_quant_engine()
             indicators = qe.compute_indicators(daily) if not daily.empty else {}
@@ -204,16 +216,13 @@ class DataFetcher:
     def get_daily_history(self, code: str, days: int = 60) -> dict:
         """获取日线行情（最近 N 天）"""
         try:
-            import datetime
             from data_engine import get_data_engine
             de = get_data_engine()
-            end = datetime.date.today().strftime("%Y-%m-%d")
-            start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
-            df = de.get_daily_history(code, start, end)
+            df = de.get_daily_history(code, self._start_date(days), self.end_date)
             if not isinstance(df, pd.DataFrame) or df.empty:
                 return {"error": f"无日线数据: {code}"}
             rows = df.tail(10).to_dict(orient="records")
-            return {"code": code, "days": len(df), "recent": rows}
+            return {"code": code, "days": len(df), "recent": rows, "as_of_date": self.end_date}
         except Exception as e:
             logger.warning(f"get_daily_history 失败 [{code}]: {e}")
             return {"error": str(e)}
@@ -221,13 +230,10 @@ class DataFetcher:
     def get_technical_indicators(self, code: str, days: int = 60) -> dict:
         """获取技术指标（RSI/MACD/布林带）"""
         try:
-            import datetime
             from data_engine import get_data_engine
             from quant_engine import get_quant_engine
             de = get_data_engine()
-            end = datetime.date.today().strftime("%Y-%m-%d")
-            start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
-            df = de.get_daily_history(code, start, end)
+            df = de.get_daily_history(code, self._start_date(days), self.end_date)
             if not isinstance(df, pd.DataFrame) or df.empty:
                 return {"error": f"无日线数据: {code}"}
             qe = get_quant_engine()
@@ -240,13 +246,10 @@ class DataFetcher:
     def get_factor_scores(self, code: str) -> dict:
         """获取个股因子评分（技术指标 + 因子权重）"""
         try:
-            import datetime
             from data_engine import get_data_engine
             from quant_engine import get_quant_engine
             de = get_data_engine()
-            end = datetime.date.today().strftime("%Y-%m-%d")
-            start = (datetime.date.today() - datetime.timedelta(days=90)).strftime("%Y-%m-%d")
-            df = de.get_daily_history(code, start, end)
+            df = de.get_daily_history(code, self._start_date(90), self.end_date)
             if not isinstance(df, pd.DataFrame) or df.empty:
                 return {"error": f"无日线数据: {code}"}
             qe = get_quant_engine()
@@ -290,14 +293,14 @@ class DataFetcher:
         """获取融资融券余额 — 仅上交所(6开头)可用，深交所 AKShare 接口暂不可用"""
         try:
             import akshare as ak
-            import datetime
             if not code.startswith("6"):
                 return {"error": f"深交所融资融券明细接口暂不可用: {code}"}
-            # 尝试最近 5 个交易日（非交易日 API 会报错）
+            # 从 as_of_date 往前尝试最近 5 个交易日
+            end = datetime.date.fromisoformat(self.end_date)
             df = None
             date_str = ""
             for offset in range(5):
-                d = (datetime.date.today() - datetime.timedelta(days=offset)).strftime("%Y%m%d")
+                d = (end - datetime.timedelta(days=offset)).strftime("%Y%m%d")
                 try:
                     df = ak.stock_margin_detail_sse(date=d)
                     if df is not None and not df.empty:

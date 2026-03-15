@@ -110,6 +110,7 @@ class Blackboard(BaseModel):
     target: str
     code: str = ""                       # 解析出的股票代码，空字符串表示未解析或非股票辩题
     debate_id: str                       # "{target}_{YYYYMMDDHHMMSS}"
+    as_of_date: str = ""                 # 辩论时间锚点（最新交易日 YYYY-MM-DD），数据拉取以此为 end
 
     # 事实层（Phase 2/3 产出，只读）
     facts: dict[str, Any] = Field(default_factory=dict)
