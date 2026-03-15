@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Mountain, Scale } from "lucide-react";
+import { Mountain, Scale, BrainCircuit } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/", icon: Mountain, label: "地形图" },
   { href: "/debate", icon: Scale, label: "专家辩论" },
+  { href: "/expert", icon: BrainCircuit, label: "投资专家" },
 ];
 
 export default function NavSidebar() {
