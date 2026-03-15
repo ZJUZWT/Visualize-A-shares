@@ -225,9 +225,13 @@ function _handleSSEEvent(
 
     case "debate_entry_complete": {
       const entry = data as unknown as DebateEntry;
-      const idx = state.transcript.findLastIndex(
-        (item) => item.type === "streaming" && item.role === entry.role && item.round === entry.round
-      );
+      const idx = (() => {
+        for (let i = state.transcript.length - 1; i >= 0; i--) {
+          const item = state.transcript[i];
+          if (item.type === "streaming" && item.role === entry.role && item.round === entry.round) return i;
+        }
+        return -1;
+      })();
       const newTranscript = idx >= 0
         ? [...state.transcript.slice(0, idx), { type: "entry" as const, data: entry }, ...state.transcript.slice(idx + 1)]
         : [...state.transcript, { type: "entry" as const, data: entry }];
