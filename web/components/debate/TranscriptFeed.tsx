@@ -63,12 +63,13 @@ export default function TranscriptFeed({ transcript, verdict, observerState }: T
           );
         }
         if (item.type === "entry") {
+          const isDebater = item.data.role === "bull_expert" || item.data.role === "bear_expert";
           const retail = observerState["retail_investor"];
           const smart = observerState["smart_money"];
           return (
             <div key={idx} className="space-y-3">
               <SpeechBubble entry={item.data} />
-              <ObserverBar retail={retail} smart={smart} />
+              {isDebater && <ObserverBar retail={retail} smart={smart} />}
             </div>
           );
         }

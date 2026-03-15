@@ -11,6 +11,11 @@ from typing import Any
 from loguru import logger
 
 
+SELF_DISPATCH: set[str] = {
+    "get_financials", "get_money_flow", "get_northbound_holding",
+    "get_margin_balance", "get_turnover_rate", "get_restrict_stock_unlock",
+}
+
 ACTION_DISPATCH: dict[str, tuple[str, str, str, bool]] = {
     # action → (module_name, getter_fn, method_name, is_async)
     "get_stock_info":           ("data_engine",    "get_data_engine",    "get_profile",           False),
@@ -114,7 +119,7 @@ class DataFetcher:
                 return await method(**req.params)
             else:
                 return await asyncio.to_thread(method, **req.params)
-        elif hasattr(self, req.action):
+        elif req.action in SELF_DISPATCH:
             method = getattr(self, req.action)
             result = await asyncio.to_thread(method, **req.params)
             # 截断返回值，避免超出 LLM 上下文预算
