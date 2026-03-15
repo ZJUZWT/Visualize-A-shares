@@ -14,7 +14,8 @@ export type TranscriptItem =
   | { type: "round_divider"; round: number; is_final: boolean }
   | { type: "system"; text: string }
   | { type: "streaming"; role: string; round: number | null; tokens: string }
-  | { type: "data_request"; id: string; requested_by: string; action: string; status: "pending" | "done" | "failed"; result_summary?: string; duration_ms?: number };
+  | { type: "data_request"; id: string; requested_by: string; action: string; status: "pending" | "done" | "failed"; result_summary?: string; duration_ms?: number }
+  | { type: "blackboard_data"; debateId: string; target: string; participants: string[] };
 
 interface DebateStore {
   status: DebateStatus;
@@ -195,7 +196,13 @@ function _handleSSEEvent(
       for (const role of DEBATERS) roleState[role] = { ...INITIAL_ROLE_STATE };
       const observerState: Record<string, ObserverState> = {};
       for (const obs of OBSERVERS) observerState[obs] = { speak: false, argument: "" };
-      set({ roleState, observerState });
+      const bbItem: TranscriptItem = {
+        type: "blackboard_data",
+        debateId: data.debate_id as string,
+        target: data.target as string,
+        participants: data.participants as string[],
+      };
+      set({ roleState, observerState, transcript: [bbItem] });
       break;
     }
 

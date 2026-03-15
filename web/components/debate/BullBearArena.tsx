@@ -3,16 +3,15 @@
 import RoleCard from "./RoleCard";
 import TranscriptFeed from "./TranscriptFeed";
 import type { TranscriptItem } from "@/stores/useDebateStore";
-import type { RoleState, JudgeVerdict, ObserverState } from "@/types/debate";
+import type { RoleState, JudgeVerdict } from "@/types/debate";
 
 interface BullBearArenaProps {
   transcript: TranscriptItem[];
   roleState: Record<string, RoleState>;
   verdict: JudgeVerdict | null;
-  observerState: Record<string, ObserverState>;
 }
 
-export default function BullBearArena({ transcript, roleState, verdict, observerState }: BullBearArenaProps) {
+export default function BullBearArena({ transcript, roleState, verdict }: BullBearArenaProps) {
   return (
     <div className="flex flex-1 overflow-hidden gap-3">
       {/* 多头区 */}
@@ -22,7 +21,7 @@ export default function BullBearArena({ transcript, roleState, verdict, observer
 
       {/* 中间发言流 */}
       <div className="flex-1 rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-auto">
-        <TranscriptFeed transcript={transcript} verdict={verdict} observerState={observerState} />
+        <TranscriptFeed transcript={transcript} verdict={verdict} />
       </div>
 
       {/* 空头区 */}

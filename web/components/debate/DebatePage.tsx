@@ -14,7 +14,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
 export default function DebatePage() {
   const {
-    status, transcript, observerState, roleState,
+    status, transcript, roleState,
     judgeVerdict, isReplayMode, error, currentTarget,
     startDebate, loadReplay, reset, stopDebate,
   } = useDebateStore();
@@ -65,7 +65,6 @@ export default function DebatePage() {
         transcript={transcript}
         roleState={roleState}
         verdict={isReplayMode ? judgeVerdict : null}
-        observerState={observerState}
       />
 
       {/* 中途终止总结 */}
