@@ -69,6 +69,9 @@ speak_stream / judge_summarize / ...
 新增两个事件（仅快速模式触发）：
 - `facts_compression_start`: `{ "mode": "fast" }`
 - `facts_compression_done`: `{ "original_tokens_est": 4000, "compressed_tokens_est": 1200, "compression_ratio": 0.3 }`
+- 压缩失败时：`facts_compression_done`: `{ "error": true, "fallback": "standard" }` — 降级为标准模式
+
+`debate_start` 事件新增 `mode` 字段：`{ ..., "mode": "standard" | "fast" }`
 
 ### 数据模型
 
@@ -161,6 +164,23 @@ def _build_context_for_role(blackboard: Blackboard) -> str:
 | `web/stores/useDebateStore.ts` | startDebate 新增 mode 参数，新增 SSE 事件处理 |
 | `web/components/debate/InputBar.tsx` | 新增模式切换按钮 |
 | `web/components/debate/TranscriptFeed.tsx` | 新增 FactsCompressionCard 组件 |
+
+## 边界情况
+
+### 压缩失败降级
+
+`compress_facts()` 失败时（LLM 超时、返回异常等），自动降级为标准模式：
+- `blackboard.mode` 回退为 `"standard"`
+- `blackboard.facts_summary` 保持 `None`
+- 推送 `facts_compression_done` 事件带 `error: true, fallback: "standard"`
+- 后续 `_build_context_for_role` 走标准模式分支，辩论正常继续
+
+### 回放模式
+
+`loadReplay` 需要感知辩论模式：
+- `blackboard_json` 中包含 `mode` 字段，回放时读取
+- 快速模式的辩论回放时，在 transcript 中插入 `FactsCompressionCard`
+- `debate_start` SSE 事件包含 `mode`，前端据此显示模式标签
 
 ## 不做的事
 
