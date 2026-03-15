@@ -9,13 +9,15 @@ interface InputBarProps {
   isReplayMode: boolean;
   onStart: (code: string, maxRounds: number) => void;
   onHistoryOpen: () => void;
+  onStop: () => void;
 }
 
-export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen }: InputBarProps) {
+export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen, onStop }: InputBarProps) {
   const [code, setCode] = useState("");
   const [maxRounds, setMaxRounds] = useState(3);
 
   const busy = status === "debating" || status === "final_round" || status === "judging";
+  const stopping = status === "stopped";
 
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] shadow-md px-5 py-3 flex items-center gap-3">
@@ -54,20 +56,27 @@ export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen 
             ))}
           </select>
 
-          <button
-            onClick={() => code && onStart(code, maxRounds)}
-            disabled={busy || !code}
-            className="h-10 px-5 rounded-lg text-sm font-medium bg-[var(--accent)] text-white
-                       hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed
-                       flex items-center gap-2 transition-opacity shrink-0"
-          >
-            {busy ? (
-              <>
-                <Loader2 size={15} className="animate-spin" />
-                辩论中...
-              </>
-            ) : "开始辩论"}
-          </button>
+          {busy ? (
+            <button
+              onClick={() => { onStop(); }}
+              disabled={stopping}
+              className="h-10 px-5 rounded-lg text-sm font-medium bg-red-500 text-white
+                         hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed
+                         flex items-center gap-2 transition-opacity shrink-0"
+            >
+              {stopping ? <><Loader2 size={14} className="animate-spin" />终止中...</> : "终止辩论"}
+            </button>
+          ) : (
+            <button
+              onClick={() => { code && onStart(code, maxRounds); }}
+              disabled={!code}
+              className="h-10 px-5 rounded-lg text-sm font-medium bg-[var(--accent)] text-white
+                         hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed
+                         flex items-center gap-2 transition-opacity shrink-0"
+            >
+              开始辩论
+            </button>
+          )}
         </>
       )}
     </div>
