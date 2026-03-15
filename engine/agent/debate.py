@@ -711,10 +711,12 @@ async def generate_industry_cognition(
     )
 
     try:
-        raw = await asyncio.wait_for(
-            llm.chat([ChatMessage(role="user", content=prompt)]),
-            timeout=30.0,
-        )
+        # 使用流式调用收集完整响应，避免非流式长时间等待超时
+        chunks: list[str] = []
+        async for token in llm.chat_stream([ChatMessage(role="user", content=prompt)]):
+            chunks.append(token)
+        raw = "".join(chunks)
+        logger.debug(f"行业认知 LLM 原始返回 (前200字): {raw[:200] if raw else '(空)'}")
         parsed = _lenient_json_loads(raw)
         if not isinstance(parsed, dict):
             logger.warning(f"行业认知 LLM 返回非 dict: {type(parsed)}")
@@ -740,10 +742,10 @@ async def generate_industry_cognition(
         logger.info(f"行业认知生成完成: {industry}, 周期={cognition.cycle_position}, 陷阱={len(cognition.common_traps)}条")
 
     except Exception as e:
-        logger.warning(f"行业认知生成失败: {e}")
+        logger.warning(f"行业认知生成失败: {type(e).__name__}: {e!r}")
         yield sse("industry_cognition_done", {
             "industry": industry,
-            "summary": f"行业认知生成失败: {e}",
+            "summary": f"行业认知生成失败: {type(e).__name__}: {e}",
             "cycle_position": "",
             "traps_count": 0,
             "cached": False,

@@ -87,7 +87,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             "stream": False,
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
@@ -175,7 +175,7 @@ class AnthropicProvider(BaseLLMProvider):
         if system_text:
             payload["system"] = system_text
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
