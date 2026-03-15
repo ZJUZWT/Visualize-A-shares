@@ -753,6 +753,113 @@ async def generate_industry_cognition(
         })
 
 
+# ── 数据压缩（快速模式）──────────────────────────────────
+
+FACTS_COMPRESSION_PROMPT = """你是金融数据分析师。请将以下原始市场数据压缩为结构化摘要，保留对多空辩论最关键的信息。
+
+## 原始数据
+{raw_facts}
+
+## 压缩要求
+输出一段结构化文本（非 JSON），包含：
+1. 【标的概况】一句话（名称、行业、市值量级）
+2. 【近期走势】区间涨跌幅、关键价位（支撑/压力）、成交量变化趋势（3-5句）
+3. 【关键事件】最重要的 2-3 条新闻/公告及其情感倾向
+4. 【行业背景】核心驱动变量、当前周期定位、最关键的认知陷阱（2-3句）
+
+总字数控制在 500-800 字。只保留对投资决策有直接影响的信息。"""
+
+
+def _serialize_facts_for_compression(blackboard: Blackboard) -> str:
+    """将 facts + industry_cognition 序列化为压缩用的原始文本"""
+    parts = []
+
+    info = blackboard.facts.get("get_stock_info", {})
+    if info:
+        parts.append(f"## 股票信息\n{_format_fact(info)}")
+
+    daily = blackboard.facts.get("get_daily_history", {})
+    if daily and isinstance(daily, dict) and "recent" in daily:
+        parts.append(f"## 日线行情（{daily.get('days', '?')}个交易日）")
+        for row in daily["recent"]:
+            date_str = str(row.get("date", ""))[:10]
+            parts.append(
+                f"  {date_str} 开:{row.get('open','')} 高:{row.get('high','')} "
+                f"低:{row.get('low','')} 收:{row.get('close','')} "
+                f"涨跌:{row.get('pct_chg','')}% 换手:{row.get('turnover_rate','')}%"
+            )
+
+    news = blackboard.facts.get("get_news")
+    if news:
+        parts.append("## 新闻")
+        items = news if isinstance(news, list) else [news]
+        for item in items:
+            if isinstance(item, dict):
+                parts.append(f"  [{item.get('sentiment','')}] {item.get('title','')} — {str(item.get('content',''))[:200]}")
+            elif hasattr(item, "model_dump"):
+                d = item.model_dump()
+                parts.append(f"  [{d.get('sentiment','')}] {d.get('title','')} — {str(d.get('content',''))[:200]}")
+
+    ic = blackboard.industry_cognition
+    if ic:
+        parts.append(f"## 行业认知（{ic.industry}）")
+        parts.append(f"产业链: 上游={ic.upstream}, 下游={ic.downstream}")
+        parts.append(f"核心驱动: {ic.core_drivers}")
+        parts.append(f"成本结构: {ic.cost_structure}")
+        parts.append(f"壁垒: {ic.barriers}")
+        parts.append(f"供需: {ic.supply_demand}")
+        parts.append(f"认知陷阱: {ic.common_traps}")
+        parts.append(f"周期: {ic.cycle_position} — {ic.cycle_reasoning}")
+        parts.append(f"催化剂: {ic.catalysts}")
+        parts.append(f"风险: {ic.risks}")
+
+    return "\n".join(parts)
+
+
+async def compress_facts(
+    blackboard: Blackboard,
+    llm: BaseLLMProvider,
+) -> AsyncGenerator[dict, None]:
+    """快速模式：LLM 预压缩 facts + 行业认知为摘要"""
+    yield sse("facts_compression_start", {"mode": "fast"})
+
+    raw_facts = _serialize_facts_for_compression(blackboard)
+    if not raw_facts.strip():
+        logger.warning("无数据可压缩，跳过")
+        blackboard.mode = "standard"
+        yield sse("facts_compression_done", {"error": True, "fallback": "standard"})
+        return
+
+    prompt = FACTS_COMPRESSION_PROMPT.format(raw_facts=raw_facts)
+    original_est = len(raw_facts) // 2
+
+    try:
+        chunks: list[str] = []
+        async for token in llm.chat_stream([ChatMessage(role="user", content=prompt)]):
+            chunks.append(token)
+        summary = "".join(chunks).strip()
+
+        if not summary or len(summary) < 50:
+            raise ValueError(f"压缩结果过短: {len(summary)} 字符")
+
+        blackboard.facts_summary = summary
+        compressed_est = len(summary) // 2
+        ratio = round(compressed_est / max(original_est, 1), 2)
+
+        yield sse("facts_compression_done", {
+            "original_tokens_est": original_est,
+            "compressed_tokens_est": compressed_est,
+            "compression_ratio": ratio,
+        })
+        logger.info(f"数据压缩完成: {original_est} → {compressed_est} tokens (ratio={ratio})")
+
+    except Exception as e:
+        logger.warning(f"数据压缩失败，降级为标准模式: {type(e).__name__}: {e}")
+        blackboard.mode = "standard"
+        blackboard.facts_summary = None
+        yield sse("facts_compression_done", {"error": True, "fallback": "standard"})
+
+
 async def request_data_for_round(
     role: str,
     blackboard: Blackboard,
