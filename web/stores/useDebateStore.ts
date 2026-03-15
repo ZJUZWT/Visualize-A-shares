@@ -181,9 +181,57 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
         }
       }
 
+      // 从 blackboard 重建 blackboardItems
+      const ACTION_TITLE: Record<string, string> = {
+        get_stock_info: "股票基本信息", get_daily_history: "日线行情",
+        get_news: "最新新闻", get_announcements: "公告",
+        get_factor_scores: "因子评分", get_technical_indicators: "技术指标",
+        get_money_flow: "资金流向", get_northbound_holding: "北向持仓",
+        get_margin_balance: "融资融券", get_turnover_rate: "换手率",
+        get_cluster_for_stock: "聚类分析", get_financials: "财务数据",
+        get_restrict_stock_unlock: "限售解禁", get_signal_history: "信号历史",
+      };
+      const blackboardItems: BlackboardItem[] = [];
+      // 公用初始数据（存在 facts 中）
+      const INITIAL_ACTIONS: [string, string][] = [
+        ["get_stock_info", "data"], ["get_daily_history", "data"], ["get_news", "info"],
+      ];
+      for (const [action, engine] of INITIAL_ACTIONS) {
+        const hasFact = blackboard.facts && action in blackboard.facts;
+        blackboardItems.push({
+          id: `public_${action}`,
+          source: "public",
+          engine,
+          action,
+          title: ACTION_TITLE[action] ?? action,
+          status: hasFact ? "done" : "failed",
+          result_summary: hasFact ? String(blackboard.facts[action]).slice(0, 300) : undefined,
+          round: 0,
+        });
+      }
+      // 专家数据请求
+      for (const dr of (blackboard.data_requests ?? []) as Array<{
+        requested_by: string; engine: string; action: string;
+        status: string; result?: unknown; round: number;
+      }>) {
+        const source = (dr.requested_by === "bull_expert" || dr.requested_by === "bear_expert")
+          ? dr.requested_by : "public";
+        blackboardItems.push({
+          id: `${dr.requested_by}_${dr.action}_${dr.round}`,
+          source: source as BlackboardItem["source"],
+          engine: dr.engine,
+          action: dr.action,
+          title: ACTION_TITLE[dr.action] ?? dr.action,
+          status: dr.status as BlackboardItem["status"],
+          result_summary: dr.result ? String(dr.result).slice(0, 300) : undefined,
+          round: dr.round,
+        });
+      }
+
       set({
         transcript,
         roleState,
+        blackboardItems,
         judgeVerdict: verdict,
         status: "completed",
         currentRound: record.rounds_completed,
