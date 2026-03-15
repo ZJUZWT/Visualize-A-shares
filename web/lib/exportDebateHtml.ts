@@ -35,6 +35,25 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/** 简易 markdown→HTML：先转义，再处理 bold/italic/list/header/paragraph */
+function md(s: string): string {
+  return escapeHtml(s)
+    // headers: ## text → <strong>text</strong> (inline, no block)
+    .replace(/^#{1,3}\s+(.+)$/gm, "<strong>$1</strong>")
+    // bold: **text**
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    // italic: *text*
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    // unordered list items: - text or * text
+    .replace(/^[-*]\s+(.+)$/gm, "<div style='padding-left:12px'>• $1</div>")
+    // ordered list items: 1. text
+    .replace(/^\d+\.\s+(.+)$/gm, "<div style='padding-left:12px'>$1</div>")
+    // double newline → paragraph break
+    .replace(/\n\n/g, "<br><br>")
+    // single newline → line break
+    .replace(/\n/g, "<br>");
+}
+
 function renderBlackboard(items: BlackboardItem[]): string {
   if (items.length === 0) return "<p style='color:#64748b'>无黑板数据</p>";
   return items.map(item => {
@@ -86,9 +105,9 @@ function renderTranscript(transcript: TranscriptItem[]): string {
             ${ROLE_LABEL[entry.role] ?? entry.role}${stanceText}
             <span style='color:#475569;font-weight:400;margin-left:8px'>置信度 ${confidencePct}%</span>
           </div>
-          <div style='font-size:13px;color:#e2e8f0;line-height:1.6;white-space:pre-wrap'>${escapeHtml(entry.argument)}</div>
+          <div style='font-size:13px;color:#e2e8f0;line-height:1.6'>${md(entry.argument)}</div>
           ${entry.challenges?.length ? `<div style='margin-top:8px;padding-top:8px;border-top:1px solid #334155'>
-            ${entry.challenges.map(c => `<div style='font-size:11px;color:#64748b;margin-top:4px'>❓ ${escapeHtml(c)}</div>`).join("")}
+            ${entry.challenges.map(c => `<div style='font-size:11px;color:#64748b;margin-top:4px'>❓ ${md(c)}</div>`).join("")}
           </div>` : ""}
         </div>
       </div>`;
@@ -106,24 +125,24 @@ function renderVerdict(verdict: JudgeVerdict): string {
       ${verdict.score != null ? `<span style='font-size:13px;color:#64748b'>评分 ${verdict.score.toFixed(2)}</span>` : ""}
       <span style='font-size:11px;color:#475569;margin-left:auto'>${verdict.debate_quality}</span>
     </div>
-    <p style='font-size:13px;color:#cbd5e1;line-height:1.7;margin-bottom:16px'>${escapeHtml(verdict.summary)}</p>
+    <p style='font-size:13px;color:#cbd5e1;line-height:1.7;margin-bottom:16px'>${md(verdict.summary)}</p>
     <div style='display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px'>
       <div style='background:#0f172a;border-radius:8px;padding:12px'>
         <div style='font-size:11px;color:#f87171;margin-bottom:6px'>多头核心论点</div>
-        <div style='font-size:12px;color:#94a3b8'>${escapeHtml(verdict.bull_core_thesis)}</div>
+        <div style='font-size:12px;color:#94a3b8'>${md(verdict.bull_core_thesis)}</div>
       </div>
       <div style='background:#0f172a;border-radius:8px;padding:12px'>
         <div style='font-size:11px;color:#34d399;margin-bottom:6px'>空头核心论点</div>
-        <div style='font-size:12px;color:#94a3b8'>${escapeHtml(verdict.bear_core_thesis)}</div>
+        <div style='font-size:12px;color:#94a3b8'>${md(verdict.bear_core_thesis)}</div>
       </div>
     </div>
     ${verdict.risk_warnings?.length ? `<div style='margin-bottom:12px'>
       <div style='font-size:11px;color:#f59e0b;margin-bottom:6px'>风险提示</div>
-      ${verdict.risk_warnings.map(w => `<div style='font-size:12px;color:#94a3b8;margin-top:4px'>⚠ ${escapeHtml(w)}</div>`).join("")}
+      ${verdict.risk_warnings.map(w => `<div style='font-size:12px;color:#94a3b8;margin-top:4px'>⚠ ${md(w)}</div>`).join("")}
     </div>` : ""}
     <div style='font-size:11px;color:#475569;border-top:1px solid #334155;padding-top:12px'>
-      散户情绪：${escapeHtml(verdict.retail_sentiment_note)} ·
-      主力资金：${escapeHtml(verdict.smart_money_note)}
+      散户情绪：${md(verdict.retail_sentiment_note)} ·
+      主力资金：${md(verdict.smart_money_note)}
     </div>
   </div>`;
 }
