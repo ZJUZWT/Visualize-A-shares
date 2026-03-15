@@ -120,7 +120,7 @@ class AlgorithmPipeline:
                 continue
 
             idx_arr = np.array(indices)
-            cluster_coords = embedding_2d[idx_arr]
+            cluster_coords = X_features[idx_arr] if X_features is not None else embedding_2d[idx_arr]
             tree = cKDTree(cluster_coords)
 
             k = min(top_k + 1, len(indices))
