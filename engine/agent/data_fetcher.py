@@ -291,7 +291,7 @@ class DataFetcher:
         try:
             import akshare as ak
             if not code.startswith("6"):
-                return {"error": f"深交所融资融券明细接口暂不可用: {code}"}
+                return {"error": f"融资融券明细仅支持上交所(6开头)股票，{code} 为深交所标的，AKShare 深交所接口暂不可用"}
             # 从 as_of_date 往前尝试最近 5 个交易日
             end = datetime.date.fromisoformat(self.end_date)
             df = None
@@ -336,18 +336,27 @@ class DataFetcher:
             return {"error": str(e)}
 
     def get_restrict_stock_unlock(self, code: str) -> dict:
-        """获取限售股解禁计划（最近 3 条）"""
+        """获取限售股解禁计划（未来 6 个月内）"""
         try:
             import akshare as ak
-            df = ak.stock_restricted_release_detail_em(symbol=code)
+            end = datetime.date.fromisoformat(self.end_date)
+            start_str = end.strftime("%Y%m%d")
+            end_str = (end + datetime.timedelta(days=180)).strftime("%Y%m%d")
+            df = ak.stock_restricted_release_detail_em(start_date=start_str, end_date=end_str)
             if df is None or df.empty:
                 return {"code": code, "unlocks": []}
+            # 按股票代码过滤
+            match = df[df["股票代码"].astype(str) == code]
+            if match.empty:
+                return {"code": code, "unlocks": []}
             unlocks = []
-            for _, r in df.head(3).iterrows():
+            for _, r in match.head(5).iterrows():
                 unlocks.append({
-                    "解禁日期": str(r.get("解禁日期", "")),
+                    "解禁时间": str(r.get("解禁时间", "")),
                     "解禁数量": str(r.get("解禁数量", "")),
-                    "解禁类型": str(r.get("限售类型", "")),
+                    "实际解禁市值": str(r.get("实际解禁市值", "")),
+                    "限售股类型": str(r.get("限售股类型", "")),
+                    "占流通市值比例": str(r.get("占解禁前流通市值比例", "")),
                 })
             return {"code": code, "unlocks": unlocks}
         except Exception as e:
