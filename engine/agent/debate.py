@@ -129,9 +129,6 @@ async def extract_structure(
 重要约束：
 - confidence 是你的公开立场（可以嘴硬）
 - inner_confidence 是你内心的真实想法——如果对方的某个论据确实让你动摇了，这里要诚实反映
-- data_requests 中的 action 必须且只能从以下列表中选择：{allowed_actions_str}
-- action 必须是英文字符串，严禁使用中文或自造名称，不在列表中的一律不填
-- 如果发言中没有明确的数据请求，或所需 action 不在列表中，data_requests 填空数组 []
 - retail_sentiment_score 仅 retail_investor 角色填写（-1.0 到 +1.0），其他角色必须为 null
 - 只返回 JSON，不要任何其他文字"""
 
