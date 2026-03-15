@@ -1061,7 +1061,7 @@ async def run_debate(
                     yield sse("data_request_done", {
                         "request_id": req_id, "engine": req.engine,
                         "action": req.action, "status": "failed",
-                        "result_summary": str(e)[:200],
+                        "result_summary": (str(e) or type(e).__name__)[:200],
                         "duration_ms": int((time.monotonic() - t0) * 1000),
                     })
             yield sse("data_batch_complete", {
