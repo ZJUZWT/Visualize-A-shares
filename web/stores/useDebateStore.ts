@@ -17,6 +17,17 @@ export type TranscriptItem =
   | { id: string; type: "data_request"; requested_by: string; action: string; status: "pending" | "done" | "failed"; result_summary?: string; duration_ms?: number }
   | { id: string; type: "blackboard_data"; debateId: string; target: string; participants: string[] };
 
+export interface BlackboardItem {
+  id: string;
+  source: "public" | "bull_expert" | "bear_expert";
+  engine: string;
+  action: string;
+  title: string;
+  status: "pending" | "done" | "failed";
+  result_summary?: string;
+  round: number;
+}
+
 interface DebateStore {
   status: DebateStatus;
   transcript: TranscriptItem[];
@@ -28,6 +39,7 @@ interface DebateStore {
   error: string | null;
   _observerSpokenThisRound: Record<string, boolean>;
   currentTarget: string | null;
+  blackboardItems: BlackboardItem[];
 
   startDebate: (code: string, maxRounds: number) => Promise<void>;
   loadReplay: (debateId: string) => Promise<void>;
@@ -50,6 +62,7 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
   error: null,
   _observerSpokenThisRound: {},
   currentTarget: null,
+  blackboardItems: [],
 
   reset: () => set({
     status: "idle",
@@ -62,6 +75,7 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
     error: null,
     _observerSpokenThisRound: {},
     currentTarget: null,
+    blackboardItems: [],
   }),
 
   stopDebate: () => {
@@ -354,6 +368,33 @@ function _handleSSEEvent(
       set({ judgeVerdict: data as unknown as JudgeVerdict, status: "completed", transcript: cleanedTranscript });
       break;
     }
+
+    case "blackboard_update": {
+      const item: BlackboardItem = {
+        id: data.request_id as string,
+        source: data.source as BlackboardItem["source"],
+        engine: data.engine as string,
+        action: data.action as string,
+        title: data.title as string,
+        status: data.status as BlackboardItem["status"],
+        result_summary: data.result_summary as string | undefined,
+        round: data.round as number,
+      };
+      const current = get().blackboardItems;
+      const existing = current.findIndex(i => i.id === item.id);
+      if (existing >= 0) {
+        const updated = [...current];
+        updated[existing] = item;
+        set({ blackboardItems: updated });
+      } else {
+        set({ blackboardItems: [...current, item] });
+      }
+      break;
+    }
+
+    case "initial_data_complete":
+      // 静默处理，无需 UI 状态变更
+      break;
 
     case "error": {
       const msg = (data.message as string) ?? "辩论出错";
