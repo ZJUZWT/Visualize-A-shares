@@ -162,3 +162,49 @@ async def test_speak_stream_token_batching(bb):
     assert token_events[0]["data"]["tokens"] == "一二三。"
     assert token_events[1]["data"]["tokens"] == "四五六七八"
     assert token_events[2]["data"]["tokens"] == "九十末"
+
+
+@pytest.mark.asyncio
+async def test_judge_streaming():
+    """judge_summarize_stream 先 yield judge_token，最后 yield judge_verdict"""
+    from agent.debate import judge_summarize_stream
+    from agent.memory import AgentMemory
+    from agent.schemas import Blackboard
+
+    mock_llm = AsyncMock()
+
+    async def fake_stream(messages):
+        for char in ["综", "合", "来", "看", "。"]:
+            yield char
+
+    mock_llm.chat_stream = fake_stream
+    mock_llm.chat = AsyncMock(return_value=json.dumps({
+        "summary": "综合来看。",
+        "signal": "bearish", "score": -0.5,
+        "key_arguments": ["论据1"],
+        "bull_core_thesis": "多头论点",
+        "bear_core_thesis": "空头论点",
+        "retail_sentiment_note": "散户中性",
+        "smart_money_note": "主力谨慎",
+        "risk_warnings": ["风险1"],
+        "debate_quality": "strong_disagreement",
+    }))
+
+    mock_memory = MagicMock(spec=AgentMemory)
+    mock_memory.recall = MagicMock(return_value=[])
+    mock_memory.store = MagicMock()
+
+    bb = Blackboard(target="600406", debate_id="test_123", max_rounds=2)
+    bb.round = 2
+    bb.status = "judging"
+
+    events = []
+    async for event in judge_summarize_stream(bb, mock_llm, mock_memory):
+        events.append(event)
+
+    token_events = [e for e in events if e["event"] == "judge_token"]
+    verdict_events = [e for e in events if e["event"] == "judge_verdict"]
+
+    assert len(token_events) >= 1
+    assert len(verdict_events) == 1
+    assert verdict_events[0]["data"]["signal"] == "bearish"
