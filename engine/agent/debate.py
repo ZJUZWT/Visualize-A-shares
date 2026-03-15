@@ -26,10 +26,11 @@ from loguru import logger
 from llm.providers import BaseLLMProvider, ChatMessage
 from agent.memory import AgentMemory
 from agent.data_fetcher import DataFetcher
-from agent.schemas import Blackboard, DebateEntry, DataRequest, JudgeVerdict
+from agent.schemas import Blackboard, DebateEntry, DataRequest, JudgeVerdict, RoundEval, RoundEvalSide
 from agent.personas import (
     build_debate_system_prompt,
     JUDGE_SYSTEM_PROMPT,
+    JUDGE_ROUND_EVAL_PROMPT,
     DEBATE_DATA_WHITELIST,
     MAX_DATA_REQUESTS_PER_ROLE_PER_ROUND,
 )
@@ -697,6 +698,86 @@ async def persist_debate(
         logger.warning(f"辩论记录持久化失败: {e}")
 
 
+async def judge_round_eval(
+    round_num: int,
+    blackboard: Blackboard,
+    llm: BaseLLMProvider,
+) -> RoundEval:
+    """评委每轮小评——读取本轮双方发言，输出 RoundEval 并追加到 blackboard.round_evals。"""
+    # 取本轮 bull/bear 发言
+    round_entries = [e for e in blackboard.transcript if e.round == round_num]
+    bull_entry = next((e for e in round_entries if e.role == "bull_expert"), None)
+    bear_entry = next((e for e in round_entries if e.role == "bear_expert"), None)
+
+    bull_conf = bull_entry.confidence if bull_entry else 0.5
+    bull_inner = bull_entry.inner_confidence if bull_entry and bull_entry.inner_confidence is not None else bull_conf
+    bear_conf = bear_entry.confidence if bear_entry else 0.5
+    bear_inner = bear_entry.inner_confidence if bear_entry and bear_entry.inner_confidence is not None else bear_conf
+
+    # 构建本轮上下文摘要
+    bull_text = f"[{bull_entry.stance}] confidence={bull_conf:.2f}, inner={bull_inner:.2f}\n{bull_entry.argument[:500]}" if bull_entry else "（无发言）"
+    bear_text = f"[{bear_entry.stance}] confidence={bear_conf:.2f}, inner={bear_inner:.2f}\n{bear_entry.argument[:500]}" if bear_entry else "（无发言）"
+
+    # 观察员信息
+    observer_lines = []
+    for e in round_entries:
+        if e.role in OBSERVERS and e.speak and e.argument:
+            observer_lines.append(f"{e.role}: {e.argument[:200]}")
+    observer_text = "\n".join(observer_lines) if observer_lines else "（无）"
+
+    # 已到位的本轮数据
+    done_data = [r for r in blackboard.data_requests if r.status == "done" and r.round == round_num]
+    data_text = "\n".join(f"- {r.action} ({r.requested_by}): {str(r.result)[:150]}" for r in done_data) if done_data else "（无）"
+
+    user_content = (
+        f"## 第 {round_num} 轮辩论（标的：{blackboard.target}）\n\n"
+        f"### 多头发言\n{bull_text}\n\n"
+        f"### 空头发言\n{bear_text}\n\n"
+        f"### 观察员信息\n{observer_text}\n\n"
+        f"### 本轮补充数据\n{data_text}\n\n"
+        "请按格式输出本轮评估 JSON。"
+    )
+
+    messages = [
+        ChatMessage(role="system", content=JUDGE_ROUND_EVAL_PROMPT),
+        ChatMessage(role="user", content=user_content),
+    ]
+
+    fallback = RoundEval(
+        round=round_num,
+        bull=RoundEvalSide(self_confidence=bull_conf, inner_confidence=bull_inner, judge_confidence=bull_conf),
+        bear=RoundEvalSide(self_confidence=bear_conf, inner_confidence=bear_inner, judge_confidence=bear_conf),
+    )
+
+    try:
+        raw = await asyncio.wait_for(llm.chat(messages), timeout=20.0)
+        parsed = json.loads(_extract_json(raw))
+
+        def _side(key: str, self_c: float, inner_c: float) -> RoundEvalSide:
+            d = parsed.get(key, {})
+            return RoundEvalSide(
+                self_confidence=float(d.get("self_confidence", self_c)),
+                inner_confidence=float(d.get("inner_confidence", inner_c)),
+                judge_confidence=float(d.get("judge_confidence", self_c)),
+            )
+
+        eval_result = RoundEval(
+            round=round_num,
+            bull=_side("bull", bull_conf, bull_inner),
+            bear=_side("bear", bear_conf, bear_inner),
+            bull_reasoning=parsed.get("bull_reasoning", ""),
+            bear_reasoning=parsed.get("bear_reasoning", ""),
+            data_utilization=parsed.get("data_utilization", {}),
+        )
+    except Exception as e:
+        logger.warning(f"judge_round_eval 第 {round_num} 轮解析失败，使用默认值: {e}")
+        eval_result = fallback
+
+    blackboard.round_evals.append(eval_result)
+    logger.info(f"评委小评 Round {round_num}: bull_judge={eval_result.bull.judge_confidence:.2f}, bear_judge={eval_result.bear.judge_confidence:.2f}")
+    return eval_result
+
+
 # ── 主循环 ────────────────────────────────────────────
 
 async def run_debate(
@@ -793,7 +874,21 @@ async def run_debate(
                 "failed": failed,
             })
 
-        # 6. 轮次控制
+        # 6. 评委每轮小评
+        try:
+            round_eval = await judge_round_eval(blackboard.round, blackboard, llm)
+            yield sse("judge_round_eval", {
+                "round": round_eval.round,
+                "bull": round_eval.bull.model_dump(),
+                "bear": round_eval.bear.model_dump(),
+                "bull_reasoning": round_eval.bull_reasoning,
+                "bear_reasoning": round_eval.bear_reasoning,
+                "data_utilization": round_eval.data_utilization,
+            })
+        except Exception as e:
+            logger.warning(f"评委小评失败，跳过: {e}")
+
+        # 7. 轮次控制
         if blackboard.bull_conceded and blackboard.bear_conceded:
             blackboard.termination_reason = "both_conceded"
             break
