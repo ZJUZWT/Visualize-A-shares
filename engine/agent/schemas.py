@@ -142,7 +142,9 @@ class Blackboard(BaseModel):
     code: str = ""                       # 解析出的股票代码，空字符串表示未解析或非股票辩题
     debate_id: str                       # "{target}_{YYYYMMDDHHMMSS}"
     as_of_date: str = ""                 # 辩论时间锚点（最新交易日 YYYY-MM-DD），数据拉取以此为 end
+    mode: Literal["standard", "fast"] = "standard"  # 辩论模式：standard=全量数据, fast=LLM预压缩
     industry_cognition: IndustryCognition | None = None  # 行业认知
+    facts_summary: str | None = None     # 快速模式下的 LLM 压缩摘要
 
     # 事实层（Phase 2/3 产出，只读）
     facts: dict[str, Any] = Field(default_factory=dict)
