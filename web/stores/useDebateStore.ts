@@ -315,7 +315,10 @@ function _handleSSEEvent(
     }
 
     case "judge_verdict": {
-      set({ judgeVerdict: data as unknown as JudgeVerdict, status: "completed" });
+      const cleanedTranscript = state.transcript.filter(
+        (item) => !(item.type === "streaming" && item.role === "judge")
+      );
+      set({ judgeVerdict: data as unknown as JudgeVerdict, status: "completed", transcript: cleanedTranscript });
       break;
     }
 
