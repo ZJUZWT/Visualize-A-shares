@@ -27,6 +27,7 @@ from quant_engine.routes import router as quant_router
 from api.routes.analysis import router as analysis_router
 from api.routes.debate import router as debate_router
 from info_engine.routes import router as info_router
+from expert.routes import router as expert_router, _init_db as expert_init_db
 
 # ─── 配置日志 ──────────────────────────────────────────
 logger.remove()
@@ -68,6 +69,7 @@ app.include_router(quant_router)
 app.include_router(analysis_router)
 app.include_router(debate_router)
 app.include_router(info_router)
+app.include_router(expert_router)
 
 
 # ─── 启动/关闭事件 ────────────────────────────────────
@@ -103,6 +105,12 @@ async def startup():
                     logger.warning(f"⚠️ ICIR 权重同步到 ClusterEngine 失败: {e}")
         except Exception as e:
             logger.warning(f"⚠️ ICIR 自动校准跳过: {e}")
+
+    # 初始化投资专家 Agent
+    try:
+        expert_init_db()
+    except Exception as e:
+        logger.warning(f"⚠️ 投资专家 Agent 初始化失败: {e}")
 
 
 @app.on_event("shutdown")
