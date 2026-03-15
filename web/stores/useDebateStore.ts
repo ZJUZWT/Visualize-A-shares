@@ -258,10 +258,16 @@ function _handleSSEEvent(
         }
         return -1;
       })();
+      // 如果 streaming 气泡已有内容，强制 speak=true，防止内容被 speak=false 清掉
+      const streamingHasContent = idx >= 0 &&
+        (state.transcript[idx] as Extract<TranscriptItem, { type: "streaming" }>).tokens.trim().length > 0;
+      const finalEntry = streamingHasContent && !entry.speak
+        ? { ...entry, speak: true }
+        : entry;
       const entryId = idx >= 0 ? state.transcript[idx].id : `entry_${entry.role}_${entry.round}`;
       const newTranscript = idx >= 0
-        ? [...state.transcript.slice(0, idx), { id: entryId, type: "entry" as const, data: entry }, ...state.transcript.slice(idx + 1)]
-        : [...state.transcript, { id: entryId, type: "entry" as const, data: entry }];
+        ? [...state.transcript.slice(0, idx), { id: entryId, type: "entry" as const, data: finalEntry }, ...state.transcript.slice(idx + 1)]
+        : [...state.transcript, { id: entryId, type: "entry" as const, data: finalEntry }];
 
       if (DEBATERS.includes(entry.role)) {
         set({
@@ -276,7 +282,7 @@ function _handleSSEEvent(
           transcript: newTranscript,
           observerState: {
             ...state.observerState,
-            [entry.role]: { speak: entry.speak, argument: entry.argument, retail_sentiment_score: entry.retail_sentiment_score ?? undefined },
+            [entry.role]: { speak: finalEntry.speak, argument: finalEntry.argument, retail_sentiment_score: finalEntry.retail_sentiment_score ?? undefined },
           },
           _observerSpokenThisRound: { ...state._observerSpokenThisRound, [entry.role]: true },
         });

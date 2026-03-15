@@ -134,7 +134,7 @@ class DataFetcher:
         try:
             import akshare as ak
             df = ak.stock_financial_analysis_indicator(symbol=code, start_year="2020")
-            if df.empty:
+            if df is None or df.empty:
                 return {"error": f"无财务数据: {code}"}
             row = df.iloc[-1]
             result: dict = {"code": code, "report_date": str(row.get("日期", ""))}
@@ -152,7 +152,7 @@ class DataFetcher:
             import akshare as ak
             market = "sh" if code.startswith("6") else "sz"
             df = ak.stock_individual_fund_flow(stock=code, market=market)
-            if df.empty:
+            if df is None or df.empty:
                 return {"error": f"无资金流向数据: {code}"}
             row = df.iloc[-1]
             return {
@@ -173,7 +173,7 @@ class DataFetcher:
         try:
             import akshare as ak
             df = ak.stock_hsgt_individual_em(symbol=code)
-            if df.empty:
+            if df is None or df.empty:
                 return {"error": f"无北向持股数据: {code}"}
             row = df.iloc[-1]
             return {
@@ -196,7 +196,7 @@ class DataFetcher:
                 df = ak.stock_margin_detail_sse(symbol=code)
             else:
                 df = ak.stock_margin_detail_szse(symbol=code)
-            if df.empty:
+            if df is None or df.empty:
                 return {"error": f"无融资融券数据: {code}"}
             row = df.iloc[-1]
             return {
@@ -227,7 +227,7 @@ class DataFetcher:
         try:
             import akshare as ak
             df = ak.stock_restricted_release_detail_em(symbol=code)
-            if df.empty:
+            if df is None or df.empty:
                 return {"code": code, "unlocks": []}
             unlocks = []
             for _, r in df.head(3).iterrows():
