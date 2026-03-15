@@ -72,8 +72,8 @@ async def extract_structure(
   "stance": "insist" | "partial_concede" | "concede",
   "confidence": 0.0-1.0,
   "challenges": ["对对方的质疑1", "质疑2"],
-  "data_requests": [{{"engine": "quant|data|info", "action": "动作名", "params": {{}}}}],
-  "retail_sentiment_score": null,
+  "data_requests": [{{"engine": "quant|data|info", "action": "动作名", "params": {{"code": "<股票代码>"}}}}],
+  "retail_sentiment_score": null,  # 仅 retail_investor 角色填写，其他角色必须为 null。格式：单一浮点数 -1.0 到 +1.0，+1 极度乐观，-1 极度悲观
   "speak": true
 }}"""
 
@@ -83,6 +83,7 @@ async def extract_structure(
             timeout=10.0,
         )
         parsed = json.loads(_extract_json(raw))
+        score = parsed.get("retail_sentiment_score")
         return {
             "stance": parsed.get("stance", "insist"),
             "confidence": float(parsed.get("confidence", 0.5)),
@@ -95,7 +96,7 @@ async def extract_structure(
                 )
                 for dr in parsed.get("data_requests", [])
             ],
-            "retail_sentiment_score": parsed.get("retail_sentiment_score"),
+            "retail_sentiment_score": float(score) if isinstance(score, (int, float)) else None,
             "speak": parsed.get("speak", True),
         }
     except Exception:
@@ -575,7 +576,7 @@ async def _extract_judge_verdict(
   "retail_sentiment_note": "散户情绪说明",
   "smart_money_note": "主力资金说明",
   "risk_warnings": ["风险1", ...],
-  "debate_quality": "strong_disagreement" | "moderate_disagreement" | "consensus"
+  "debate_quality": "strong_disagreement" | "consensus" | "one_sided"
 }}"""
 
     raw = await llm.chat([ChatMessage(role="user", content=extract_prompt)])
