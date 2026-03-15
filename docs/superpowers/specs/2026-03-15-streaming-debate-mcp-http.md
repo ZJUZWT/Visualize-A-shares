@@ -211,11 +211,58 @@ async def extract_structure(
 | `debate_entry_complete` | 同现有 `debate_entry` | 含完整结构化数据 |
 | `judge_token` | `{"role": "judge", "round": null, "tokens": str, "seq": int}` | 裁判发言的批量 token |
 
-保留事件：`debate_start`、`debate_round_start`、`data_fetching`、`data_ready`、`debate_end`、`judge_verdict`、`error`。
+保留事件：`debate_start`、`debate_round_start`、`debate_end`、`judge_verdict`、`error`。
 
-移除事件：`debate_entry`（被 `debate_token` + `debate_entry_complete` 替代）。
+移除事件：`debate_entry`（被 `debate_token` + `debate_entry_complete` 替代）。`data_fetching` 和 `data_ready` 拆分为更细粒度的事件（见下方 1.7）。
 
 `debate_token` 和 `judge_token` 格式一致，区别仅在 `role` 字段。前端可统一处理。
+
+### 1.7 数据请求详细事件
+
+现有 `data_fetching` 和 `data_ready` 只给出粗粒度信息（"正在请求"/"已完成 N 条"），无法监控每个引擎专家的具体行为。拆分为以下事件：
+
+| 事件 | 数据格式 | 说明 |
+|------|----------|------|
+| `data_request_start` | `{"requested_by": str, "engine": str, "action": str, "params": dict, "request_id": str}` | 单个数据请求开始，路由到具体引擎 |
+| `data_request_done` | `{"request_id": str, "engine": str, "action": str, "status": "done"\|"failed", "result_summary": str, "duration_ms": int}` | 单个数据请求完成，含结果摘要和耗时 |
+| `data_batch_complete` | `{"round": int, "total": int, "success": int, "failed": int}` | 本轮所有数据请求处理完毕的汇总 |
+
+事件序列示例：
+```
+debate_entry_complete (多头，含 3 个 data_requests)
+debate_entry_complete (空头，含 2 个 data_requests)
+debate_entry_complete (主力代表，含 1 个 data_request)
+→ data_request_start (多头请求 get_factor_scores → quant 引擎)
+→ data_request_start (空头请求 get_valuation_history → quant 引擎)
+→ data_request_start (主力请求 get_technical_indicators → quant 引擎)
+→ data_request_done (get_factor_scores, done, 1.2s)
+→ data_request_start (多头请求 get_financial_summary → data 引擎)
+→ data_request_done (get_valuation_history, done, 0.8s)
+→ data_request_done (get_technical_indicators, done, 0.9s)
+→ data_request_start (空头请求 get_financial_trend → data 引擎)
+→ data_request_done (get_financial_summary, done, 1.1s)
+→ data_request_done (get_financial_trend, failed, 2.0s)
+→ data_batch_complete (round=1, total=6, success=5, failed=1)
+```
+
+实现位置：`run_debate()` 中现有的 `_process_data_requests()` 调用改为逐个请求 yield 事件。每个请求并发执行（`asyncio.gather`），完成时立即 yield `data_request_done`。
+
+MCP notification 推送：`start_debate_async()` 中对这些事件同样通过 `ctx.log()` 推送：
+```python
+elif event_type == "data_request_start":
+    if ctx:
+        await ctx.log("info",
+            f"📊 [{data['requested_by']}] → {data['engine']}.{data['action']}({data.get('params', {})})")
+elif event_type == "data_request_done":
+    status_icon = "✅" if data["status"] == "done" else "❌"
+    if ctx:
+        await ctx.log("info",
+            f"{status_icon} {data['action']} ({data['duration_ms']}ms): {data.get('result_summary', '')}")
+elif event_type == "data_batch_complete":
+    if ctx:
+        await ctx.log("info",
+            f"📋 数据请求完毕: {data['success']}/{data['total']} 成功, {data['failed']} 失败")
+```
 
 ### 1.5 run_debate() 适配
 
@@ -408,6 +455,8 @@ async def start_debate_async(da: "DataAccess", code: str, max_rounds: int, ctx) 
 | `test_stream_interruption` | `chat_stream()` 中途抛异常，验证部分 argument + `(发言中断)` 标记 |
 | `test_judge_streaming` | mock judge `chat_stream()`，验证 `judge_token` 事件产出 + `judge_verdict` 完整裁决 |
 | `test_token_batching` | 验证 token 按 5 个一批或遇标点 flush 的逻辑 |
+| `test_data_request_events` | mock DataFetcher，验证 `data_request_start`/`data_request_done`/`data_batch_complete` 事件逐个产出，含正确的 engine/action/duration_ms |
+| `test_data_request_failure` | mock DataFetcher 部分请求失败，验证 `data_request_done` status="failed" + `data_batch_complete` 统计正确 |
 
 ### 4.2 集成测试
 
@@ -426,7 +475,7 @@ async def start_debate_async(da: "DataAccess", code: str, max_rounds: int, ctx) 
 | 文件 | 改动类型 | 说明 |
 |------|----------|------|
 | `engine/llm/providers.py` | Bug 修复 | `_get_base_url` → `self.config.base_url.rstrip('/')` |
-| `engine/agent/debate.py` | 重构 | speak_stream() + extract_structure() + judge 流式化 |
+| `engine/agent/debate.py` | 重构 | speak_stream() + extract_structure() + judge 流式化 + 数据请求逐个事件化 |
 | `engine/agent/personas.py` | 修改 | 辩论 prompt 改为纯自然语言输出 |
 | `engine/mcpserver/__main__.py` | 重构 | `server.run(transport="streamable-http")` |
 | `engine/mcpserver/server.py` | 修改 | start_debate 改 async def + ctx: Context |
