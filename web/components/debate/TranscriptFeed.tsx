@@ -131,8 +131,8 @@ function DataRequestCard({ item }: { item: Extract<TranscriptItem, { type: "data
   const borderCls = isPending
     ? "border-[var(--border)] bg-[var(--bg-primary)]"
     : isFailed
-    ? "border-red-500/20 bg-red-500/5"
-    : "border-emerald-500/20 bg-emerald-500/5";
+    ? "border-red-500/30 bg-[var(--bg-primary)]"
+    : "border-emerald-500/30 bg-[var(--bg-primary)]";
 
   return (
     <div className="flex justify-center">
@@ -201,11 +201,10 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
   }
 
   // debater
-  const bgColor = isBull ? "bg-red-500/5" : "bg-emerald-500/5";
   const borderSide = isBull ? "border-l-2" : "border-r-2";
   return (
     <div className={`flex ${isBull ? "justify-start" : "justify-end"}`}>
-      <div className={`max-w-[78%] rounded-2xl px-6 py-4 ${bgColor} ${borderSide}`} style={{ borderColor: color }}>
+      <div className={`max-w-[78%] rounded-2xl px-6 py-4 bg-[var(--bg-secondary)] ${borderSide}`} style={{ borderColor: color }}>
         <div className="flex items-center gap-2 mb-3">
           {item.round !== null && <span className="text-xs text-[var(--text-tertiary)]">Round {item.round}</span>}
           <span className="text-[13px] font-semibold" style={{ color }}>{label}</span>
@@ -267,13 +266,13 @@ function VerdictCard({ verdict }: { verdict: JudgeVerdict }) {
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <div className="p-4 rounded-xl text-[13px] bg-red-500/5 border-l-2 border-red-500">
+          <div className="p-4 rounded-xl text-[13px] bg-[var(--bg-primary)] border-l-2 border-red-500">
             <div className="font-medium text-[var(--text-secondary)] mb-2">多头核心论点</div>
             <div className="text-[var(--text-primary)] leading-7">
               <MarkdownContent content={verdict.bull_core_thesis} />
             </div>
           </div>
-          <div className="p-4 rounded-xl text-[13px] bg-emerald-500/5 border-l-2 border-emerald-500">
+          <div className="p-4 rounded-xl text-[13px] bg-[var(--bg-primary)] border-l-2 border-emerald-500">
             <div className="font-medium text-[var(--text-secondary)] mb-2">空头核心论点</div>
             <div className="text-[var(--text-primary)] leading-7">
               <MarkdownContent content={verdict.bear_core_thesis} />

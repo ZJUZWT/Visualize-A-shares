@@ -78,12 +78,11 @@ export default function SpeechBubble({ entry }: SpeechBubbleProps) {
   }
 
   // 辩论者：左右对齐
-  const bgColor = isBull ? "bg-red-500/5" : "bg-emerald-500/5";
   const borderSide = isBull ? "border-l-2" : "border-r-2";
 
   return (
     <div className={`flex ${isBull ? "justify-start" : "justify-end"}`}>
-      <div className={`max-w-[78%] rounded-2xl px-6 py-4 ${bgColor} ${borderSide}`}
+      <div className={`max-w-[78%] rounded-2xl px-6 py-4 bg-[var(--bg-secondary)] ${borderSide}`}
            style={{ borderColor: color }}>
         <div className="flex items-center gap-2 mb-3">
           <span className="text-xs text-[var(--text-tertiary)]">Round {entry.round}</span>

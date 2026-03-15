@@ -32,8 +32,8 @@ export default function RoleCard({ role, state }: RoleCardProps) {
                      ${conceded ? "opacity-50" : ""}`}>
       {/* 头像 */}
       <div
-        className="w-20 h-20 rounded-full flex items-center justify-center text-4xl"
-        style={{ background: `radial-gradient(circle, ${color}33, ${color}88)` }}
+        className="w-20 h-20 rounded-full flex items-center justify-center text-4xl border-2"
+        style={{ borderColor: `${color}66`, background: `${color}15` }}
       >
         {emoji}
       </div>
