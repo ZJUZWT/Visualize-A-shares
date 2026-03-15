@@ -141,9 +141,6 @@ class DataFetcher:
         elif req.action in SELF_DISPATCH:
             method = getattr(self, req.action)
             result = await asyncio.to_thread(method, **req.params)
-            # 截断返回值，避免超出 LLM 上下文预算
-            if isinstance(result, dict):
-                return {k: str(v)[:300] if isinstance(v, str) else v for k, v in result.items()}
             return result
         else:
             raise ValueError(f"不支持的 action: {req.action}")

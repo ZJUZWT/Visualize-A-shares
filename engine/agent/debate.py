@@ -257,6 +257,16 @@ def _parse_judge_output(raw: str, blackboard: Blackboard) -> JudgeVerdict:
     return JudgeVerdict(**data)
 
 
+def _format_fact(data: dict) -> str:
+    """将 fact dict 格式化为 LLM 可读文本，不截断"""
+    lines = []
+    for k, v in data.items():
+        if k in ("code", "error"):
+            continue
+        lines.append(f"  {k}: {v}")
+    return "\n".join(lines) if lines else str(data)
+
+
 def _build_context_for_role(blackboard: Blackboard) -> str:
     """将 Blackboard 核心内容序列化为 LLM 可读的上下文"""
     parts = []
@@ -282,13 +292,29 @@ def _build_context_for_role(blackboard: Blackboard) -> str:
                             f"低:{row.get('low','')} 收:{row.get('close','')} "
                             f"涨跌:{row.get('pct_chg','')}% 换手:{row.get('turnover_rate','')}%"
                         )
+                # 新闻数据特殊处理：逐条展示标题和情感
+                elif action == "get_news" and isinstance(data, list):
+                    for item in data:
+                        if hasattr(item, "model_dump"):
+                            item = item.model_dump()
+                        title = item.get("title", "")
+                        sentiment = item.get("sentiment", "")
+                        source = item.get("source", "")
+                        time_str = item.get("publish_time", "")
+                        parts.append(f"  [{sentiment}] {title} ({source} {time_str})")
                 else:
-                    # 其他 facts：截断到 800 字符
-                    parts.append(str(data)[:800])
+                    parts.append(_format_fact(data))
             elif isinstance(data, list):
-                parts.append(str(data)[:800])
+                # 新闻/公告列表
+                for item in data:
+                    if isinstance(item, dict):
+                        title = item.get("title", "")
+                        sentiment = item.get("sentiment", "")
+                        parts.append(f"  [{sentiment}] {title}")
+                    else:
+                        parts.append(f"  {item}")
             else:
-                parts.append(str(data)[:800])
+                parts.append(str(data))
 
     # Worker 初步判断
     if blackboard.worker_verdicts:
@@ -320,7 +346,18 @@ def _build_context_for_role(blackboard: Blackboard) -> str:
     if done_reqs:
         parts.append("\n## 补充数据")
         for r in done_reqs:
-            parts.append(f"- {r.action} ({r.requested_by} 请求): {str(r.result)[:600]}")
+            label = ACTION_TITLE_MAP.get(r.action, r.action)
+            parts.append(f"\n### {label} ({r.requested_by} 请求)")
+            if isinstance(r.result, dict):
+                parts.append(_format_fact(r.result))
+            elif isinstance(r.result, list):
+                for item in r.result:
+                    if isinstance(item, dict):
+                        parts.append(f"  {item}")
+                    else:
+                        parts.append(f"  {item}")
+            else:
+                parts.append(str(r.result))
 
     return "\n".join(parts)
 
@@ -903,19 +940,19 @@ async def judge_round_eval(
     bear_inner = bear_entry.inner_confidence if bear_entry and bear_entry.inner_confidence is not None else bear_conf
 
     # 构建本轮上下文摘要
-    bull_text = f"[{bull_entry.stance}] confidence={bull_conf:.2f}, inner={bull_inner:.2f}\n{bull_entry.argument[:500]}" if bull_entry else "（无发言）"
-    bear_text = f"[{bear_entry.stance}] confidence={bear_conf:.2f}, inner={bear_inner:.2f}\n{bear_entry.argument[:500]}" if bear_entry else "（无发言）"
+    bull_text = f"[{bull_entry.stance}] confidence={bull_conf:.2f}, inner={bull_inner:.2f}\n{bull_entry.argument}" if bull_entry else "（无发言）"
+    bear_text = f"[{bear_entry.stance}] confidence={bear_conf:.2f}, inner={bear_inner:.2f}\n{bear_entry.argument}" if bear_entry else "（无发言）"
 
     # 观察员信息
     observer_lines = []
     for e in round_entries:
         if e.role in OBSERVERS and e.speak and e.argument:
-            observer_lines.append(f"{e.role}: {e.argument[:200]}")
+            observer_lines.append(f"{e.role}: {e.argument}")
     observer_text = "\n".join(observer_lines) if observer_lines else "（无）"
 
     # 已到位的本轮数据
     done_data = [r for r in blackboard.data_requests if r.status == "done" and r.round == round_num]
-    data_text = "\n".join(f"- {r.action} ({r.requested_by}): {str(r.result)[:150]}" for r in done_data) if done_data else "（无）"
+    data_text = "\n".join(f"- {r.action} ({r.requested_by}): {str(r.result)}" for r in done_data) if done_data else "（无）"
 
     user_content = (
         f"## 第 {round_num} 轮辩论（标的：{blackboard.target}）\n\n"
