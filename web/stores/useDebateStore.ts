@@ -10,12 +10,12 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 let _abortController: AbortController | null = null;
 
 export type TranscriptItem =
-  | { type: "entry"; data: DebateEntry }
-  | { type: "round_divider"; round: number; is_final: boolean }
-  | { type: "system"; text: string }
-  | { type: "streaming"; role: string; round: number | null; tokens: string }
-  | { type: "data_request"; id: string; requested_by: string; action: string; status: "pending" | "done" | "failed"; result_summary?: string; duration_ms?: number }
-  | { type: "blackboard_data"; debateId: string; target: string; participants: string[] };
+  | { id: string; type: "entry"; data: DebateEntry }
+  | { id: string; type: "round_divider"; round: number; is_final: boolean }
+  | { id: string; type: "system"; text: string }
+  | { id: string; type: "streaming"; role: string; round: number | null; tokens: string }
+  | { id: string; type: "data_request"; requested_by: string; action: string; status: "pending" | "done" | "failed"; result_summary?: string; duration_ms?: number }
+  | { id: string; type: "blackboard_data"; debateId: string; target: string; participants: string[] };
 
 interface DebateStore {
   status: DebateStatus;
@@ -148,11 +148,11 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
       let lastRound = 0;
       for (const entry of (blackboard.transcript ?? []) as DebateEntry[]) {
         if (entry.round !== lastRound) {
-          transcript.push({ type: "round_divider", round: entry.round, is_final: false });
+          transcript.push({ id: `round_${entry.round}`, type: "round_divider", round: entry.round, is_final: false });
           lastRound = entry.round;
         }
-        if (DEBATERS.includes(entry.role)) {
-          transcript.push({ type: "entry", data: entry });
+        if (DEBATERS.includes(entry.role) || OBSERVERS.includes(entry.role)) {
+          transcript.push({ id: `entry_${entry.role}_${entry.round}`, type: "entry", data: entry });
         }
       }
 
@@ -197,6 +197,7 @@ function _handleSSEEvent(
       const observerState: Record<string, ObserverState> = {};
       for (const obs of OBSERVERS) observerState[obs] = { speak: false, argument: "" };
       const bbItem: TranscriptItem = {
+        id: `blackboard_${data.debate_id}`,
         type: "blackboard_data",
         debateId: data.debate_id as string,
         target: data.target as string,
@@ -225,7 +226,7 @@ function _handleSSEEvent(
         _observerSpokenThisRound: {},
         transcript: [
           ...state.transcript,
-          { type: "round_divider", round, is_final },
+          { id: `round_${round}`, type: "round_divider", round, is_final },
         ],
       });
       break;
@@ -233,16 +234,17 @@ function _handleSSEEvent(
 
     case "debate_token": {
       const { role, round, tokens } = data as { role: string; round: number | null; tokens: string };
+      const streamId = `streaming_${role}_${round ?? "null"}`;
       const existing = state.transcript.findIndex(
         (item) => item.type === "streaming" && item.role === role && item.round === round
       );
       if (existing >= 0) {
         const updated = [...state.transcript];
-        const item = updated[existing] as { type: "streaming"; role: string; round: number | null; tokens: string };
+        const item = updated[existing] as { id: string; type: "streaming"; role: string; round: number | null; tokens: string };
         updated[existing] = { ...item, tokens: item.tokens + tokens };
         set({ transcript: updated });
       } else {
-        set({ transcript: [...state.transcript, { type: "streaming", role, round, tokens }] });
+        set({ transcript: [...state.transcript, { id: streamId, type: "streaming", role, round, tokens }] });
       }
       break;
     }
@@ -256,9 +258,10 @@ function _handleSSEEvent(
         }
         return -1;
       })();
+      const entryId = idx >= 0 ? state.transcript[idx].id : `entry_${entry.role}_${entry.round}`;
       const newTranscript = idx >= 0
-        ? [...state.transcript.slice(0, idx), { type: "entry" as const, data: entry }, ...state.transcript.slice(idx + 1)]
-        : [...state.transcript, { type: "entry" as const, data: entry }];
+        ? [...state.transcript.slice(0, idx), { id: entryId, type: "entry" as const, data: entry }, ...state.transcript.slice(idx + 1)]
+        : [...state.transcript, { id: entryId, type: "entry" as const, data: entry }];
 
       if (DEBATERS.includes(entry.role)) {
         set({
@@ -286,7 +289,7 @@ function _handleSSEEvent(
     case "data_request_start": {
       const { request_id, requested_by, action } = data as { request_id: string; requested_by: string; action: string };
       set({
-        transcript: [...state.transcript, { type: "data_request", id: request_id, requested_by, action, status: "pending" }],
+        transcript: [...state.transcript, { id: request_id, type: "data_request", requested_by, action, status: "pending" }],
       });
       break;
     }
@@ -310,11 +313,11 @@ function _handleSSEEvent(
       );
       if (existing >= 0) {
         const updated = [...state.transcript];
-        const item = updated[existing] as { type: "streaming"; role: string; round: number | null; tokens: string };
+        const item = updated[existing] as { id: string; type: "streaming"; role: string; round: number | null; tokens: string };
         updated[existing] = { ...item, tokens: item.tokens + tokens };
         set({ transcript: updated });
       } else {
-        set({ transcript: [...state.transcript, { type: "streaming", role: "judge", round: null, tokens }] });
+        set({ transcript: [...state.transcript, { id: "streaming_judge", type: "streaming", role: "judge", round: null, tokens }] });
       }
       break;
     }
@@ -332,7 +335,7 @@ function _handleSSEEvent(
         status: "judging",
         transcript: [
           ...state.transcript,
-          { type: "system", text: `${reasonText} · 共 ${rounds} 轮` },
+          { id: `system_end_${rounds}`, type: "system", text: `${reasonText} · 共 ${rounds} 轮` },
         ],
       });
       break;

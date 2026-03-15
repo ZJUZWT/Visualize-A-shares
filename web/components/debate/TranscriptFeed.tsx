@@ -57,13 +57,13 @@ export default function TranscriptFeed({ transcript, verdict }: TranscriptFeedPr
 
   return (
     <div className="overflow-y-auto h-full px-6 py-5 space-y-4">
-      {transcript.map((item, idx) => {
+      {transcript.map((item) => {
         if (item.type === "blackboard_data") {
-          return <BlackboardCard key={idx} item={item} />;
+          return <BlackboardCard key={item.id} item={item} />;
         }
         if (item.type === "round_divider") {
           return (
-            <div key={idx} className="flex items-center gap-3 py-1">
+            <div key={item.id} className="flex items-center gap-3 py-1">
               <div className="flex-1 h-px bg-[var(--border)]" />
               <span className="text-xs font-medium text-[var(--text-tertiary)] px-3 py-1 rounded-full bg-[var(--bg-primary)]">
                 {item.is_final ? "最终轮" : `第 ${item.round} 轮`}
@@ -74,7 +74,7 @@ export default function TranscriptFeed({ transcript, verdict }: TranscriptFeedPr
         }
         if (item.type === "system") {
           return (
-            <div key={idx} className="flex justify-center">
+            <div key={item.id} className="flex justify-center">
               <span className="text-xs text-[var(--text-tertiary)] px-4 py-1.5 rounded-full bg-[var(--bg-primary)] border border-[var(--border)]">
                 {item.text}
               </span>
@@ -82,13 +82,13 @@ export default function TranscriptFeed({ transcript, verdict }: TranscriptFeedPr
           );
         }
         if (item.type === "entry") {
-          return <SpeechBubble key={idx} entry={item.data} />;
+          return <SpeechBubble key={item.id} entry={item.data} />;
         }
         if (item.type === "streaming") {
-          return <StreamingBubble key={idx} item={item} />;
+          return <StreamingBubble key={item.id} item={item} />;
         }
         if (item.type === "data_request") {
-          return <DataRequestCard key={idx} item={item} />;
+          return <DataRequestCard key={item.id} item={item} />;
         }
         return null;
       })}
