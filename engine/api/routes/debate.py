@@ -139,9 +139,15 @@ async def get_debate_record(debate_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class TranscriptEntry(BaseModel):
+    role: str
+    round: int = 0
+    argument: str = ""
+
+
 class SummarizeRequest(BaseModel):
     target: str = Field(description="股票代码")
-    transcript: list[dict] = Field(description="已有辩论记录，DebateEntry 列表")
+    transcript: list[TranscriptEntry] = Field(min_length=1, description="已有辩论记录")
 
 
 @router.post("/debate/summarize")
@@ -151,9 +157,6 @@ async def summarize_debate(req: SummarizeRequest):
     if not llm_settings.api_key:
         raise HTTPException(status_code=503, detail="LLM 未配置")
 
-    if not req.transcript:
-        raise HTTPException(status_code=400, detail="transcript 为空，无法总结")
-
     try:
         from agent import get_orchestrator
         orch = get_orchestrator()
@@ -162,8 +165,8 @@ async def summarize_debate(req: SummarizeRequest):
         # 构建 transcript 文本
         lines = []
         for entry in req.transcript:
-            role = "多头" if entry.get("role") == "bull_expert" else "空头"
-            lines.append(f"[{role} 第{entry.get('round', '?')}轮] {entry.get('argument', '')}")
+            role_label = "多头" if entry.role == "bull_expert" else ("空头" if entry.role == "bear_expert" else entry.role)
+            lines.append(f"[{role_label} 第{entry.round}轮] {entry.argument}")
         transcript_text = "\n\n".join(lines)
 
         prompt = f"""以下是关于股票 {req.target} 的多空辩论记录（辩论被用户中途终止）：
@@ -177,14 +180,24 @@ async def summarize_debate(req: SummarizeRequest):
 以 JSON 格式返回：{{"summary": "...", "signal": "bullish|bearish|neutral"}}"""
 
         response = await llm.chat([{"role": "user", "content": prompt}])
-        import json as _json
         # 提取 JSON
         text = response.strip()
         if "```" in text:
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        result = _json.loads(text.strip())
+            # Handle ```json or ```JSON or ``` with optional whitespace
+            parts = text.split("```")
+            if len(parts) >= 2:
+                text = parts[1]
+                # Strip language identifier (json, JSON, etc.)
+                first_newline = text.find("\n")
+                if first_newline > 0:
+                    lang = text[:first_newline].strip().lower()
+                    if lang in ("json", ""):
+                        text = text[first_newline:]
+        try:
+            result = json.loads(text.strip())
+        except json.JSONDecodeError as parse_err:
+            logger.error(f"LLM 返回内容无法解析为 JSON: {parse_err}\n原始内容: {response!r}")
+            raise HTTPException(status_code=500, detail="LLM 返回格式错误，无法解析总结")
         return {
             "summary": result.get("summary", ""),
             "signal": result.get("signal") if result.get("signal") in ("bullish", "bearish", "neutral") else None,
