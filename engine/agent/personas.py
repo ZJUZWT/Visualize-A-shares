@@ -108,18 +108,21 @@ DEBATE_DATA_WHITELIST: dict[str, list[str]] = {
     "bull_expert": [
         "get_stock_info", "get_daily_history", "get_factor_scores",
         "get_news", "get_announcements", "get_technical_indicators",
-        "get_cluster_for_stock",
+        "get_cluster_for_stock", "get_financials", "get_turnover_rate",
     ],
     "bear_expert": [
         "get_stock_info", "get_daily_history", "get_factor_scores",
         "get_news", "get_announcements", "get_technical_indicators",
-        "get_cluster_for_stock",
+        "get_cluster_for_stock", "get_financials", "get_restrict_stock_unlock",
+        "get_margin_balance",
     ],
     "retail_investor": [
-        "get_news",
+        "get_news", "get_money_flow",
     ],
     "smart_money": [
         "get_technical_indicators", "get_factor_scores",
+        "get_money_flow", "get_northbound_holding", "get_margin_balance",
+        "get_turnover_rate",
     ],
 }
 
