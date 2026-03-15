@@ -1,14 +1,13 @@
 "use client";
 
 import NavSidebar from "@/components/ui/NavSidebar";
+import DebatePage from "@/components/debate/DebatePage";
 
-export default function DebatePage() {
+export default function DebatePageRoute() {
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-[var(--bg-primary)] ml-12">
+    <main className="relative w-screen h-screen overflow-hidden bg-[var(--bg-primary)] ml-12 flex flex-col">
       <NavSidebar />
-      <div className="flex items-center justify-center h-full">
-        <p className="text-[var(--text-tertiary)]">辩论页面加载中...</p>
-      </div>
+      <DebatePage />
     </main>
   );
 }
