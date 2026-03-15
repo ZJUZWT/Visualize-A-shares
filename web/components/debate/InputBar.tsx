@@ -7,7 +7,7 @@ import type { DebateStatus } from "@/types/debate";
 interface InputBarProps {
   status: DebateStatus;
   isReplayMode: boolean;
-  onStart: (code: string, maxRounds: number) => void;
+  onStart: (code: string, maxRounds: number, mode: string) => void;
   onHistoryOpen: () => void;
   onStop: () => void;
   onExport?: () => void;
@@ -16,6 +16,7 @@ interface InputBarProps {
 export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen, onStop, onExport }: InputBarProps) {
   const [code, setCode] = useState("");
   const [maxRounds, setMaxRounds] = useState(3);
+  const [mode, setMode] = useState<"standard" | "fast">("standard");
 
   const busy = status === "debating" || status === "final_round" || status === "judging";
   const stopping = status === "stopped";
@@ -57,6 +58,17 @@ export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen,
             ))}
           </select>
 
+          <button
+            onClick={() => setMode(m => m === "standard" ? "fast" : "standard")}
+            disabled={busy}
+            className="h-10 px-3 rounded-lg text-xs font-medium border border-[var(--border)]
+                       text-[var(--text-secondary)] hover:bg-[var(--bg-primary)]
+                       disabled:opacity-50 transition-colors shrink-0"
+            title={mode === "fast" ? "快速模式：压缩数据，加速辩论" : "标准模式：完整数据，深度分析"}
+          >
+            {mode === "fast" ? "⚡ 快速" : "📊 标准"}
+          </button>
+
           {busy ? (
             <button
               onClick={() => { onStop(); }}
@@ -69,7 +81,7 @@ export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen,
             </button>
           ) : (
             <button
-              onClick={() => { code && onStart(code, maxRounds); }}
+              onClick={() => { code && onStart(code, maxRounds, mode); }}
               disabled={!code}
               className="h-10 px-5 rounded-lg text-sm font-medium bg-[var(--accent)] text-white
                          hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed

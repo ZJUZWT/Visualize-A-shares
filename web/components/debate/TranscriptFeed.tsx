@@ -96,6 +96,9 @@ export default function TranscriptFeed({ transcript, verdict }: TranscriptFeedPr
         if (item.type === "industry_cognition") {
           return <IndustryCognitionCard key={item.id} item={item} />;
         }
+        if (item.type === "facts_compression") {
+          return <FactsCompressionCard key={item.id} item={item} />;
+        }
         return null;
       })}
 
@@ -124,6 +127,53 @@ function BlackboardCard({ item }: { item: Extract<TranscriptItem, { type: "black
             <p className="text-[var(--text-tertiary)]">参与者: <span className="text-[var(--text-secondary)]">{item.participants.join(", ")}</span></p>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── 数据压缩卡片 ────────────────────────────────────
+function FactsCompressionCard({ item }: { item: Extract<TranscriptItem, { type: "facts_compression" }> }) {
+  if (item.loading) {
+    return (
+      <div className="flex justify-center">
+        <div className="w-full max-w-[90%] rounded-xl border border-blue-500/20 bg-blue-500/5 text-xs overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 text-[var(--text-tertiary)]">
+            <Loader2 size={12} className="animate-spin text-blue-400" />
+            <span className="text-blue-400 font-medium">数据压缩</span>
+            <span>正在压缩市场数据...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (item.error) {
+    return (
+      <div className="flex justify-center">
+        <div className="w-full max-w-[90%] rounded-xl border border-yellow-500/20 bg-yellow-500/5 text-xs overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 text-[var(--text-tertiary)]">
+            <span className="text-yellow-400">⚠</span>
+            <span className="text-yellow-400 font-medium">数据压缩</span>
+            <span>压缩失败，已降级为标准模式</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const pct = item.compression_ratio != null ? Math.round(item.compression_ratio * 100) : null;
+  return (
+    <div className="flex justify-center">
+      <div className="w-full max-w-[90%] rounded-xl border border-blue-500/20 bg-blue-500/5 text-xs overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-2.5 text-[var(--text-tertiary)]">
+          <span className="text-blue-400">⚡</span>
+          <span className="text-blue-400 font-medium">数据压缩</span>
+          <span>
+            {item.original_tokens_est} → {item.compressed_tokens_est} tokens
+            {pct != null && <span className="ml-1 text-blue-400">({pct}%)</span>}
+          </span>
+        </div>
       </div>
     </div>
   );
