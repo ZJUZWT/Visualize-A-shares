@@ -14,6 +14,7 @@ from loguru import logger
 from .schemas import NewsArticle, Announcement, EventImpact
 from .sentiment import SentimentAnalyzer
 from .event_assessor import EventAssessor
+from config import InfoConfig
 
 
 class InfoEngine:
@@ -24,7 +25,7 @@ class InfoEngine:
         self._sentiment = SentimentAnalyzer(llm_capability=llm_capability)
         self._assessor = EventAssessor(llm_capability=llm_capability)
         self._store = data_engine.store
-        self._config = None
+        self._config = InfoConfig()
 
     # ── 新闻 ──
 
