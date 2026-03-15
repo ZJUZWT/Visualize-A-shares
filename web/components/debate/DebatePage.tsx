@@ -65,7 +65,7 @@ export default function DebatePage() {
       <BullBearArena
         transcript={transcript}
         roleState={roleState}
-        verdict={isReplayMode ? judgeVerdict : null}
+        verdict={judgeVerdict}
         blackboardItems={blackboardItems}
       />
 
