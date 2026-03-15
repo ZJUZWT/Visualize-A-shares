@@ -72,6 +72,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
+      let eventType = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -80,7 +81,6 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         const lines = buf.split("\n");
         buf = lines.pop() ?? "";
 
-        let eventType = "";
         for (const line of lines) {
           if (line.startsWith("event:")) {
             eventType = line.slice(6).trim();
@@ -155,7 +155,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         return { messages: msgs, status: "error", error: errMsg };
       });
     } finally {
-      set({ status: "idle" });
+      set(s => s.status !== "error" ? { status: "idle" } : s);
     }
   },
 }));
