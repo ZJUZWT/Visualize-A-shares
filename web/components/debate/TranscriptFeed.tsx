@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { TranscriptItem } from "@/stores/useDebateStore";
-import type { JudgeVerdict, DebateSignal } from "@/types/debate";
+import type { JudgeVerdict, DebateSignal, RoundEval } from "@/types/debate";
 import SpeechBubble from "./SpeechBubble";
 
 interface TranscriptFeedProps {
@@ -89,6 +89,9 @@ export default function TranscriptFeed({ transcript, verdict }: TranscriptFeedPr
         }
         if (item.type === "data_request") {
           return <DataRequestCard key={item.id} item={item} />;
+        }
+        if (item.type === "round_eval") {
+          return <RoundEvalCard key={item.id} data={item.data} />;
         }
         return null;
       })}
@@ -238,6 +241,61 @@ function MarkdownContent({ content }: { content: string }) {
     >
       {content}
     </ReactMarkdown>
+  );
+}
+
+// ── 评委每轮小评卡片 ──────────────────────────────────
+function RoundEvalCard({ data }: { data: RoundEval }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex justify-center">
+      <div className="w-full max-w-[90%] rounded-xl border border-purple-500/20 bg-purple-500/5 text-xs overflow-hidden">
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="w-full flex items-center gap-2 px-4 py-2 text-left text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+        >
+          {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          <span className="text-purple-400 font-medium">评委小评</span>
+          <span>Round {data.round}</span>
+          <span className="ml-auto flex gap-3">
+            <span className="text-red-400">多 {Math.round(data.bull.judge_confidence * 100)}%</span>
+            <span className="text-emerald-400">空 {Math.round(data.bear.judge_confidence * 100)}%</span>
+          </span>
+        </button>
+        {open && (
+          <div className="px-4 pb-3 border-t border-purple-500/10 pt-2 space-y-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-red-400 font-medium mb-1">多头</p>
+                <TripleBar label="公开" value={data.bull.self_confidence} color="#EF4444" />
+                <TripleBar label="内心" value={data.bull.inner_confidence} color="#F59E0B" />
+                <TripleBar label="评委" value={data.bull.judge_confidence} color="#8B5CF6" />
+                {data.bull_reasoning && <p className="text-[var(--text-secondary)] mt-1 leading-relaxed">{data.bull_reasoning}</p>}
+              </div>
+              <div>
+                <p className="text-emerald-400 font-medium mb-1">空头</p>
+                <TripleBar label="公开" value={data.bear.self_confidence} color="#10B981" />
+                <TripleBar label="内心" value={data.bear.inner_confidence} color="#F59E0B" />
+                <TripleBar label="评委" value={data.bear.judge_confidence} color="#8B5CF6" />
+                {data.bear_reasoning && <p className="text-[var(--text-secondary)] mt-1 leading-relaxed">{data.bear_reasoning}</p>}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TripleBar({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="flex items-center gap-2 mb-1">
+      <span className="w-6 text-[var(--text-tertiary)] shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 rounded-full bg-[var(--bg-primary)]">
+        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${value * 100}%`, backgroundColor: color }} />
+      </div>
+      <span style={{ color }} className="w-7 text-right shrink-0">{Math.round(value * 100)}%</span>
+    </div>
   );
 }
 
