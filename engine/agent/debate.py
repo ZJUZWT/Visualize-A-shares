@@ -518,9 +518,23 @@ async def judge_summarize_stream(
         )
 
     context = _build_context_for_role(blackboard)
+
+    # 评委历史评估
+    eval_history = ""
+    if blackboard.round_evals:
+        eval_lines = []
+        for ev in blackboard.round_evals:
+            eval_lines.append(
+                f"Round {ev.round}: 多头(公开={ev.bull.self_confidence:.2f}, "
+                f"内心={ev.bull.inner_confidence:.2f}, 评委={ev.bull.judge_confidence:.2f}) "
+                f"空头(公开={ev.bear.self_confidence:.2f}, "
+                f"内心={ev.bear.inner_confidence:.2f}, 评委={ev.bear.judge_confidence:.2f})"
+            )
+        eval_history = "\n\n## 各轮评委评估\n" + "\n".join(eval_lines)
+
     judge_stream_prompt = (
         f"你是一位专业的股票辩论裁判。请对以下辩论做出总结评价，"
-        f"直接用自然语言阐述你的裁决。\n\n{context}{memory_text}"
+        f"直接用自然语言阐述你的裁决。\n\n{context}{memory_text}{eval_history}"
     )
     messages = [
         ChatMessage(role="system", content=JUDGE_SYSTEM_PROMPT),
@@ -585,6 +599,22 @@ async def judge_summarize_stream(
             termination_reason=blackboard.termination_reason or "max_rounds",
             timestamp=datetime.now(tz=ZoneInfo("Asia/Shanghai")),
         )
+
+    # Phase 3: 数据驱动 score 覆盖
+    if blackboard.round_evals:
+        last_eval = blackboard.round_evals[-1]
+        calculated_score = last_eval.bull.judge_confidence - last_eval.bear.judge_confidence
+        if verdict.score is not None:
+            verdict.score = round(calculated_score * 0.7 + verdict.score * 0.3, 3)
+        else:
+            verdict.score = round(calculated_score, 3)
+        # 根据 score 修正 signal
+        if verdict.score > 0.1:
+            verdict.signal = "bullish"
+        elif verdict.score < -0.1:
+            verdict.signal = "bearish"
+        else:
+            verdict.signal = "neutral"
 
     # 存储裁判记忆
     try:
