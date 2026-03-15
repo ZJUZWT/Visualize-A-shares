@@ -446,7 +446,7 @@ async def fetch_initial_data(
         )
         try:
             result = await asyncio.wait_for(
-                data_fetcher.fetch_by_request(req), timeout=15.0
+                data_fetcher.fetch_by_request(req), timeout=30.0
             )
             # 判断是否有实质内容
             has_content = bool(result) and result != {"error": None}
@@ -466,12 +466,13 @@ async def fetch_initial_data(
                 "status": status, "result_summary": summary, "round": 0,
             })
         except Exception as e:
-            logger.warning(f"公用数据拉取失败 [{action}]: {e}")
+            logger.warning(f"公用数据拉取失败 [{action}]: {type(e).__name__}: {e}")
             failed += 1
+            err_msg = str(e) or type(e).__name__
             yield sse("blackboard_update", {
                 "request_id": req_id, "source": "public",
                 "engine": engine, "action": action, "title": title,
-                "status": "failed", "result_summary": str(e)[:200], "round": 0,
+                "status": "failed", "result_summary": err_msg[:200], "round": 0,
             })
     yield sse("initial_data_complete", {
         "total": len(INITIAL_ACTIONS), "success": success, "failed": failed,
@@ -532,7 +533,7 @@ async def request_data_for_round(
         })
         try:
             result = await asyncio.wait_for(
-                data_fetcher.fetch_by_request(req), timeout=15.0
+                data_fetcher.fetch_by_request(req), timeout=30.0
             )
             is_error = isinstance(result, dict) and "error" in result
             if is_error:
@@ -554,15 +555,14 @@ async def request_data_for_round(
                     "round": blackboard.round,
                 })
         except Exception as e:
-            logger.warning(f"[{role}] 数据请求失败 [{req.action}]: {e}")
+            logger.warning(f"[{role}] 数据请求失败 [{req.action}]: {type(e).__name__}: {e}")
             req.status = "failed"
             yield sse("blackboard_update", {
                 "request_id": req_id, "source": role,
                 "engine": req.engine, "action": req.action, "title": title,
-                "status": "failed", "result_summary": str(e)[:200],
+                "status": "failed", "result_summary": (str(e) or type(e).__name__)[:200],
                 "round": blackboard.round,
             })
-
 
 async def judge_summarize(
     blackboard: Blackboard,
