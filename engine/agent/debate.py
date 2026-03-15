@@ -74,6 +74,8 @@ async def extract_structure(
     llm: BaseLLMProvider,
 ) -> dict:
     """从 argument 正文提取结构化字段，返回可解包到 DebateEntry 的 dict。"""
+    allowed_actions = DEBATE_DATA_WHITELIST.get(role, [])
+    allowed_actions_str = ", ".join(f'"{a}"' for a in allowed_actions) if allowed_actions else "（无，data_requests 必须为空数组）"
     extract_prompt = f"""请从以下辩论发言中提取结构化信息，只返回 JSON，不要其他内容。
 
 角色: {role}
@@ -86,9 +88,16 @@ async def extract_structure(
   "confidence": 0.0-1.0,
   "challenges": ["对对方的质疑1", "质疑2"],
   "data_requests": [{{"engine": "quant|data|info", "action": "动作名", "params": {{"code": "<股票代码>"}}}}],
-  "retail_sentiment_score": null,  # 仅 retail_investor 角色填写，其他角色必须为 null。格式：单一浮点数 -1.0 到 +1.0，+1 极度乐观，-1 极度悲观
+  "retail_sentiment_score": null,
   "speak": true
-}}"""
+}}
+
+重要约束：
+- data_requests 中的 action 必须且只能从以下列表中选择：{allowed_actions_str}
+- action 必须是英文字符串，严禁使用中文或自造名称，不在列表中的一律不填
+- 如果发言中没有明确的数据请求，或所需 action 不在列表中，data_requests 填空数组 []
+- retail_sentiment_score 仅 retail_investor 角色填写（-1.0 到 +1.0），其他角色必须为 null
+- 只返回 JSON，不要任何其他文字"""
 
     try:
         raw = await asyncio.wait_for(
