@@ -16,6 +16,7 @@ import RelatedStocksPanel from "@/components/ui/RelatedStocksPanel";
 import AIChatPanel from "@/components/ui/AIChatPanel";
 import AnalysisPanel from "@/components/ui/AnalysisPanel";
 import { useTerrainStore } from "@/stores/useTerrainStore";
+import NavSidebar from "@/components/ui/NavSidebar";
 
 const TerrainScene = dynamic(
   () => import("@/components/canvas/TerrainScene"),
@@ -35,7 +36,8 @@ export default function Home() {
     }
   }, [isStaticMode, terrainData, loadSnapshot]);
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-transparent">
+    <main className="relative w-screen h-screen overflow-hidden bg-transparent ml-12">
+      <NavSidebar />
       {/* Layer 0: 3D 场景 */}
       <TerrainScene />
 
