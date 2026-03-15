@@ -62,18 +62,7 @@ export default function TranscriptFeed({ transcript, verdict, observerState }: T
             </div>
           );
         }
-        if (item.type === "loading") {
-          return (
-            <div key={idx} className="flex justify-center">
-              <span className="flex items-center gap-2 text-xs text-[var(--text-tertiary)] px-4 py-1.5 rounded-full bg-[var(--bg-primary)] border border-[var(--border)]">
-                <Loader2 size={12} className="animate-spin" />
-                正在获取补充数据...
-              </span>
-            </div>
-          );
-        }
-        // 每条发言后插入 observer 条
-        if (item.type === "speech") {
+        if (item.type === "entry") {
           const retail = observerState["retail_investor"];
           const smart = observerState["smart_money"];
           return (
@@ -83,7 +72,50 @@ export default function TranscriptFeed({ transcript, verdict, observerState }: T
             </div>
           );
         }
-        return <SpeechBubble key={idx} entry={item.data} />;
+        if (item.type === "streaming") {
+          const roleLabel: Record<string, string> = {
+            bull_expert: "多头专家", bear_expert: "空头专家",
+            retail_investor: "散户", smart_money: "主力", judge: "裁判",
+          };
+          return (
+            <div key={idx} className="flex justify-start px-1">
+              <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-[var(--bg-secondary)] border border-[var(--border)] text-sm text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap">
+                <span className="text-xs text-[var(--text-tertiary)] block mb-1">
+                  {roleLabel[item.role] ?? item.role}
+                </span>
+                {item.tokens}
+                <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+              </div>
+            </div>
+          );
+        }
+        if (item.type === "data_request") {
+          const isPending = item.status === "pending";
+          const isFailed = item.status === "failed";
+          return (
+            <div key={idx} className="flex justify-center">
+              <div className={`flex flex-col gap-1 px-4 py-2 rounded-xl border text-xs max-w-[90%] ${
+                isPending ? "border-[var(--border)] bg-[var(--bg-primary)]"
+                : isFailed ? "border-red-500/20 bg-red-500/5"
+                : "border-emerald-500/20 bg-emerald-500/5"
+              }`}>
+                <div className="flex items-center gap-2">
+                  {isPending && <Loader2 size={11} className="animate-spin text-[var(--text-tertiary)]" />}
+                  {!isPending && <span className={isFailed ? "text-red-400" : "text-emerald-400"}>{isFailed ? "✗" : "✓"}</span>}
+                  <span className="text-[var(--text-tertiary)]">{item.requested_by}</span>
+                  <span className="font-medium text-[var(--text-secondary)]">{item.action}</span>
+                  {item.duration_ms !== undefined && (
+                    <span className="text-[var(--text-tertiary)]">{item.duration_ms}ms</span>
+                  )}
+                </div>
+                {item.result_summary && (
+                  <p className="text-[var(--text-secondary)] pl-4 leading-relaxed">{item.result_summary}</p>
+                )}
+              </div>
+            </div>
+          );
+        }
+        return null;
       })}
 
       {verdict && <VerdictCard verdict={verdict} />}

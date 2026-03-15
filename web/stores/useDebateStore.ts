@@ -10,7 +10,8 @@ export type TranscriptItem =
   | { type: "entry"; data: DebateEntry }
   | { type: "round_divider"; round: number; is_final: boolean }
   | { type: "system"; text: string }
-  | { type: "loading"; id: string };
+  | { type: "streaming"; role: string; round: number | null; tokens: string }
+  | { type: "data_request"; id: string; requested_by: string; action: string; status: "pending" | "done" | "failed"; result_summary?: string; duration_ms?: number };
 
 interface DebateStore {
   status: DebateStatus;
@@ -202,51 +203,87 @@ function _handleSSEEvent(
       break;
     }
 
-    case "debate_entry": {
-      const entry = data as unknown as DebateEntry;
-      if (DEBATERS.includes(entry.role)) {
-        const roleState = {
-          ...state.roleState,
-          [entry.role]: {
-            stance: entry.stance,
-            confidence: entry.confidence,
-            conceded: entry.stance === "concede",
-          },
-        };
-        set({
-          roleState,
-          transcript: [...state.transcript, { type: "entry", data: entry }],
-        });
-      } else if (OBSERVERS.includes(entry.role)) {
-        const observerState = {
-          ...state.observerState,
-          [entry.role]: {
-            speak: true,
-            argument: entry.argument,
-            retail_sentiment_score: entry.retail_sentiment_score ?? undefined,
-          },
-        };
-        set({
-          observerState,
-          _observerSpokenThisRound: { ...state._observerSpokenThisRound, [entry.role]: true },
-        });
+    case "debate_token": {
+      const { role, round, tokens } = data as { role: string; round: number | null; tokens: string };
+      const existing = state.transcript.findIndex(
+        (item) => item.type === "streaming" && item.role === role && item.round === round
+      );
+      if (existing >= 0) {
+        const updated = [...state.transcript];
+        const item = updated[existing] as { type: "streaming"; role: string; round: number | null; tokens: string };
+        updated[existing] = { ...item, tokens: item.tokens + tokens };
+        set({ transcript: updated });
+      } else {
+        set({ transcript: [...state.transcript, { type: "streaming", role, round, tokens }] });
       }
       break;
     }
 
-    case "data_fetching": {
-      const loadingId = `loading_${Date.now()}`;
-      set({ transcript: [...state.transcript, { type: "loading", id: loadingId }] });
+    case "debate_entry_complete": {
+      const entry = data as unknown as DebateEntry;
+      const idx = state.transcript.findLastIndex(
+        (item) => item.type === "streaming" && item.role === entry.role && item.round === entry.round
+      );
+      const newTranscript = idx >= 0
+        ? [...state.transcript.slice(0, idx), { type: "entry" as const, data: entry }, ...state.transcript.slice(idx + 1)]
+        : [...state.transcript, { type: "entry" as const, data: entry }];
+
+      if (DEBATERS.includes(entry.role)) {
+        set({
+          transcript: newTranscript,
+          roleState: {
+            ...state.roleState,
+            [entry.role]: { stance: entry.stance, confidence: entry.confidence, conceded: entry.stance === "concede" },
+          },
+        });
+      } else if (OBSERVERS.includes(entry.role)) {
+        set({
+          transcript: newTranscript,
+          observerState: {
+            ...state.observerState,
+            [entry.role]: { speak: entry.speak, argument: entry.argument, retail_sentiment_score: entry.retail_sentiment_score ?? undefined },
+          },
+          _observerSpokenThisRound: { ...state._observerSpokenThisRound, [entry.role]: true },
+        });
+      } else {
+        set({ transcript: newTranscript });
+      }
       break;
     }
 
-    case "data_ready": {
+    case "data_request_start": {
+      const { request_id, requested_by, action } = data as { request_id: string; requested_by: string; action: string };
       set({
-        transcript: state.transcript.filter(
-          (item, idx) =>
-            !(item.type === "loading" && idx === state.transcript.length - 1)
+        transcript: [...state.transcript, { type: "data_request", id: request_id, requested_by, action, status: "pending" }],
+      });
+      break;
+    }
+
+    case "data_request_done": {
+      const { request_id, status, result_summary, duration_ms } = data as { request_id: string; status: "done" | "failed"; result_summary: string; duration_ms: number };
+      set({
+        transcript: state.transcript.map((item) =>
+          item.type === "data_request" && item.id === request_id
+            ? { ...item, status, result_summary, duration_ms }
+            : item
         ),
       });
+      break;
+    }
+
+    case "judge_token": {
+      const { tokens } = data as { tokens: string };
+      const existing = state.transcript.findIndex(
+        (item) => item.type === "streaming" && item.role === "judge"
+      );
+      if (existing >= 0) {
+        const updated = [...state.transcript];
+        const item = updated[existing] as { type: "streaming"; role: string; round: number | null; tokens: string };
+        updated[existing] = { ...item, tokens: item.tokens + tokens };
+        set({ transcript: updated });
+      } else {
+        set({ transcript: [...state.transcript, { type: "streaming", role: "judge", round: null, tokens }] });
+      }
       break;
     }
 
