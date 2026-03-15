@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type {
   DebateEntry, JudgeVerdict, DebateStatus,
-  ObserverState, RoleState, DebateReplayRecord,
+  ObserverState, RoleState, DebateReplayRecord, RoundEval,
 } from "@/types/debate";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -15,7 +15,8 @@ export type TranscriptItem =
   | { id: string; type: "system"; text: string }
   | { id: string; type: "streaming"; role: string; round: number | null; tokens: string }
   | { id: string; type: "data_request"; requested_by: string; action: string; status: "pending" | "done" | "failed"; result_summary?: string; duration_ms?: number }
-  | { id: string; type: "blackboard_data"; debateId: string; target: string; participants: string[] };
+  | { id: string; type: "blackboard_data"; debateId: string; target: string; participants: string[] }
+  | { id: string; type: "round_eval"; data: RoundEval };
 
 interface DebateStore {
   status: DebateStatus;
@@ -35,7 +36,7 @@ interface DebateStore {
   stopDebate: () => void;
 }
 
-const INITIAL_ROLE_STATE: RoleState = { stance: null, confidence: 0.5, conceded: false };
+const INITIAL_ROLE_STATE: RoleState = { stance: null, confidence: 0.5, inner_confidence: null, judge_confidence: null, conceded: false };
 const OBSERVERS = ["retail_investor", "smart_money"];
 const DEBATERS = ["bull_expert", "bear_expert"];
 
@@ -162,13 +163,27 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
           roleState[entry.role] = {
             stance: entry.stance,
             confidence: entry.confidence,
+            inner_confidence: entry.inner_confidence ?? null,
+            judge_confidence: null,
             conceded: entry.stance === "concede",
           };
         }
       }
+      // Apply judge_confidence from round_evals (last round wins)
+      for (const re of (blackboard.round_evals ?? []) as RoundEval[]) {
+        if (roleState["bull_expert"]) roleState["bull_expert"].judge_confidence = re.bull.judge_confidence;
+        if (roleState["bear_expert"]) roleState["bear_expert"].judge_confidence = re.bear.judge_confidence;
+      }
+
+      // Build round_eval transcript items
+      const roundEvalItems: TranscriptItem[] = (blackboard.round_evals ?? []).map((re: RoundEval) => ({
+        id: `round_eval_${re.round}`,
+        type: "round_eval" as const,
+        data: re,
+      }));
 
       set({
-        transcript,
+        transcript: [...transcript, ...roundEvalItems],
         roleState,
         judgeVerdict: verdict,
         status: "completed",
@@ -268,7 +283,13 @@ function _handleSSEEvent(
           transcript: newTranscript,
           roleState: {
             ...state.roleState,
-            [entry.role]: { stance: entry.stance, confidence: entry.confidence, conceded: entry.stance === "concede" },
+            [entry.role]: {
+              stance: entry.stance,
+              confidence: entry.confidence,
+              inner_confidence: entry.inner_confidence ?? null,
+              judge_confidence: state.roleState[entry.role]?.judge_confidence ?? null,
+              conceded: entry.stance === "concede",
+            },
           },
         });
       } else if (OBSERVERS.includes(entry.role)) {
@@ -319,6 +340,31 @@ function _handleSSEEvent(
       } else {
         set({ transcript: [...state.transcript, { id: "streaming_judge", type: "streaming", role: "judge", round: null, tokens }] });
       }
+      break;
+    }
+
+    case "judge_round_eval": {
+      const roundEval = data as unknown as RoundEval;
+      const updatedRoleState = { ...state.roleState };
+      if (updatedRoleState["bull_expert"]) {
+        updatedRoleState["bull_expert"] = {
+          ...updatedRoleState["bull_expert"],
+          judge_confidence: roundEval.bull.judge_confidence,
+        };
+      }
+      if (updatedRoleState["bear_expert"]) {
+        updatedRoleState["bear_expert"] = {
+          ...updatedRoleState["bear_expert"],
+          judge_confidence: roundEval.bear.judge_confidence,
+        };
+      }
+      set({
+        roleState: updatedRoleState,
+        transcript: [
+          ...state.transcript,
+          { id: `round_eval_${roundEval.round}`, type: "round_eval", data: roundEval },
+        ],
+      });
       break;
     }
 
