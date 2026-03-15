@@ -10,7 +10,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from config import settings
+from config import settings, DB_PATH, DATA_DIR
 from expert.agent import ExpertAgent
 from expert.schemas import ExpertChatRequest
 from expert.tools import ExpertTools
@@ -22,7 +22,7 @@ _expert_agent: ExpertAgent | None = None
 
 
 def _get_db():
-    return duckdb.connect(str(settings.DB_PATH))
+    return duckdb.connect(str(DB_PATH))
 
 
 async def _init_db():
@@ -56,21 +56,12 @@ async def _init_db():
 
         data_engine = get_data_engine()
         cluster_engine = get_cluster_engine()
-        llm_engine = None
-
-        try:
-            from llm import get_llm_engine
-            llm_engine = get_llm_engine()
-        except Exception as e:
-            logger.warning(f"LLM 引擎加载失败: {e}")
-
         tools = ExpertTools(
             data_engine=data_engine,
             cluster_engine=cluster_engine,
-            llm_engine=llm_engine,
         )
 
-        kg_path = str(settings.DATA_DIR / "expert_kg.json")
+        kg_path = str(DATA_DIR / "expert_kg.json")
         Path(kg_path).parent.mkdir(parents=True, exist_ok=True)
 
         chromadb_dir = str(settings.chromadb.persist_dir)
