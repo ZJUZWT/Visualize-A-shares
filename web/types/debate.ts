@@ -1,6 +1,11 @@
 export type DebateSignal = "bullish" | "bearish" | "neutral";
 export type DebateQuality = "consensus" | "strong_disagreement" | "one_sided";
-export type DebateStatus = "idle" | "debating" | "final_round" | "judging" | "completed";
+
+export interface PartialSummary {
+  summary: string;
+  signal: DebateSignal | null;
+}
+export type DebateStatus = "idle" | "debating" | "final_round" | "judging" | "completed" | "stopped";
 export type Stance = "insist" | "partial_concede" | "concede";
 
 export interface DebateEntry {
