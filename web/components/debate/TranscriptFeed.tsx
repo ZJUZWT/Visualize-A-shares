@@ -93,6 +93,9 @@ export default function TranscriptFeed({ transcript, verdict }: TranscriptFeedPr
         if (item.type === "round_eval") {
           return <RoundEvalCard key={item.id} data={item.data} />;
         }
+        if (item.type === "industry_cognition") {
+          return <IndustryCognitionCard key={item.id} item={item} />;
+        }
         return null;
       })}
 
@@ -119,6 +122,64 @@ function BlackboardCard({ item }: { item: Extract<TranscriptItem, { type: "black
           <div className="px-4 pb-3 space-y-1 border-t border-[var(--border)]">
             <p className="text-[var(--text-tertiary)] pt-2">辩论 ID: <span className="text-[var(--text-secondary)]">{item.debateId}</span></p>
             <p className="text-[var(--text-tertiary)]">参与者: <span className="text-[var(--text-secondary)]">{item.participants.join(", ")}</span></p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── 行业认知卡片 ────────────────────────────────────
+function IndustryCognitionCard({ item }: { item: Extract<TranscriptItem, { type: "industry_cognition" }> }) {
+  const [open, setOpen] = useState(false);
+
+  if (item.loading) {
+    return (
+      <div className="flex justify-center">
+        <div className="w-full max-w-[90%] rounded-xl border border-amber-500/20 bg-amber-500/5 text-xs overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 text-[var(--text-tertiary)]">
+            <Loader2 size={12} className="animate-spin text-amber-400" />
+            <span className="text-amber-400 font-medium">行业认知</span>
+            <span>正在分析 {item.industry} 产业链逻辑...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (item.error) {
+    return (
+      <div className="flex justify-center">
+        <div className="w-full max-w-[90%] rounded-xl border border-red-500/20 bg-red-500/5 text-xs overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 text-[var(--text-tertiary)]">
+            <span className="text-red-400">✗</span>
+            <span className="text-red-400 font-medium">行业认知</span>
+            <span>{item.summary}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-center">
+      <div className="w-full max-w-[90%] rounded-xl border border-amber-500/20 bg-amber-500/5 text-xs overflow-hidden">
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+        >
+          {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          <span className="text-amber-400 font-medium">行业认知</span>
+          <span className="text-[var(--text-secondary)]">{item.industry}</span>
+          {item.cached && <span className="text-[var(--text-tertiary)] text-[10px]">(缓存)</span>}
+          <span className="ml-auto flex gap-3">
+            {item.cycle_position && <span className="text-amber-400">{item.cycle_position}</span>}
+            {item.traps_count > 0 && <span className="text-yellow-500">陷阱 {item.traps_count}</span>}
+          </span>
+        </button>
+        {open && (
+          <div className="px-4 pb-3 border-t border-amber-500/10 pt-2 space-y-1">
+            <p className="text-[var(--text-secondary)] leading-relaxed">{item.summary}</p>
           </div>
         )}
       </div>

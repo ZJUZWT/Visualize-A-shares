@@ -16,7 +16,8 @@ export type TranscriptItem =
   | { id: string; type: "streaming"; role: string; round: number | null; tokens: string }
   | { id: string; type: "data_request"; requested_by: string; action: string; status: "pending" | "done" | "failed"; result_summary?: string; duration_ms?: number }
   | { id: string; type: "blackboard_data"; debateId: string; target: string; participants: string[] }
-  | { id: string; type: "round_eval"; data: RoundEval };
+  | { id: string; type: "round_eval"; data: RoundEval }
+  | { id: string; type: "industry_cognition"; industry: string; summary: string; cycle_position: string; traps_count: number; cached: boolean; loading: boolean; error?: boolean };
 
 export interface BlackboardItem {
   id: string;
@@ -488,6 +489,36 @@ function _handleSSEEvent(
       } else {
         set({ blackboardItems: [...current, item] });
       }
+      break;
+    }
+
+    case "industry_cognition_start": {
+      const industry = data.industry as string;
+      const cached = data.cached as boolean;
+      set({
+        transcript: [...state.transcript, {
+          id: "industry_cognition",
+          type: "industry_cognition",
+          industry,
+          summary: "",
+          cycle_position: "",
+          traps_count: 0,
+          cached,
+          loading: true,
+        }],
+      });
+      break;
+    }
+
+    case "industry_cognition_done": {
+      const ic = data as { industry: string; summary: string; cycle_position: string; traps_count: number; cached: boolean; error?: boolean };
+      set({
+        transcript: state.transcript.map((item) =>
+          item.type === "industry_cognition"
+            ? { ...item, summary: ic.summary, cycle_position: ic.cycle_position, traps_count: ic.traps_count, loading: false, error: ic.error }
+            : item
+        ),
+      });
       break;
     }
 
