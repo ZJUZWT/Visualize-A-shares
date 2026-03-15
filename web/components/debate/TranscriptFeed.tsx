@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import type { TranscriptItem } from "@/stores/useDebateStore";
-import type { JudgeVerdict, DebateSignal, ObserverState } from "@/types/debate";
+import type { JudgeVerdict, DebateSignal } from "@/types/debate";
 import SpeechBubble from "./SpeechBubble";
 
 interface TranscriptFeedProps {
   transcript: TranscriptItem[];
   verdict: JudgeVerdict | null;
-  observerState: Record<string, ObserverState>;
 }
 
 const SIGNAL_COLOR: Record<DebateSignal, string> = {
@@ -23,7 +23,23 @@ const SIGNAL_LABEL: Record<DebateSignal, string> = {
   neutral: "中性",
 };
 
-export default function TranscriptFeed({ transcript, verdict, observerState }: TranscriptFeedProps) {
+const ROLE_LABEL: Record<string, string> = {
+  bull_expert: "多头专家",
+  bear_expert: "空头专家",
+  retail_investor: "散户",
+  smart_money: "主力",
+  judge: "裁判",
+};
+
+const ROLE_COLOR: Record<string, string> = {
+  bull_expert: "#EF4444",
+  bear_expert: "#10B981",
+  retail_investor: "#F59E0B",
+  smart_money: "#8B5CF6",
+  judge: "#6B7280",
+};
+
+export default function TranscriptFeed({ transcript, verdict }: TranscriptFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,6 +58,9 @@ export default function TranscriptFeed({ transcript, verdict, observerState }: T
   return (
     <div className="overflow-y-auto h-full px-6 py-5 space-y-4">
       {transcript.map((item, idx) => {
+        if (item.type === "blackboard_data") {
+          return <BlackboardCard key={idx} item={item} />;
+        }
         if (item.type === "round_divider") {
           return (
             <div key={idx} className="flex items-center gap-3 py-1">
@@ -63,58 +82,13 @@ export default function TranscriptFeed({ transcript, verdict, observerState }: T
           );
         }
         if (item.type === "entry") {
-          const isDebater = item.data.role === "bull_expert" || item.data.role === "bear_expert";
-          const retail = observerState["retail_investor"];
-          const smart = observerState["smart_money"];
-          return (
-            <div key={idx} className="space-y-3">
-              <SpeechBubble entry={item.data} />
-              {isDebater && <ObserverBar retail={retail} smart={smart} />}
-            </div>
-          );
+          return <SpeechBubble key={idx} entry={item.data} />;
         }
         if (item.type === "streaming") {
-          const roleLabel: Record<string, string> = {
-            bull_expert: "多头专家", bear_expert: "空头专家",
-            retail_investor: "散户", smart_money: "主力", judge: "裁判",
-          };
-          return (
-            <div key={idx} className="flex justify-start px-1">
-              <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-[var(--bg-secondary)] border border-[var(--border)] text-sm text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap">
-                <span className="text-xs text-[var(--text-tertiary)] block mb-1">
-                  {roleLabel[item.role] ?? item.role}
-                </span>
-                {item.tokens}
-                <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
-              </div>
-            </div>
-          );
+          return <StreamingBubble key={idx} item={item} />;
         }
         if (item.type === "data_request") {
-          const isPending = item.status === "pending";
-          const isFailed = item.status === "failed";
-          return (
-            <div key={idx} className="flex justify-center">
-              <div className={`flex flex-col gap-1 px-4 py-2 rounded-xl border text-xs max-w-[90%] ${
-                isPending ? "border-[var(--border)] bg-[var(--bg-primary)]"
-                : isFailed ? "border-red-500/20 bg-red-500/5"
-                : "border-emerald-500/20 bg-emerald-500/5"
-              }`}>
-                <div className="flex items-center gap-2">
-                  {isPending && <Loader2 size={11} className="animate-spin text-[var(--text-tertiary)]" />}
-                  {!isPending && <span className={isFailed ? "text-red-400" : "text-emerald-400"}>{isFailed ? "✗" : "✓"}</span>}
-                  <span className="text-[var(--text-tertiary)]">{item.requested_by}</span>
-                  <span className="font-medium text-[var(--text-secondary)]">{item.action}</span>
-                  {item.duration_ms !== undefined && (
-                    <span className="text-[var(--text-tertiary)]">{item.duration_ms}ms</span>
-                  )}
-                </div>
-                {item.result_summary && (
-                  <p className="text-[var(--text-secondary)] pl-4 leading-relaxed">{item.result_summary}</p>
-                )}
-              </div>
-            </div>
-          );
+          return <DataRequestCard key={idx} item={item} />;
         }
         return null;
       })}
@@ -125,36 +99,145 @@ export default function TranscriptFeed({ transcript, verdict, observerState }: T
   );
 }
 
-function ObserverBar({ retail, smart }: { retail: ObserverState | undefined; smart: ObserverState | undefined }) {
-  const retailScore = retail?.retail_sentiment_score ?? 0;
-  const retailSignal: DebateSignal = retailScore > 0.1 ? "bullish" : retailScore < -0.1 ? "bearish" : "neutral";
-  const retailColor = SIGNAL_COLOR[retailSignal];
-  const retailLabel = retail?.speak ? SIGNAL_LABEL[retailSignal] : null;
-
-  const smartLabel = smart?.speak ? smart.argument?.slice(0, 20) : null;
-
-  const retailBg = retailSignal === "bullish" ? "bg-red-500/8" : retailSignal === "bearish" ? "bg-emerald-500/8" : "bg-[var(--bg-primary)]";
-  const smartBg = "bg-[var(--bg-primary)]";
-
+// ── 黑板初始数据卡片（可折叠）────────────────────────────
+function BlackboardCard({ item }: { item: Extract<TranscriptItem, { type: "blackboard_data" }> }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="flex gap-2 justify-center">
-      {/* 散户情绪 */}
-      <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full border border-[var(--border)] text-xs ${retailBg}`}>
-        <span className="text-[var(--text-tertiary)]">散户</span>
-        {retailLabel
-          ? <span className="font-medium" style={{ color: retailColor }}>{retailLabel}</span>
-          : <span className="text-[var(--text-tertiary)]">暂无意见</span>
-        }
-      </div>
-      {/* 主力动向 */}
-      <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full border border-[var(--border)] text-xs ${smartBg}`}>
-        <span className="text-[var(--text-tertiary)]">主力</span>
-        {smartLabel
-          ? <span className="text-[var(--text-secondary)]">{smartLabel}...</span>
-          : <span className="text-[var(--text-tertiary)]">暂无意见</span>
-        }
+    <div className="flex justify-center">
+      <div className="w-full max-w-[90%] rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] text-xs overflow-hidden">
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="w-full flex items-center gap-2 px-4 py-2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+        >
+          {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          <span>辩论初始化 · {item.target}</span>
+        </button>
+        {open && (
+          <div className="px-4 pb-3 space-y-1 border-t border-[var(--border)]">
+            <p className="text-[var(--text-tertiary)] pt-2">辩论 ID: <span className="text-[var(--text-secondary)]">{item.debateId}</span></p>
+            <p className="text-[var(--text-tertiary)]">参与者: <span className="text-[var(--text-secondary)]">{item.participants.join(", ")}</span></p>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+// ── 数据请求卡片（可折叠结果）────────────────────────────
+function DataRequestCard({ item }: { item: Extract<TranscriptItem, { type: "data_request" }> }) {
+  const [open, setOpen] = useState(false);
+  const isPending = item.status === "pending";
+  const isFailed = item.status === "failed";
+  const borderCls = isPending
+    ? "border-[var(--border)] bg-[var(--bg-primary)]"
+    : isFailed
+    ? "border-red-500/20 bg-red-500/5"
+    : "border-emerald-500/20 bg-emerald-500/5";
+
+  return (
+    <div className="flex justify-center">
+      <div className={`w-full max-w-[90%] rounded-xl border text-xs overflow-hidden ${borderCls}`}>
+        <button
+          onClick={() => !isPending && setOpen(v => !v)}
+          className="w-full flex items-center gap-2 px-4 py-2 text-left"
+          disabled={isPending}
+        >
+          {isPending
+            ? <Loader2 size={11} className="animate-spin text-[var(--text-tertiary)] shrink-0" />
+            : <span className={`shrink-0 ${isFailed ? "text-red-400" : "text-emerald-400"}`}>{isFailed ? "✗" : "✓"}</span>
+          }
+          <span className="text-[var(--text-tertiary)]">{item.requested_by}</span>
+          <span className="font-medium text-[var(--text-secondary)]">{item.action}</span>
+          {item.duration_ms !== undefined && (
+            <span className="text-[var(--text-tertiary)] ml-auto">{item.duration_ms}ms</span>
+          )}
+          {!isPending && item.result_summary && (
+            open ? <ChevronUp size={11} className="ml-1 shrink-0 text-[var(--text-tertiary)]" />
+                 : <ChevronDown size={11} className="ml-1 shrink-0 text-[var(--text-tertiary)]" />
+          )}
+        </button>
+        {open && item.result_summary && (
+          <p className="px-4 pb-3 text-[var(--text-secondary)] leading-relaxed border-t border-[var(--border)] pt-2">
+            {item.result_summary}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── 流式气泡（与最终格式一致）────────────────────────────
+function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "streaming" }> }) {
+  const isBull = item.role === "bull_expert";
+  const isObserver = item.role === "retail_investor" || item.role === "smart_money";
+  const isJudge = item.role === "judge";
+  const color = ROLE_COLOR[item.role] ?? "#9CA3AF";
+  const label = ROLE_LABEL[item.role] ?? item.role;
+
+  if (isJudge) {
+    return (
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] px-5 py-4">
+        <span className="text-xs font-semibold mb-2 block" style={{ color }}>裁判</span>
+        <div className="prose-sm text-[var(--text-primary)] leading-7">
+          <MarkdownContent content={item.tokens} />
+          <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+        </div>
+      </div>
+    );
+  }
+
+  if (isObserver) {
+    return (
+      <div className="flex justify-center">
+        <div className="max-w-[85%] rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] px-4 py-3">
+          <span className="text-xs font-semibold mb-1 block" style={{ color }}>{label}</span>
+          <div className="text-sm text-[var(--text-primary)] leading-relaxed">
+            <MarkdownContent content={item.tokens} />
+            <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // debater
+  const bgColor = isBull ? "bg-red-500/5" : "bg-emerald-500/5";
+  const borderSide = isBull ? "border-l-2" : "border-r-2";
+  return (
+    <div className={`flex ${isBull ? "justify-start" : "justify-end"}`}>
+      <div className={`max-w-[78%] rounded-xl p-4 ${bgColor} ${borderSide}`} style={{ borderColor: color }}>
+        <div className="flex items-center gap-2 mb-2">
+          {item.round !== null && <span className="text-xs text-[var(--text-tertiary)]">Round {item.round}</span>}
+          <span className="text-sm font-semibold" style={{ color }}>{label}</span>
+        </div>
+        <div className="text-sm text-[var(--text-primary)] leading-7">
+          <MarkdownContent content={item.tokens} />
+          <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Markdown 渲染 ─────────────────────────────────────
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      components={{
+        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+        ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
+        li: ({ children }) => <li>{children}</li>,
+        strong: ({ children }) => <strong className="font-semibold text-[var(--text-primary)]">{children}</strong>,
+        em: ({ children }) => <em className="italic">{children}</em>,
+        code: ({ children }) => <code className="px-1 py-0.5 rounded text-xs bg-[var(--bg-primary)] font-mono">{children}</code>,
+        h1: ({ children }) => <h1 className="text-base font-bold mb-1">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-sm font-bold mb-1">{children}</h2>,
+        h3: ({ children }) => <h3 className="text-sm font-semibold mb-1">{children}</h3>,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
   );
 }
 
