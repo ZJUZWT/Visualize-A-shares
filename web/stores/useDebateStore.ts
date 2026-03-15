@@ -17,7 +17,8 @@ export type TranscriptItem =
   | { id: string; type: "data_request"; requested_by: string; action: string; status: "pending" | "done" | "failed"; result_summary?: string; duration_ms?: number }
   | { id: string; type: "blackboard_data"; debateId: string; target: string; participants: string[] }
   | { id: string; type: "round_eval"; data: RoundEval }
-  | { id: string; type: "industry_cognition"; industry: string; summary: string; cycle_position: string; traps_count: number; cached: boolean; loading: boolean; error?: boolean };
+  | { id: string; type: "industry_cognition"; industry: string; summary: string; cycle_position: string; traps_count: number; cached: boolean; loading: boolean; error?: boolean }
+  | { id: string; type: "facts_compression"; mode: string; loading: boolean; original_tokens_est?: number; compressed_tokens_est?: number; compression_ratio?: number; error?: boolean; fallback?: string };
 
 export interface BlackboardItem {
   id: string;
@@ -43,7 +44,7 @@ interface DebateStore {
   currentTarget: string | null;
   blackboardItems: BlackboardItem[];
 
-  startDebate: (code: string, maxRounds: number) => Promise<void>;
+  startDebate: (code: string, maxRounds: number, mode?: string) => Promise<void>;
   loadReplay: (debateId: string) => Promise<void>;
   reset: () => void;
   stopDebate: () => void;
@@ -91,7 +92,7 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
     set({ status: "stopped" });
   },
 
-  startDebate: async (code, maxRounds) => {
+  startDebate: async (code, maxRounds, mode = "standard") => {
     get().reset();
     _abortController = new AbortController();
     set({ status: "debating", currentTarget: code });
@@ -100,7 +101,7 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
       const res = await fetch(`${API_BASE}/api/v1/debate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, max_rounds: maxRounds }),
+        body: JSON.stringify({ code, max_rounds: maxRounds, mode }),
         signal: _abortController.signal,
       });
 
@@ -489,6 +490,37 @@ function _handleSSEEvent(
       } else {
         set({ blackboardItems: [...current, item] });
       }
+      break;
+    }
+
+    case "facts_compression_start": {
+      set({
+        transcript: [...state.transcript, {
+          id: "facts_compression",
+          type: "facts_compression",
+          mode: data.mode as string,
+          loading: true,
+        }],
+      });
+      break;
+    }
+
+    case "facts_compression_done": {
+      set({
+        transcript: state.transcript.map((item) =>
+          item.type === "facts_compression"
+            ? {
+                ...item,
+                loading: false,
+                original_tokens_est: data.original_tokens_est as number | undefined,
+                compressed_tokens_est: data.compressed_tokens_est as number | undefined,
+                compression_ratio: data.compression_ratio as number | undefined,
+                error: data.error as boolean | undefined,
+                fallback: data.fallback as string | undefined,
+              }
+            : item
+        ),
+      });
       break;
     }
 
