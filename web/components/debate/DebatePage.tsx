@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useDebateStore } from "@/stores/useDebateStore";
+import { exportDebateHtml } from "@/lib/exportDebateHtml";
 import BullBearArena from "./BullBearArena";
 import InputBar from "./InputBar";
 import HistoryModal from "./HistoryModal";
@@ -80,6 +81,12 @@ export default function DebatePage() {
         onStart={startDebate}
         onHistoryOpen={() => setShowHistory(true)}
         onStop={() => setShowStopConfirm(true)}
+        onExport={() => exportDebateHtml(
+          currentTarget ?? "",
+          transcript,
+          blackboardItems,
+          judgeVerdict,
+        )}
       />
 
       {/* 终止确认弹窗 */}
