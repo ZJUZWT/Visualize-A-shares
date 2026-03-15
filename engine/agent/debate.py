@@ -58,6 +58,36 @@ def _extract_json(text: str) -> str:
     return result
 
 
+def _lenient_json_loads(text: str) -> dict | list:
+    """宽松 JSON 解析：先尝试标准解析，失败后修复常见 LLM 格式问题"""
+    raw = _extract_json(text)
+    # 1. 标准解析
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    # 2. 移除尾逗号（}, ] 前的逗号）
+    fixed = re.sub(r',\s*([}\]])', r'\1', raw)
+    try:
+        return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+    # 3. 单引号替换为双引号
+    fixed2 = fixed.replace("'", '"')
+    try:
+        return json.loads(fixed2)
+    except json.JSONDecodeError:
+        pass
+    # 4. 尝试提取第一个 { ... } 或 [ ... ] 块
+    m = re.search(r'(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|\[.*\])', fixed, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except json.JSONDecodeError:
+            pass
+    raise json.JSONDecodeError("宽松解析也失败", raw, 0)
+
+
 def _parse_sentiment_score(value) -> float | None:
     """将 LLM 返回的情感分数转为 float，支持数字和字符串格式"""
     if isinstance(value, (int, float)):
@@ -103,7 +133,7 @@ async def extract_structure(
             llm.chat([ChatMessage(role="user", content=extract_prompt)]),
             timeout=10.0,
         )
-        parsed = json.loads(_extract_json(raw))
+        parsed = _lenient_json_loads(raw)
         score = parsed.get("retail_sentiment_score")
         return {
             "stance": parsed.get("stance", "insist"),
@@ -412,19 +442,28 @@ async def fetch_initial_data(
         })
         req = DataRequest(
             requested_by="public", engine=engine,
-            action=action, params={"code": blackboard.target}, round=0,
+            action=action, params={"code": blackboard.code or blackboard.target}, round=0,
         )
         try:
             result = await asyncio.wait_for(
                 data_fetcher.fetch_by_request(req), timeout=15.0
             )
-            summary = str(result)[:300] if result else ""
-            blackboard.facts[action] = result
-            success += 1
+            # 判断是否有实质内容
+            has_content = bool(result) and result != {"error": None}
+            is_error = isinstance(result, dict) and "error" in result
+            if is_error:
+                summary = result["error"]
+                status = "failed"
+                failed += 1
+            else:
+                summary = str(result)[:300] if has_content else "（无数据）"
+                status = "done"
+                blackboard.facts[action] = result
+                success += 1
             yield sse("blackboard_update", {
                 "request_id": req_id, "source": "public",
                 "engine": engine, "action": action, "title": title,
-                "status": "done", "result_summary": summary, "round": 0,
+                "status": status, "result_summary": summary, "round": 0,
             })
         except Exception as e:
             logger.warning(f"公用数据拉取失败 [{action}]: {e}")
@@ -466,7 +505,7 @@ async def request_data_for_round(
             llm.chat([ChatMessage(role="user", content=prompt)]),
             timeout=15.0,
         )
-        parsed = json.loads(_extract_json(raw))
+        parsed = _lenient_json_loads(raw)
         if not isinstance(parsed, list):
             parsed = []
     except Exception as e:
@@ -495,15 +534,25 @@ async def request_data_for_round(
             result = await asyncio.wait_for(
                 data_fetcher.fetch_by_request(req), timeout=15.0
             )
-            req.result = result
-            req.status = "done"
-            blackboard.data_requests.append(req)
-            yield sse("blackboard_update", {
-                "request_id": req_id, "source": role,
-                "engine": req.engine, "action": req.action, "title": title,
-                "status": "done", "result_summary": str(result)[:300] if result else "",
-                "round": blackboard.round,
-            })
+            is_error = isinstance(result, dict) and "error" in result
+            if is_error:
+                req.status = "failed"
+                yield sse("blackboard_update", {
+                    "request_id": req_id, "source": role,
+                    "engine": req.engine, "action": req.action, "title": title,
+                    "status": "failed", "result_summary": result["error"],
+                    "round": blackboard.round,
+                })
+            else:
+                req.result = result
+                req.status = "done"
+                blackboard.data_requests.append(req)
+                yield sse("blackboard_update", {
+                    "request_id": req_id, "source": role,
+                    "engine": req.engine, "action": req.action, "title": title,
+                    "status": "done", "result_summary": str(result)[:300] if result else "（无数据）",
+                    "round": blackboard.round,
+                })
         except Exception as e:
             logger.warning(f"[{role}] 数据请求失败 [{req.action}]: {e}")
             req.status = "failed"
@@ -771,6 +820,28 @@ async def persist_debate(
 
 # ── 主循环 ────────────────────────────────────────────
 
+def resolve_stock_code(target: str) -> str:
+    """从 target 解析股票代码。
+    - 如果 target 本身是 6 位数字代码，直接返回
+    - 否则在公司概况里按名称模糊匹配，返回最佳匹配的代码
+    - 找不到返回空字符串
+    """
+    import re
+    if re.fullmatch(r"\d{6}", target.strip()):
+        return target.strip()
+    try:
+        from data_engine import get_data_engine
+        profiles = get_data_engine().get_profiles()
+        target_lower = target.lower()
+        for code, info in profiles.items():
+            name = info.get("name", "")
+            if name and (name in target or target_lower in name.lower()):
+                return code
+    except Exception as e:
+        logger.warning(f"resolve_stock_code 失败: {e}")
+    return ""
+
+
 async def run_debate(
     blackboard: Blackboard,
     llm: BaseLLMProvider,
@@ -778,6 +849,14 @@ async def run_debate(
     data_fetcher: DataFetcher,
 ) -> AsyncGenerator[dict, None]:
     """专家辩论主循环 — async generator，推送 SSE 事件"""
+
+    # 解析股票代码（target 可能是自由文本）
+    if not blackboard.code:
+        blackboard.code = resolve_stock_code(blackboard.target)
+        if blackboard.code:
+            logger.info(f"target '{blackboard.target}' 解析为股票代码: {blackboard.code}")
+        else:
+            logger.info(f"target '{blackboard.target}' 未匹配到股票代码，数据拉取将降级")
 
     yield sse("debate_start", {
         "debate_id": blackboard.debate_id,
