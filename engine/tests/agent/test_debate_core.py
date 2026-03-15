@@ -66,13 +66,13 @@ class TestFallbackEntry:
 
 class TestParseDebateEntry:
     def test_parses_valid_debater_json(self):
-        raw = '{"stance": "insist", "argument": "PE合理", "challenges": ["空头误判"], "confidence": 0.8, "data_requests": []}'
+        raw = "坚持我的观点。PE合理，估值处于历史低位。\n【质疑】空头误判了行业周期"
         entry = _parse_debate_entry("bull_expert", round=1, raw=raw)
         assert entry.stance == "insist"
-        assert entry.confidence == 0.8
+        assert len(entry.challenges) == 1
 
     def test_parses_observer_with_speak_false(self):
-        raw = '{"speak": false, "argument": "", "retail_sentiment_score": null, "data_requests": []}'
+        raw = "【沉默】"
         entry = _parse_debate_entry("retail_investor", round=1, raw=raw)
         assert entry.speak is False
 
@@ -81,13 +81,12 @@ class TestParseDebateEntry:
         assert entry.stance == "insist"  # fallback
 
     def test_handles_markdown_code_block(self):
-        raw = '```json\n{"stance": "concede", "argument": "认输", "challenges": [], "confidence": 0.2, "data_requests": []}\n```'
+        raw = "认输，对方论据充分，我承认失败。\n【质疑】"
         entry = _parse_debate_entry("bear_expert", round=2, raw=raw)
         assert entry.stance == "concede"
-        assert entry.confidence == 0.2
 
     def test_parses_data_requests_in_entry(self):
-        raw = '{"stance": "insist", "argument": "需要更多数据", "challenges": [], "confidence": 0.7, "data_requests": [{"engine": "quant", "action": "get_factor_scores", "params": {"code": "600519"}}]}'
+        raw = "坚持观点，需要更多数据支撑。\n【数据请求】\nquant.get_factor_scores({\"code\": \"600519\"})"
         entry = _parse_debate_entry("bull_expert", round=1, raw=raw)
         assert len(entry.data_requests) == 1
         assert entry.data_requests[0].action == "get_factor_scores"

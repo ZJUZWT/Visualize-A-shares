@@ -1158,8 +1158,8 @@ def _get_debate_record(da: "DataAccess", debate_id: str) -> dict | None:
         return None
 
 
-def start_debate(da: "DataAccess", code: str, max_rounds: int = 3) -> str:
-    """发起专家辩论 — 消费完整 SSE 流，返回完整辩论记录"""
+async def start_debate_async(da: "DataAccess", code: str, max_rounds: int, ctx=None) -> str:
+    """发起专家辩论 — 异步消费 SSE 流，通过 MCP notification 实时推送"""
     import httpx
 
     if not da.is_online():
@@ -1175,126 +1175,151 @@ def start_debate(da: "DataAccess", code: str, max_rounds: int = 3) -> str:
 
     try:
         lines = []
-        current_round = 0
         debate_id = None
-        verdict = None
 
-        with httpx.stream(
-            "POST",
-            f"{da._api_base}/api/v1/debate",
-            json={"code": code, "max_rounds": max_rounds},
-            timeout=600.0,
-        ) as resp:
-            resp.raise_for_status()
-            event_type = None
-            data_buf = ""
-            for line in resp.iter_lines():
-                if line.startswith("event: "):
-                    event_type = line[7:].strip()
-                elif line.startswith("data: "):
-                    data_buf = line[6:]
-                elif line == "" and event_type and data_buf:
-                    try:
-                        data = json.loads(data_buf)
-                    except json.JSONDecodeError:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+            async with client.stream(
+                "POST", f"{da._api_base}/api/v1/debate",
+                json={"code": code, "max_rounds": max_rounds},
+            ) as resp:
+                resp.raise_for_status()
+                event_type = None
+                data_buf = ""
+
+                async for line in resp.aiter_lines():
+                    if line.startswith("event: "):
+                        event_type = line[7:].strip()
+                    elif line.startswith("data: "):
+                        data_buf = line[6:]
+                    elif line == "" and event_type and data_buf:
+                        try:
+                            data = json.loads(data_buf)
+                        except json.JSONDecodeError:
+                            event_type = None
+                            data_buf = ""
+                            continue
+
+                        if event_type == "debate_start":
+                            debate_id = data.get("debate_id")
+                            lines.append(f"# 专家辩论: {code}")
+                            lines.append(f"debate_id: `{debate_id}` | max_rounds: {data.get('max_rounds')}")
+                            lines.append("")
+
+                        elif event_type == "debate_round_start":
+                            rd = data.get("round", 0)
+                            is_final = data.get("is_final", False)
+                            lines.append("---")
+                            lines.append(f"## Round {rd}" + (" (最终轮)" if is_final else ""))
+                            lines.append("")
+
+                        elif event_type == "debate_token":
+                            role = data.get("role", "")
+                            role_cn = ROLE_NAMES.get(role, role)
+                            tokens_text = data.get("tokens", "")
+                            if ctx:
+                                await ctx.log("info", f"[{role_cn}] {tokens_text}")
+
+                        elif event_type == "debate_entry_complete":
+                            role = data.get("role", "")
+                            role_cn = ROLE_NAMES.get(role, role)
+                            stance = data.get("stance")
+                            conf = data.get("confidence", 0)
+                            arg = data.get("argument", "")
+                            challenges = data.get("challenges", [])
+                            sentiment = data.get("retail_sentiment_score")
+
+                            header = f"### {role_cn}"
+                            if stance:
+                                header += f" [{stance}]"
+                            header += f" (confidence={conf:.2f})"
+                            if sentiment is not None:
+                                header += f" | 情绪={sentiment:+.2f}"
+                            lines.append(header)
+                            lines.append("")
+                            if arg:
+                                lines.append(arg)
+                                lines.append("")
+                            if challenges:
+                                lines.append("**质疑:**")
+                                for i, c in enumerate(challenges, 1):
+                                    lines.append(f"{i}. {c}")
+                                lines.append("")
+                            if ctx:
+                                await ctx.log("info", f"✅ {role_cn} 发言完毕 (confidence={conf:.2f})")
+
+                        elif event_type == "data_request_start":
+                            if ctx:
+                                await ctx.log("info",
+                                    f"📊 [{ROLE_NAMES.get(data.get('requested_by',''), data.get('requested_by',''))}] "
+                                    f"→ {data.get('engine')}.{data.get('action')}()")
+                            lines.append(f"> 📊 数据请求: {data.get('engine')}.{data.get('action')} "
+                                        f"(by {ROLE_NAMES.get(data.get('requested_by',''), data.get('requested_by',''))})")
+
+                        elif event_type == "data_request_done":
+                            status_icon = "✅" if data.get("status") == "done" else "❌"
+                            if ctx:
+                                await ctx.log("info",
+                                    f"{status_icon} {data.get('action')} ({data.get('duration_ms', 0)}ms)")
+                            lines.append(f"> {status_icon} {data.get('action')} "
+                                        f"({data.get('duration_ms', 0)}ms): {data.get('result_summary', '')}")
+
+                        elif event_type == "data_batch_complete":
+                            if ctx:
+                                await ctx.log("info",
+                                    f"📋 数据请求完毕: {data.get('success')}/{data.get('total')} 成功")
+                            lines.append("")
+
+                        elif event_type == "judge_token":
+                            tokens_text = data.get("tokens", "")
+                            if ctx:
+                                await ctx.log("info", f"[裁判] {tokens_text}")
+
+                        elif event_type == "debate_end":
+                            reason = data.get("reason", "")
+                            rounds = data.get("rounds_completed", 0)
+                            lines.append("---")
+                            lines.append(f"辩论结束 | 完成 {rounds} 轮 | 终止原因: {reason}")
+                            lines.append("")
+
+                        elif event_type == "judge_verdict":
+                            lines.append("---")
+                            lines.append("# 裁判裁决")
+                            lines.append("")
+                            lines.append(data.get("summary", ""))
+                            lines.append("")
+                            signal = data.get("signal")
+                            score = data.get("score")
+                            if signal:
+                                score_str = f" (score={score:.2f})" if score is not None else ""
+                                lines.append(f"**信号: {signal}{score_str}**")
+                                lines.append("")
+                            lines.append(f"**多头核心论点:** {data.get('bull_core_thesis', '')}")
+                            lines.append("")
+                            lines.append(f"**空头核心论点:** {data.get('bear_core_thesis', '')}")
+                            lines.append("")
+                            lines.append(f"**散户情绪参考:** {data.get('retail_sentiment_note', '')}")
+                            lines.append("")
+                            lines.append(f"**主力资金动向:** {data.get('smart_money_note', '')}")
+                            lines.append("")
+                            lines.append(f"**辩论质量:** {data.get('debate_quality', '')}")
+                            lines.append("")
+                            warnings = data.get("risk_warnings", [])
+                            if warnings:
+                                lines.append("**风险提示:**")
+                                for i, w in enumerate(warnings, 1):
+                                    lines.append(f"{i}. {w}")
+                                lines.append("")
+                            key_args = data.get("key_arguments", [])
+                            if key_args:
+                                lines.append("**关键论据:**")
+                                for i, a in enumerate(key_args, 1):
+                                    lines.append(f"{i}. {a}")
+
+                        elif event_type == "error":
+                            return json.dumps({"error": data.get("message", "辩论失败")}, ensure_ascii=False)
+
                         event_type = None
                         data_buf = ""
-                        continue
-
-                    if event_type == "debate_start":
-                        debate_id = data.get("debate_id")
-                        lines.append(f"# 专家辩论: {code}")
-                        lines.append(f"debate_id: `{debate_id}` | max_rounds: {data.get('max_rounds')}")
-                        lines.append("")
-
-                    elif event_type == "debate_round_start":
-                        rd = data.get("round", 0)
-                        current_round = rd
-                        is_final = data.get("is_final", False)
-                        lines.append("---")
-                        lines.append(f"## Round {rd}" + (" (最终轮)" if is_final else ""))
-                        lines.append("")
-
-                    elif event_type == "debate_entry":
-                        role = data.get("role", "")
-                        role_cn = ROLE_NAMES.get(role, role)
-                        stance = data.get("stance")
-                        conf = data.get("confidence", 0)
-                        arg = data.get("argument", "")
-                        challenges = data.get("challenges", [])
-                        sentiment = data.get("retail_sentiment_score")
-
-                        header = f"### {role_cn}"
-                        if stance:
-                            header += f" [{stance}]"
-                        header += f" (confidence={conf:.2f})"
-                        if sentiment is not None:
-                            header += f" | 情绪={sentiment:+.2f}"
-                        lines.append(header)
-                        lines.append("")
-                        if arg:
-                            lines.append(arg)
-                            lines.append("")
-                        if challenges:
-                            lines.append("**质疑:**")
-                            for i, c in enumerate(challenges, 1):
-                                lines.append(f"{i}. {c}")
-                            lines.append("")
-
-                    elif event_type == "data_fetching":
-                        lines.append(f"> 📊 数据请求: {data.get('action')} (by {ROLE_NAMES.get(data.get('requested_by', ''), data.get('requested_by', ''))})")
-
-                    elif event_type == "data_ready":
-                        lines.append(f"> ✅ {data.get('result_summary', '')}")
-                        lines.append("")
-
-                    elif event_type == "debate_end":
-                        reason = data.get("reason", "")
-                        rounds = data.get("rounds_completed", 0)
-                        lines.append("---")
-                        lines.append(f"辩论结束 | 完成 {rounds} 轮 | 终止原因: {reason}")
-                        lines.append("")
-
-                    elif event_type == "judge_verdict":
-                        verdict = data
-                        lines.append("---")
-                        lines.append("# 裁判裁决")
-                        lines.append("")
-                        lines.append(data.get("summary", ""))
-                        lines.append("")
-                        signal = data.get("signal")
-                        score = data.get("score")
-                        if signal:
-                            score_str = f" (score={score:.2f})" if score is not None else ""
-                            lines.append(f"**信号: {signal}{score_str}**")
-                            lines.append("")
-                        lines.append(f"**多头核心论点:** {data.get('bull_core_thesis', '')}")
-                        lines.append("")
-                        lines.append(f"**空头核心论点:** {data.get('bear_core_thesis', '')}")
-                        lines.append("")
-                        lines.append(f"**散户情绪参考:** {data.get('retail_sentiment_note', '')}")
-                        lines.append("")
-                        lines.append(f"**主力资金动向:** {data.get('smart_money_note', '')}")
-                        lines.append("")
-                        lines.append(f"**辩论质量:** {data.get('debate_quality', '')}")
-                        lines.append("")
-                        warnings = data.get("risk_warnings", [])
-                        if warnings:
-                            lines.append("**风险提示:**")
-                            for i, w in enumerate(warnings, 1):
-                                lines.append(f"{i}. {w}")
-                            lines.append("")
-                        key_args = data.get("key_arguments", [])
-                        if key_args:
-                            lines.append("**关键论据:**")
-                            for i, a in enumerate(key_args, 1):
-                                lines.append(f"{i}. {a}")
-
-                    elif event_type == "error":
-                        return json.dumps({"error": data.get("message", "辩论失败")}, ensure_ascii=False)
-
-                    event_type = None
-                    data_buf = ""
 
         return "\n".join(lines)
 
