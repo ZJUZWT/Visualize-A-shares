@@ -26,7 +26,7 @@ from loguru import logger
 from llm.providers import BaseLLMProvider, ChatMessage
 from agent.memory import AgentMemory
 from agent.data_fetcher import DataFetcher
-from agent.schemas import Blackboard, DebateEntry, DataRequest, JudgeVerdict, RoundEval, RoundEvalSide
+from agent.schemas import Blackboard, DebateEntry, DataRequest, JudgeVerdict, RoundEval, RoundEvalSide, IndustryCognition
 from agent.personas import (
     build_debate_system_prompt,
     JUDGE_SYSTEM_PROMPT,
@@ -274,6 +274,32 @@ def _build_context_for_role(blackboard: Blackboard) -> str:
     # 时间锚点
     if blackboard.as_of_date:
         parts.append(f"## 辩论时间基准\n当前讨论基于 {blackboard.as_of_date} 收盘后的市场环境。所有数据截止到该日期。\n")
+
+    # 行业底层逻辑
+    if blackboard.industry_cognition:
+        ic = blackboard.industry_cognition
+        parts.append(f"## 行业底层逻辑（{ic.industry}）")
+        parts.append(f"\n### 产业链")
+        parts.append(f"上游: {', '.join(ic.upstream)}")
+        parts.append(f"下游: {', '.join(ic.downstream)}")
+        parts.append(f"核心驱动变量: {', '.join(ic.core_drivers)}")
+        parts.append(f"\n### 成本结构\n{ic.cost_structure}")
+        parts.append(f"\n### 行业壁垒\n{ic.barriers}")
+        parts.append(f"\n### 供需格局\n{ic.supply_demand}")
+        if ic.common_traps:
+            parts.append(f"\n### ⚠ 常见认知陷阱（务必注意）")
+            for i, trap in enumerate(ic.common_traps, 1):
+                parts.append(f"{i}. {trap}")
+        parts.append(f"\n### 周期定位\n{ic.cycle_position}：{ic.cycle_reasoning}")
+        if ic.catalysts:
+            parts.append(f"\n### 潜在催化剂")
+            for c in ic.catalysts:
+                parts.append(f"- {c}")
+        if ic.risks:
+            parts.append(f"\n### 关键风险")
+            for r in ic.risks:
+                parts.append(f"- {r}")
+        parts.append("")
 
     # 公用初始数据（facts）
     if blackboard.facts:
@@ -563,6 +589,166 @@ ACTION_TITLE_MAP = {
     "get_cluster_for_stock": "聚类分析", "get_financials": "财务数据",
     "get_restrict_stock_unlock": "限售解禁", "get_signal_history": "信号历史",
 }
+
+
+# ── 行业认知 ──────────────────────────────────────────
+
+INDUSTRY_COGNITION_PROMPT = """你是产业链分析专家。请基于你对 {industry} 行业的深度理解，生成以下结构化分析。
+当前讨论标的：{target}（{stock_name}），时间基准：{as_of_date}。
+
+请以 JSON 格式返回：
+{{
+  "upstream": ["上游环节1", "上游环节2"],
+  "downstream": ["下游应用1", "下游应用2"],
+  "core_drivers": ["核心驱动变量1 — 简要说明", "..."],
+  "cost_structure": "成本结构描述（原材料占比、人工、能源等）",
+  "barriers": "行业壁垒（资源、技术、资质、规模等）",
+  "supply_demand": "当前供需格局分析（供给端变化、需求端趋势、库存状态）",
+  "common_traps": [
+    "认知陷阱1 — 表面逻辑 vs 实际逻辑",
+    "认知陷阱2 — ..."
+  ],
+  "cycle_position": "景气上行 | 景气下行 | 拐点向上 | 拐点向下 | 高位震荡 | 底部盘整",
+  "cycle_reasoning": "周期判断的具体依据",
+  "catalysts": ["潜在催化剂1", "..."],
+  "risks": ["关键风险1", "..."]
+}}
+
+要求：
+- common_traps 是最关键的部分，必须列出该行业中投资者最容易犯的认知错误
+- 每个陷阱要说明「表面逻辑」和「实际逻辑」的差异
+- cycle_position 必须给出明确判断，不能模棱两可
+- 所有分析基于 {as_of_date} 时点的行业状态"""
+
+
+def _load_cached_cognition(industry: str, as_of_date: str) -> IndustryCognition | None:
+    """从 DuckDB 读取缓存的行业认知"""
+    try:
+        from data_engine import get_data_engine
+        import json as _json
+        con = get_data_engine().store._conn
+        row = con.execute(
+            "SELECT cognition_json FROM shared.industry_cognition WHERE industry = ? AND as_of_date = ?",
+            [industry, as_of_date],
+        ).fetchone()
+        if row:
+            data = _json.loads(row[0])
+            return IndustryCognition(**data)
+    except Exception as e:
+        logger.debug(f"行业认知缓存读取失败: {e}")
+    return None
+
+
+def _save_cognition_cache(cognition: IndustryCognition):
+    """写入 DuckDB + ChromaDB 缓存"""
+    try:
+        from data_engine import get_data_engine
+        con = get_data_engine().store._conn
+        con.execute(
+            "INSERT OR REPLACE INTO shared.industry_cognition (industry, as_of_date, target, cognition_json) VALUES (?, ?, ?, ?)",
+            [cognition.industry, cognition.as_of_date, cognition.target, cognition.model_dump_json()],
+        )
+    except Exception as e:
+        logger.warning(f"行业认知 DuckDB 缓存写入失败: {e}")
+
+    try:
+        from agent.memory import AgentMemory
+        memory = AgentMemory()
+        text = (
+            f"行业: {cognition.industry}\n"
+            f"产业链: 上游={cognition.upstream}, 下游={cognition.downstream}\n"
+            f"核心驱动: {cognition.core_drivers}\n"
+            f"供需: {cognition.supply_demand}\n"
+            f"认知陷阱: {cognition.common_traps}\n"
+            f"周期: {cognition.cycle_position} — {cognition.cycle_reasoning}"
+        )
+        memory.store(
+            agent_role="industry_cognition",
+            target=cognition.industry,
+            content=text,
+            metadata={"industry": cognition.industry, "as_of_date": cognition.as_of_date, "target": cognition.target},
+        )
+    except Exception as e:
+        logger.debug(f"行业认知 ChromaDB 缓存写入失败: {e}")
+
+
+async def generate_industry_cognition(
+    blackboard: Blackboard,
+    llm: BaseLLMProvider,
+) -> AsyncGenerator[dict, None]:
+    """生成/检索行业产业链认知，推送 SSE 事件"""
+    stock_info = blackboard.facts.get("get_stock_info", {})
+    industry = stock_info.get("industry", "")
+    stock_name = stock_info.get("name", blackboard.target)
+
+    if not industry:
+        logger.info("未获取到行业信息，跳过行业认知生成")
+        return
+
+    # 检查缓存
+    cached = _load_cached_cognition(industry, blackboard.as_of_date)
+    if cached:
+        logger.info(f"行业认知缓存命中: {industry} @ {blackboard.as_of_date}")
+        blackboard.industry_cognition = cached
+        yield sse("industry_cognition_start", {"industry": industry, "cached": True})
+        yield sse("industry_cognition_done", {
+            "industry": industry,
+            "summary": f"产业链: {' → '.join(cached.upstream[:2])} → [{stock_name}] → {' → '.join(cached.downstream[:2])}",
+            "cycle_position": cached.cycle_position,
+            "traps_count": len(cached.common_traps),
+            "cached": True,
+        })
+        return
+
+    # LLM 生成
+    yield sse("industry_cognition_start", {"industry": industry, "cached": False})
+
+    prompt = INDUSTRY_COGNITION_PROMPT.format(
+        industry=industry,
+        target=blackboard.code or blackboard.target,
+        stock_name=stock_name,
+        as_of_date=blackboard.as_of_date,
+    )
+
+    try:
+        raw = await asyncio.wait_for(
+            llm.chat([ChatMessage(role="user", content=prompt)]),
+            timeout=30.0,
+        )
+        parsed = _lenient_json_loads(raw)
+        if not isinstance(parsed, dict):
+            logger.warning(f"行业认知 LLM 返回非 dict: {type(parsed)}")
+            return
+
+        cognition = IndustryCognition(
+            industry=industry,
+            target=blackboard.code or blackboard.target,
+            generated_at=datetime.now(tz=ZoneInfo("Asia/Shanghai")).isoformat(),
+            as_of_date=blackboard.as_of_date,
+            **{k: v for k, v in parsed.items() if k in IndustryCognition.model_fields},
+        )
+        blackboard.industry_cognition = cognition
+        _save_cognition_cache(cognition)
+
+        yield sse("industry_cognition_done", {
+            "industry": industry,
+            "summary": f"产业链: {' → '.join(cognition.upstream[:2])} → [{stock_name}] → {' → '.join(cognition.downstream[:2])}",
+            "cycle_position": cognition.cycle_position,
+            "traps_count": len(cognition.common_traps),
+            "cached": False,
+        })
+        logger.info(f"行业认知生成完成: {industry}, 周期={cognition.cycle_position}, 陷阱={len(cognition.common_traps)}条")
+
+    except Exception as e:
+        logger.warning(f"行业认知生成失败: {e}")
+        yield sse("industry_cognition_done", {
+            "industry": industry,
+            "summary": f"行业认知生成失败: {e}",
+            "cycle_position": "",
+            "traps_count": 0,
+            "cached": False,
+            "error": True,
+        })
 
 
 async def request_data_for_round(
@@ -1092,6 +1278,10 @@ async def run_debate(
 
     # 公用初始数据
     async for event in fetch_initial_data(blackboard, data_fetcher):
+        yield event
+
+    # 行业产业链认知
+    async for event in generate_industry_cognition(blackboard, llm):
         yield event
 
     while blackboard.round < blackboard.max_rounds:
