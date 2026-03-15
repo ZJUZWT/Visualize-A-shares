@@ -56,7 +56,7 @@ export default function TranscriptFeed({ transcript, verdict }: TranscriptFeedPr
   }
 
   return (
-    <div className="overflow-y-auto h-full px-6 py-5 space-y-4">
+    <div className="overflow-y-auto h-full px-8 py-6 space-y-5">
       {transcript.map((item) => {
         if (item.type === "blackboard_data") {
           return <BlackboardCard key={item.id} item={item} />;
@@ -176,8 +176,8 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
 
   if (isJudge) {
     return (
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] px-5 py-4">
-        <span className="text-xs font-semibold mb-2 block" style={{ color }}>裁判</span>
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] px-6 py-5">
+        <span className="text-xs font-semibold mb-3 block" style={{ color }}>裁判</span>
         <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]">
           <Loader2 size={14} className="animate-spin" />
           <span>裁判正在综合各方观点，生成裁决...</span>
@@ -189,9 +189,9 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
   if (isObserver) {
     return (
       <div className="flex justify-center">
-        <div className="max-w-[85%] rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] px-4 py-3">
-          <span className="text-xs font-semibold mb-1 block" style={{ color }}>{label}</span>
-          <div className="text-sm text-[var(--text-primary)] leading-relaxed">
+        <div className="max-w-[85%] rounded-2xl border border-[var(--border)] bg-[var(--bg-primary)] px-6 py-4">
+          <span className="text-xs font-semibold mb-2 block" style={{ color }}>{label}</span>
+          <div className="text-[13px] text-[var(--text-primary)] leading-7">
             <MarkdownContent content={item.tokens} />
             <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
           </div>
@@ -205,12 +205,12 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
   const borderSide = isBull ? "border-l-2" : "border-r-2";
   return (
     <div className={`flex ${isBull ? "justify-start" : "justify-end"}`}>
-      <div className={`max-w-[78%] rounded-xl p-4 ${bgColor} ${borderSide}`} style={{ borderColor: color }}>
-        <div className="flex items-center gap-2 mb-2">
+      <div className={`max-w-[78%] rounded-2xl px-6 py-4 ${bgColor} ${borderSide}`} style={{ borderColor: color }}>
+        <div className="flex items-center gap-2 mb-3">
           {item.round !== null && <span className="text-xs text-[var(--text-tertiary)]">Round {item.round}</span>}
-          <span className="text-sm font-semibold" style={{ color }}>{label}</span>
+          <span className="text-[13px] font-semibold" style={{ color }}>{label}</span>
         </div>
-        <div className="text-sm text-[var(--text-primary)] leading-7">
+        <div className="text-[13px] text-[var(--text-primary)] leading-7">
           <MarkdownContent content={item.tokens} />
           <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
         </div>
@@ -219,21 +219,20 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
   );
 }
 
-// ── Markdown 渲染 ─────────────────────────────────────
 function MarkdownContent({ content }: { content: string }) {
   return (
     <ReactMarkdown
       components={{
-        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-        ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
-        ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
-        li: ({ children }) => <li>{children}</li>,
+        p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+        ul: ({ children }) => <ul className="list-disc pl-5 mb-3 space-y-1.5">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5">{children}</ol>,
+        li: ({ children }) => <li className="leading-7">{children}</li>,
         strong: ({ children }) => <strong className="font-semibold text-[var(--text-primary)]">{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
-        code: ({ children }) => <code className="px-1 py-0.5 rounded text-xs bg-[var(--bg-primary)] font-mono">{children}</code>,
-        h1: ({ children }) => <h1 className="text-base font-bold mb-1">{children}</h1>,
-        h2: ({ children }) => <h2 className="text-sm font-bold mb-1">{children}</h2>,
-        h3: ({ children }) => <h3 className="text-sm font-semibold mb-1">{children}</h3>,
+        code: ({ children }) => <code className="px-1.5 py-0.5 rounded text-xs bg-[var(--bg-primary)] font-mono">{children}</code>,
+        h1: ({ children }) => <h1 className="text-base font-bold mb-2">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-sm font-bold mb-2">{children}</h2>,
+        h3: ({ children }) => <h3 className="text-sm font-semibold mb-1.5">{children}</h3>,
       }}
     >
       {content}
@@ -250,49 +249,49 @@ function VerdictCard({ verdict }: { verdict: JudgeVerdict }) {
   };
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden mt-4">
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden mt-6">
       <div className="h-1.5" style={{ backgroundColor: color }} />
-      <div className="px-5 py-4 space-y-4">
+      <div className="px-6 py-5 space-y-5">
         <div className="flex items-center gap-3">
           <span className="text-xl font-bold" style={{ color }}>{label}</span>
           {verdict.score !== null && (
             <span className="text-sm text-[var(--text-tertiary)]">评分 {verdict.score}</span>
           )}
-          <span className="text-xs text-[var(--text-tertiary)] ml-auto px-2 py-0.5 rounded bg-[var(--bg-primary)]">
+          <span className="text-xs text-[var(--text-tertiary)] ml-auto px-2.5 py-1 rounded bg-[var(--bg-primary)]">
             {QUALITY_LABEL[verdict.debate_quality] ?? verdict.debate_quality}
           </span>
         </div>
 
-        <div className="text-sm text-[var(--text-primary)] leading-relaxed">
+        <div className="text-[13px] text-[var(--text-primary)] leading-7">
           <MarkdownContent content={verdict.summary} />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="p-3 rounded-lg text-sm bg-red-500/5 border-l-2 border-red-500">
-            <div className="font-medium text-[var(--text-secondary)] mb-1.5">多头核心论点</div>
-            <div className="text-[var(--text-primary)] leading-relaxed">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="p-4 rounded-xl text-[13px] bg-red-500/5 border-l-2 border-red-500">
+            <div className="font-medium text-[var(--text-secondary)] mb-2">多头核心论点</div>
+            <div className="text-[var(--text-primary)] leading-7">
               <MarkdownContent content={verdict.bull_core_thesis} />
             </div>
           </div>
-          <div className="p-3 rounded-lg text-sm bg-emerald-500/5 border-l-2 border-emerald-500">
-            <div className="font-medium text-[var(--text-secondary)] mb-1.5">空头核心论点</div>
-            <div className="text-[var(--text-primary)] leading-relaxed">
+          <div className="p-4 rounded-xl text-[13px] bg-emerald-500/5 border-l-2 border-emerald-500">
+            <div className="font-medium text-[var(--text-secondary)] mb-2">空头核心论点</div>
+            <div className="text-[var(--text-primary)] leading-7">
               <MarkdownContent content={verdict.bear_core_thesis} />
             </div>
           </div>
         </div>
 
         {verdict.risk_warnings.length > 0 && (
-          <ul className="space-y-1.5">
+          <ul className="space-y-2">
             {verdict.risk_warnings.map((w, i) => (
-              <li key={i} className="text-sm text-[var(--text-secondary)] flex gap-2">
+              <li key={i} className="text-[13px] text-[var(--text-secondary)] flex gap-2 leading-relaxed">
                 <span className="text-yellow-500 shrink-0">⚠</span>{w}
               </li>
             ))}
           </ul>
         )}
 
-        <div className="text-xs text-[var(--text-tertiary)] border-t border-[var(--border)] pt-3 flex gap-4">
+        <div className="text-xs text-[var(--text-tertiary)] border-t border-[var(--border)] pt-4 flex gap-6">
           <span>散户情绪：{verdict.retail_sentiment_note}</span>
           <span>主力资金：{verdict.smart_money_note}</span>
         </div>

@@ -33,9 +33,9 @@ function BlackboardItemRow({ item }: { item: BlackboardItem }) {
       <button
         onClick={() => !isPending && setOpen(v => !v)}
         disabled={isPending}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-[var(--bg-primary)] transition-colors"
+        className="w-full flex items-center gap-2.5 px-4 py-3 text-left hover:bg-[var(--bg-primary)] transition-colors"
       >
-        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${SOURCE_COLOR[item.source] ?? SOURCE_COLOR.public}`}>
+        <span className={`text-[10px] font-medium px-2 py-0.5 rounded shrink-0 ${SOURCE_COLOR[item.source] ?? SOURCE_COLOR.public}`}>
           {SOURCE_LABEL[item.source] ?? item.source}
         </span>
         <span className="text-[var(--text-tertiary)] shrink-0">
@@ -53,7 +53,7 @@ function BlackboardItemRow({ item }: { item: BlackboardItem }) {
         }
       </button>
       {open && item.result_summary && (
-        <div className="px-3 pb-2 text-[11px] text-[var(--text-secondary)] leading-relaxed bg-[var(--bg-primary)] border-t border-[var(--border)]">
+        <div className="px-4 pb-3 text-[11px] text-[var(--text-secondary)] leading-relaxed bg-[var(--bg-primary)] border-t border-[var(--border)] whitespace-pre-wrap break-all">
           {item.result_summary}
         </div>
       )}
@@ -64,7 +64,7 @@ function BlackboardItemRow({ item }: { item: BlackboardItem }) {
 export default function BlackboardPanel({ items }: { items: BlackboardItem[] }) {
   return (
     <div className="w-60 shrink-0 flex flex-col rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden">
-      <div className="px-3 py-2 border-b border-[var(--border)] shrink-0">
+      <div className="px-4 py-3 border-b border-[var(--border)] shrink-0">
         <span className="text-xs font-semibold text-[var(--text-secondary)]">黑板</span>
         <span className="text-[10px] text-[var(--text-tertiary)] ml-2">{items.length} 条数据</span>
       </div>
