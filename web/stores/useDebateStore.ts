@@ -51,6 +51,11 @@ const INITIAL_ROLE_STATE: RoleState = { stance: null, confidence: 0.5, conceded:
 const OBSERVERS = ["retail_investor", "smart_money"];
 const DEBATERS = ["bull_expert", "bear_expert"];
 
+function _summarize(val: unknown): string {
+  if (typeof val === "string") return val.slice(0, 300);
+  try { return JSON.stringify(val).slice(0, 300); } catch { return String(val).slice(0, 300); }
+}
+
 export const useDebateStore = create<DebateStore>((set, get) => ({
   status: "idle",
   transcript: [],
@@ -205,7 +210,7 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
           action,
           title: ACTION_TITLE[action] ?? action,
           status: hasFact ? "done" : "failed",
-          result_summary: hasFact ? String(blackboard.facts[action]).slice(0, 300) : undefined,
+          result_summary: hasFact ? _summarize(blackboard.facts[action]) : undefined,
           round: 0,
         });
       }
@@ -223,7 +228,7 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
           action: dr.action,
           title: ACTION_TITLE[dr.action] ?? dr.action,
           status: dr.status as BlackboardItem["status"],
-          result_summary: dr.result ? String(dr.result).slice(0, 300) : undefined,
+          result_summary: dr.result ? _summarize(dr.result) : undefined,
           round: dr.round,
         });
       }
