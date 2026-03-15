@@ -73,7 +73,11 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
         return;
       }
 
-      const reader = res.body!.getReader();
+      if (!res.body) {
+        set({ error: "响应体为空", status: "idle" });
+        return;
+      }
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
 
