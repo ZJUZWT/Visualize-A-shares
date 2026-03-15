@@ -108,7 +108,7 @@ async def startup():
 
     # 初始化投资专家 Agent
     try:
-        expert_init_db()
+        await expert_init_db()
     except Exception as e:
         logger.warning(f"⚠️ 投资专家 Agent 初始化失败: {e}")
 

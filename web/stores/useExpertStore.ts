@@ -1,251 +1,161 @@
-/**
- * 投资专家 Agent 状态管理 (Zustand)
- *
- * 功能：
- * - 管理专家 Agent 的信念、立场、知识图谱
- * - SSE 流式对话
- * - 信念更新和记忆管理
- */
-
 import { create } from "zustand";
+import type {
+  ExpertMessage,
+  ExpertStatus,
+  ThinkingItem,
+  GraphNode,
+  ToolCallData,
+  ToolResultData,
+  BeliefUpdatedData,
+} from "@/types/expert";
 
-const SSE_API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+let _abort: AbortController | null = null;
 
-// ─── Types ────────────────────────────────────────
-
-export interface BeliefNode {
-  id: string;
-  type: "belief";
-  content: string;
-  confidence: number;
-  created_at: string;
-}
-
-export interface StanceNode {
-  id: string;
-  type: "stance";
-  target: string;
-  signal: "bullish" | "bearish" | "neutral";
-  score: number;
-  confidence: number;
-  created_at: string;
-}
-
-export interface ExpertMessage {
-  id: string;
-  role: "user" | "expert";
-  content: string;
-  timestamp: number;
-  isStreaming?: boolean;
-}
-
-export interface KnowledgeGraphStats {
-  num_nodes: number;
-  num_edges: number;
-  node_types: Record<string, number>;
-  edge_relations: Record<string, number>;
-}
-
-interface ExpertState {
-  // ─── 对话状态 ────────────────────
+interface ExpertStore {
   messages: ExpertMessage[];
-  isStreaming: boolean;
+  status: ExpertStatus;
   error: string | null;
-
-  // ─── 面板状态 ────────────────────
-  isPanelOpen: boolean;
-
-  // ─── 专家状态 ────────────────────
-  beliefs: BeliefNode[];
-  stances: StanceNode[];
-  kgStats: KnowledgeGraphStats | null;
-  sessionId: string | null;
-
-  // ─── Actions ─────────────────────
-  togglePanel: () => void;
-  sendMessage: (content: string) => Promise<void>;
-  clearMessages: () => void;
-  fetchBeliefs: () => Promise<void>;
-  fetchStances: () => Promise<void>;
-  fetchKGStats: () => Promise<void>;
-  setSessionId: (id: string) => void;
+  sendMessage: (text: string) => Promise<void>;
+  reset: () => void;
 }
 
-let messageCounter = 0;
-function nextId() {
-  return `expert_msg_${Date.now()}_${++messageCounter}`;
+function newId() {
+  return Math.random().toString(36).slice(2);
 }
 
-function generateSessionId(): string {
-  return `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
-export const useExpertStore = create<ExpertState>((set, get) => ({
+export const useExpertStore = create<ExpertStore>((set, get) => ({
   messages: [],
-  isStreaming: false,
+  status: "idle",
   error: null,
 
-  isPanelOpen: false,
-
-  beliefs: [],
-  stances: [],
-  kgStats: null,
-  sessionId: null,
-
-  togglePanel: () => set((s) => ({ isPanelOpen: !s.isPanelOpen })),
-
-  setSessionId: (id: string) => set({ sessionId: id }),
-
-  fetchBeliefs: async () => {
-    try {
-      const res = await fetch(`${SSE_API_BASE}/api/v1/expert/beliefs`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      set({ beliefs: data.beliefs || [] });
-    } catch (e) {
-      console.error("获取信念失败:", e);
-      set({ error: "获取信念失败" });
-    }
+  reset: () => {
+    _abort?.abort();
+    _abort = null;
+    set({ messages: [], status: "idle", error: null });
   },
 
-  fetchStances: async () => {
-    try {
-      const res = await fetch(`${SSE_API_BASE}/api/v1/expert/stances`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      set({ stances: data.stances || [] });
-    } catch (e) {
-      console.error("获取立场失败:", e);
-      set({ error: "获取立场失败" });
-    }
-  },
-
-  fetchKGStats: async () => {
-    try {
-      const res = await fetch(
-        `${SSE_API_BASE}/api/v1/expert/knowledge-graph/stats`
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      set({ kgStats: data });
-    } catch (e) {
-      console.error("获取知识图谱统计失败:", e);
-    }
-  },
-
-  sendMessage: async (content: string) => {
-    const { messages, sessionId } = get();
-
-    // 生成 session ID（如果没有）
-    const finalSessionId = sessionId || generateSessionId();
-    if (!sessionId) {
-      set({ sessionId: finalSessionId });
-    }
-
-    // 添加用户消息
+  sendMessage: async (text: string) => {
     const userMsg: ExpertMessage = {
-      id: nextId(),
+      id: newId(),
       role: "user",
-      content,
-      timestamp: Date.now(),
+      content: text,
+      thinking: [],
+      isStreaming: false,
     };
-
-    // 添加空的 expert 消息（流式填充）
     const expertMsg: ExpertMessage = {
-      id: nextId(),
+      id: newId(),
       role: "expert",
       content: "",
-      timestamp: Date.now(),
+      thinking: [],
       isStreaming: true,
     };
 
-    set({
-      messages: [...messages, userMsg, expertMsg],
-      isStreaming: true,
+    set((s) => ({
+      messages: [...s.messages, userMsg, expertMsg],
+      status: "thinking",
       error: null,
-    });
+    }));
+
+    _abort = new AbortController();
 
     try {
-      const res = await fetch(`${SSE_API_BASE}/api/v1/expert/chat`, {
+      const res = await fetch(`${API_BASE}/api/v1/expert/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: content,
-          session_id: finalSessionId,
-        }),
+        body: JSON.stringify({ message: text }),
+        signal: _abort.signal,
       });
 
-      if (!res.ok) {
-        const errBody = await res.text();
-        let detail = `HTTP ${res.status}`;
-        try {
-          detail = JSON.parse(errBody).detail || detail;
-        } catch {}
-        throw new Error(detail);
-      }
+      if (!res.body) throw new Error("No response body");
 
-      // SSE 流式读取
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("浏览器不支持流式读取");
-
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
-      let fullContent = "";
+      let buf = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
+        let eventType = "";
         for (const line of lines) {
-          if (!line.trim()) continue;
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            fullContent += data;
+          if (line.startsWith("event:")) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            const rawData = line.slice(5).trim();
+            if (!rawData) continue;
+            let data: Record<string, unknown>;
+            try {
+              data = JSON.parse(rawData);
+            } catch {
+              continue;
+            }
 
-            // 更新 expert 消息内容
-            set((s) => ({
-              messages: s.messages.map((m) =>
-                m.id === expertMsg.id
-                  ? { ...m, content: fullContent }
-                  : m
-              ),
-            }));
+            set((s) => {
+              const msgs = [...s.messages];
+              const idx = msgs.findIndex((m) => m.id === expertMsg.id);
+              if (idx === -1) return s;
+              const msg: ExpertMessage = {
+                ...msgs[idx],
+                thinking: [...msgs[idx].thinking],
+              };
+
+              if (eventType === "reply_token") {
+                msg.content += (data.token as string) ?? "";
+              } else if (eventType === "reply_complete") {
+                msg.content = (data.full_text as string) ?? msg.content;
+                msg.isStreaming = false;
+              } else if (eventType === "graph_recall") {
+                msg.thinking = [
+                  ...msg.thinking,
+                  { type: "graph_recall" as const, nodes: data.nodes as GraphNode[] },
+                ];
+              } else if (eventType === "tool_call") {
+                msg.thinking = [
+                  ...msg.thinking,
+                  { type: "tool_call" as const, data: data as unknown as ToolCallData },
+                ];
+              } else if (eventType === "tool_result") {
+                msg.thinking = [
+                  ...msg.thinking,
+                  { type: "tool_result" as const, data: data as unknown as ToolResultData },
+                ];
+              } else if (eventType === "belief_updated") {
+                msg.thinking = [
+                  ...msg.thinking,
+                  { type: "belief_updated" as const, data: data as unknown as BeliefUpdatedData },
+                ];
+              } else if (eventType === "error") {
+                msg.content = `错误: ${data.message as string}`;
+                msg.isStreaming = false;
+              }
+
+              msgs[idx] = msg;
+              return { messages: msgs };
+            });
           }
         }
       }
-
-      // 流结束
-      set((s) => ({
-        messages: s.messages.map((m) =>
-          m.id === expertMsg.id
-            ? { ...m, content: fullContent || "（空回复）", isStreaming: false }
-            : m
-        ),
-        isStreaming: false,
-      }));
-
-      // 更新信念和立场
-      await get().fetchBeliefs();
-      await get().fetchStances();
-      await get().fetchKGStats();
-    } catch (e) {
-      const errorMsg = e instanceof Error ? e.message : "发送消息失败";
-      set((s) => ({
-        error: errorMsg,
-        isStreaming: false,
-        messages: s.messages.map((m) =>
-          m.id === expertMsg.id
-            ? { ...m, content: `❌ ${errorMsg}`, isStreaming: false }
-            : m
-        ),
-      }));
+    } catch (e: unknown) {
+      if ((e as Error).name === "AbortError") return;
+      const errMsg = (e as Error).message;
+      set((s) => {
+        const msgs = [...s.messages];
+        const idx = msgs.findIndex((m) => m.id === expertMsg.id);
+        if (idx !== -1) {
+          msgs[idx] = {
+            ...msgs[idx],
+            content: `请求失败: ${errMsg}`,
+            isStreaming: false,
+          };
+        }
+        return { messages: msgs, status: "error", error: errMsg };
+      });
+    } finally {
+      set({ status: "idle" });
     }
   },
-
-  clearMessages: () => set({ messages: [], error: null }),
 }));

@@ -1,150 +1,140 @@
 """投资专家 Agent 人格和提示词"""
 
-from expert.schemas import BeliefNode, StanceNode
-
-# 初始信念集合
+# 初始信念集合（spec 4.2）
 INITIAL_BELIEFS = [
-    BeliefNode(
-        content="A股市场长期向好，但短期波动较大",
-        confidence=0.75,
-    ),
-    BeliefNode(
-        content="新能源、芯片等科技行业是未来发展方向",
-        confidence=0.8,
-    ),
-    BeliefNode(
-        content="消费升级是长期趋势，但需关注经济周期",
-        confidence=0.7,
-    ),
-    BeliefNode(
-        content="政策面对市场有重要影响，需密切关注",
-        confidence=0.85,
-    ),
+    {"content": "基本面是长期定价的锚，但短期价格由情绪和资金驱动", "confidence": 0.7},
+    {"content": "分散投资优于集中押注，除非有极高确定性", "confidence": 0.65},
+    {"content": "政策是A股不可忽视的系统性变量", "confidence": 0.75},
+    {"content": "散户情绪是反向指标，极度乐观时需警惕", "confidence": 0.6},
 ]
 
 # 初始立场
-INITIAL_STANCES = [
-    StanceNode(
-        target="新能源",
-        signal="bullish",
-        score=0.7,
-        confidence=0.8,
-    ),
-    StanceNode(
-        target="消费",
-        signal="neutral",
-        score=0.0,
-        confidence=0.6,
-    ),
-]
+INITIAL_STANCES: list[dict] = []
 
-THINK_SYSTEM_PROMPT = """你是一位资深的A股投资分析师，具有深厚的金融知识和市场洞察力。
+# think 步骤系统提示（spec 4.3）
+THINK_SYSTEM_PROMPT = """你是一位理性、多元视角的A股投资专家。你有自己的投资哲学和信念体系。
+当用户提问时，你需要判断是否需要查询实时数据才能给出有价值的回答。
 
-你的职责是：
-1. 分析用户提出的投资问题
-2. 基于已有的知识图谱和信念系统进行推理
-3. 决定是否需要调用数据工具获取实时信息
-4. 输出结构化的思考过程
+你的当前信念（知识图谱召回）：
+{graph_context}
 
-在分析时，请考虑：
-- 宏观经济形势和政策环境
-- 行业发展趋势和竞争格局
-- 公司基本面和技术面
-- 市场情绪和资金面
+相关历史对话：
+{memory_context}
 
-输出格式必须是有效的 JSON，包含以下字段：
-- needs_data: 布尔值，是否需要调用数据工具
-- tool_calls: 工具调用列表（如果 needs_data=true）
-- reasoning: 你的分析推理过程（中文）
-
-工具调用格式：
+请以 JSON 格式输出你的决策，不要输出任何其他内容：
 {{
-  "engine": "data" | "cluster" | "llm",
-  "action": "search_stock" | "query_stock" | "get_news" | ...,
-  "params": {{...}}
+  "needs_data": true,
+  "tool_calls": [
+    {{"engine": "data", "action": "get_daily_history", "params": {{"code": "300750", "days": 30}}}},
+    {{"engine": "quant", "action": "get_factor_scores", "params": {{"code": "300750"}}}}
+  ],
+  "reasoning": "用户问宁德时代近期走势，需要日线数据和因子评分才能回答"
 }}
-"""
 
-BELIEF_UPDATE_PROMPT = """基于以下信息，更新你的投资信念：
+可用引擎和动作：
+- engine="data", action="get_daily_history", params={{"code": "...", "days": 30}}
+- engine="data", action="get_company_profile", params={{"code": "..."}}
+- engine="quant", action="get_factor_scores", params={{"code": "..."}}
+- engine="quant", action="get_technical_indicators", params={{"code": "..."}}
+- engine="cluster", action="get_terrain_data", params={{}}
+- engine="debate", action="start", params={{"code": "...", "max_rounds": 2}}
 
-当前信念：
-{current_beliefs}
+needs_data=false 时 tool_calls 为空列表，直接回复用户。"""
 
-新信息：
-{new_information}
+# belief_update 步骤提示
+BELIEF_UPDATE_PROMPT = """基于以下对话，判断是否需要更新投资信念：
 
-请分析新信息是否改变了你的信念，并输出结构化的更新结果。
+当前信念列表：
+{beliefs_context}
 
-输出格式必须是有效的 JSON，包含以下字段：
-- updated: 布尔值，是否有信念更新
-- changes: 信念变化列表，每项包含：
-  - old_belief_id: 原信念 ID
-  - new_content: 新的信念内容
-  - new_confidence: 新的置信度（0-1）
-  - reason: 更新原因
+本轮对话：
+用户: {user_message}
+专家: {expert_reply}
 
-如果没有信念更新，changes 应为空列表。
-"""
+请分析对话是否包含足够充分的论据使信念发生改变，输出 JSON，不要输出任何其他内容：
+{{
+  "updated": false,
+  "changes": []
+}}
 
-DEBATE_SYSTEM_PROMPT = """你是一位{role}，参与关于股票 {code}（{name}）的投资辩论。
+若有更新，changes 每项格式：
+{{
+  "old_belief_id": "原信念的完整 UUID",
+  "new_content": "新的信念内容",
+  "new_confidence": 0.8,
+  "reason": "被什么论据说服"
+}}
 
-你的观点：
-{stance}
-
-你的信念基础：
-{beliefs}
-
-请基于你的立场和信念，提出有力的论证。考虑对方可能的观点，并准备反驳。
-
-保持专业、理性的态度，使用数据和逻辑支撑你的观点。"""
+注意：只有用户提供了充分、具体的论据时才更新信念，不要轻易改变。"""
 
 
-def format_beliefs_for_prompt(beliefs: list[BeliefNode]) -> str:
-    """格式化信念列表用于提示词"""
+def format_graph_context(nodes: list[dict]) -> str:
+    """格式化图谱节点列表用于提示词"""
+    if not nodes:
+        return "（无相关图谱节点）"
+    lines = []
+    for n in nodes:
+        t = n.get("type", "")
+        if t == "belief":
+            lines.append(f"- [信念 {n['id'][:8]}] {n.get('content')} (置信度: {n.get('confidence')})")
+        elif t == "stock":
+            lines.append(f"- [股票] {n.get('code')} {n.get('name')}")
+        elif t == "stance":
+            lines.append(f"- [看法] {n.get('target')} {n.get('signal')} 评分:{n.get('score')}")
+        else:
+            lines.append(f"- [{t}] {n.get('name', n.get('id', ''))}")
+    return "\n".join(lines)
+
+
+def format_memory_context(memories: list[dict]) -> str:
+    """格式化历史记忆用于提示词"""
+    if not memories:
+        return "（无相关历史对话）"
+    return "\n".join(f"- {m['content'][:200]}" for m in memories[:3])
+
+
+def format_beliefs_context(beliefs: list[dict]) -> str:
+    """格式化信念列表用于 belief_update 提示词"""
+    if not beliefs:
+        return "（暂无信念）"
+    return "\n".join(
+        f"- ID:{b['id']} 内容:{b.get('content')} 置信度:{b.get('confidence')}"
+        for b in beliefs
+    )
+
+
+def format_beliefs_for_prompt(beliefs) -> str:
+    """格式化信念列表（兼容 BeliefNode 对象或 dict）"""
     if not beliefs:
         return "暂无信念"
     lines = []
     for i, belief in enumerate(beliefs, 1):
-        lines.append(f"{i}. {belief.content}（置信度：{belief.confidence:.1%}）")
+        if isinstance(belief, dict):
+            content = belief.get("content", "")
+            confidence = belief.get("confidence", 0)
+        else:
+            content = belief.content
+            confidence = belief.confidence
+        lines.append(f"{i}. {content}（置信度：{confidence:.1%}）")
     return "\n".join(lines)
 
 
-def format_stances_for_prompt(stances: list[StanceNode]) -> str:
-    """格式化立场列表用于提示词"""
+def format_stances_for_prompt(stances) -> str:
+    """格式化立场列表（兼容 StanceNode 对象或 dict）"""
     if not stances:
         return "暂无立场"
     lines = []
     for stance in stances:
-        signal_text = {
-            "bullish": "看多",
-            "bearish": "看空",
-            "neutral": "中立",
-        }.get(stance.signal, stance.signal)
-        lines.append(
-            f"- {stance.target}: {signal_text}（评分：{stance.score:.1f}，置信度：{stance.confidence:.1%}）"
-        )
+        if isinstance(stance, dict):
+            target = stance.get("target", "")
+            signal = stance.get("signal", "")
+            score = stance.get("score", 0)
+            confidence = stance.get("confidence", 0)
+        else:
+            target = stance.target
+            signal = stance.signal
+            score = stance.score
+            confidence = stance.confidence
+        signal_text = {"bullish": "看多", "bearish": "看空", "neutral": "中立"}.get(signal, signal)
+        lines.append(f"- {target}: {signal_text}（评分：{score:.1f}，置信度：{confidence:.1%}）")
     return "\n".join(lines)
-
-
-def format_debate_prompt(
-    role: str,
-    code: str,
-    name: str,
-    stance: str,
-    beliefs: str,
-) -> str:
-    """格式化辩论提示词"""
-    role_text = {
-        "bull_expert": "看多专家",
-        "bear_expert": "看空专家",
-        "retail_investor": "散户投资者",
-        "smart_money": "主力资金",
-    }.get(role, role)
-
-    return DEBATE_SYSTEM_PROMPT.format(
-        role=role_text,
-        code=code,
-        name=name,
-        stance=stance,
-        beliefs=beliefs,
-    )

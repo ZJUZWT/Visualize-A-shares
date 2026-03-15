@@ -1,5 +1,7 @@
 """投资专家 Agent 工具层 — 引擎调用适配"""
 
+import asyncio
+import json
 from typing import Any
 
 import httpx
@@ -11,34 +13,86 @@ from expert.schemas import ToolCall
 class ExpertTools:
     """专家 Agent 工具层 — 适配各引擎的调用"""
 
-    def __init__(self, data_engine, cluster_engine, llm_engine=None, api_base: str = "http://localhost:8000"):
+    def __init__(
+        self,
+        data_engine=None,
+        cluster_engine=None,
+        llm_engine=None,
+        api_base: str = "http://localhost:8000",
+    ):
         self.data_engine = data_engine
         self.cluster_engine = cluster_engine
         self.llm_engine = llm_engine
         self.api_base = api_base
-        self.http_client = httpx.Client(timeout=30.0)
+
+    async def execute(self, engine: str, action: str, params: dict) -> str:
+        """异步执行工具调用，返回摘要字符串（截断至200字）"""
+        logger.debug(f"执行工具调用: {engine}.{action} with {params}")
+        try:
+            if engine == "data":
+                result = self._call_data_engine(action, params)
+            elif engine == "quant":
+                result = await self._call_quant_engine(action, params)
+            elif engine == "cluster":
+                result = self._call_cluster_engine(action, params)
+            elif engine == "debate":
+                if action == "start":
+                    return await self._run_debate(
+                        code=params.get("code", ""),
+                        max_rounds=params.get("max_rounds", 2),
+                    )
+                result = {"error": f"Unknown debate action: {action}"}
+            else:
+                result = {"error": f"Unknown engine: {engine}"}
+
+            summary = json.dumps(result, ensure_ascii=False)
+            return summary[:200]
+        except Exception as e:
+            logger.error(f"工具调用失败 {engine}.{action}: {e}")
+            return f"工具调用失败: {e}"
+
+    # ── 同步兼容旧接口 ──────────────────────────────────
 
     def execute_tool_call(self, tool_call: ToolCall) -> dict[str, Any]:
-        """执行工具调用"""
+        """同步执行工具调用（旧接口兼容）"""
         engine = tool_call.engine
         action = tool_call.action
         params = tool_call.params
-
-        logger.debug(f"执行工具调用: {engine}.{action} with {params}")
-
+        logger.debug(f"执行工具调用(sync): {engine}.{action} with {params}")
         if engine == "data":
             return self._call_data_engine(action, params)
         elif engine == "cluster":
             return self._call_cluster_engine(action, params)
-        elif engine == "llm":
-            return self._call_llm_engine(action, params)
         else:
             return {"error": f"Unknown engine: {engine}"}
 
+    # ── 数据引擎 ────────────────────────────────────────
+
     def _call_data_engine(self, action: str, params: dict) -> dict[str, Any]:
         """调用数据引擎"""
+        if self.data_engine is None:
+            return {"error": "data_engine not available"}
         try:
-            if action == "search_stock":
+            if action == "get_daily_history":
+                import datetime
+                code = params.get("code", "")
+                days = params.get("days", 60)
+                end = datetime.date.today().strftime("%Y-%m-%d")
+                start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+                df = self.data_engine.get_daily_history(code, start, end)
+                if df.empty:
+                    return {"error": f"No history for {code}"}
+                records = df.tail(10).to_dict("records")
+                return {"code": code, "history": records, "total_days": len(df)}
+
+            elif action == "get_company_profile":
+                code = params.get("code", "")
+                profile = self.data_engine.get_company_profile(code)
+                if profile is None:
+                    return {"error": f"No profile for {code}"}
+                return profile if isinstance(profile, dict) else {"profile": str(profile)}
+
+            elif action == "search_stock":
                 query = params.get("query", "")
                 limit = params.get("limit", 20)
                 snapshot = self.data_engine.get_snapshot()
@@ -60,39 +114,6 @@ class ExpertTools:
                         break
                 return {"results": results}
 
-            elif action == "get_stock_info":
-                code = params.get("code", "")
-                snapshot = self.data_engine.get_snapshot()
-                if snapshot.empty:
-                    return {"error": "No snapshot data"}
-                for _, row in snapshot.iterrows():
-                    if str(row.get("code", "")) == code:
-                        return {
-                            "code": code,
-                            "name": str(row.get("name", "")),
-                            "price": float(row.get("price", 0)),
-                            "pct_chg": float(row.get("pct_chg", 0)),
-                            "volume": int(row.get("volume", 0)),
-                            "amount": float(row.get("amount", 0)),
-                            "pe_ttm": float(row.get("pe_ttm", 0)),
-                            "pb": float(row.get("pb", 0)),
-                        }
-                return {"error": f"Stock not found: {code}"}
-
-            elif action == "get_daily_history":
-                code = params.get("code", "")
-                days = params.get("days", 60)
-                import datetime
-                end = datetime.date.today().strftime("%Y-%m-%d")
-                start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
-                df = self.data_engine.get_daily_history(code, start, end)
-                if df.empty:
-                    return {"error": f"No history for {code}"}
-                return {
-                    "code": code,
-                    "history": df.to_dict("records")
-                }
-
             else:
                 return {"error": f"Unknown data action: {action}"}
 
@@ -100,75 +121,80 @@ class ExpertTools:
             logger.error(f"数据引擎调用失败: {e}")
             return {"error": str(e)}
 
+    # ── 量化引擎 ────────────────────────────────────────
+
+    async def _call_quant_engine(self, action: str, params: dict) -> dict[str, Any]:
+        """调用量化引擎（通过 HTTP）"""
+        try:
+            code = params.get("code", "")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                if action == "get_factor_scores":
+                    resp = await client.get(f"{self.api_base}/api/v1/quant/factors/{code}")
+                    resp.raise_for_status()
+                    return resp.json()
+                elif action == "get_technical_indicators":
+                    resp = await client.get(f"{self.api_base}/api/v1/quant/indicators/{code}")
+                    resp.raise_for_status()
+                    return resp.json()
+                else:
+                    return {"error": f"Unknown quant action: {action}"}
+        except Exception as e:
+            logger.error(f"量化引擎调用失败: {e}")
+            return {"error": str(e)}
+
+    # ── 聚类引擎 ────────────────────────────────────────
+
     def _call_cluster_engine(self, action: str, params: dict) -> dict[str, Any]:
         """调用聚类引擎"""
+        if self.cluster_engine is None:
+            return {"error": "cluster_engine not available"}
         try:
-            if action == "search_stocks":
+            if action == "get_terrain_data":
+                result = self.cluster_engine.get_terrain_data()
+                return {"status": "ok", "clusters": len(result) if result else 0}
+            elif action == "search_stocks":
                 query = params.get("query", "")
                 limit = params.get("limit", 20)
                 results = self.cluster_engine.search_stocks(query, limit)
                 return {"results": results}
-
-            elif action == "get_cluster_for_stock":
-                code = params.get("code", "")
-                cluster_info = self.cluster_engine.get_cluster_for_stock(code)
-                if cluster_info is None:
-                    return {"error": f"Stock not found: {code}"}
-                return cluster_info
-
             else:
                 return {"error": f"Unknown cluster action: {action}"}
-
         except Exception as e:
             logger.error(f"聚类引擎调用失败: {e}")
             return {"error": str(e)}
 
-    def _call_llm_engine(self, action: str, params: dict) -> dict[str, Any]:
-        """调用 LLM 引擎"""
+    # ── 辩论工具 ────────────────────────────────────────
+
+    async def _run_debate(self, code: str, max_rounds: int = 2) -> str:
+        """触发专家辩论，消费完整 SSE 流，返回裁判裁决摘要（最长500字）"""
+        url = f"{self.api_base}/api/v1/debate/start"
+        payload = {"code": code, "max_rounds": max_rounds}
+        judge_verdict = ""
         try:
-            if action == "chat":
-                message = params.get("message", "")
-                if not self.llm_engine:
-                    return {"error": "LLM engine not available"}
-                response = self.llm_engine.chat(message)
-                return {"response": response}
-
-            else:
-                return {"error": f"Unknown llm action: {action}"}
-
-        except Exception as e:
-            logger.error(f"LLM 引擎调用失败: {e}")
-            return {"error": str(e)}
-
-    def run_debate(self, code: str, max_rounds: int = 3) -> str:
-        """运行辩论并消费 SSE 流"""
-        try:
-            url = f"{self.api_base}/api/v1/debate/start"
-            payload = {"code": code, "max_rounds": max_rounds}
-
-            with self.http_client.stream("POST", url, json=payload) as response:
-                if response.status_code != 200:
-                    logger.error(f"辩论启动失败: {response.status_code}")
-                    return ""
-
-                debate_id = None
-                for line in response.iter_lines():
-                    if line.startswith("data: "):
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                async with client.stream("POST", url, json=payload) as response:
+                    if response.status_code != 200:
+                        return f"辩论启动失败: HTTP {response.status_code}"
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data_str = line[5:].strip()
+                        if not data_str:
+                            continue
                         try:
-                            import json
-                            data = json.loads(line[6:])
-                            if "debate_id" in data:
-                                debate_id = data["debate_id"]
-                            logger.debug(f"辩论流: {data}")
-                        except Exception as e:
-                            logger.debug(f"解析 SSE 行失败: {e}")
-
-                return debate_id or ""
-
+                            data = json.loads(data_str)
+                            # 提取 judge_verdict summary
+                            if isinstance(data, dict):
+                                if data.get("event") == "judge_verdict" or "summary" in data:
+                                    summary = data.get("summary") or data.get("data", {}).get("summary", "")
+                                    if summary:
+                                        judge_verdict = summary
+                        except (json.JSONDecodeError, Exception):
+                            continue
+        except asyncio.TimeoutError:
+            return f"辩论超时（180s），已获取部分结果: {judge_verdict[:200]}"
         except Exception as e:
             logger.error(f"辩论运行失败: {e}")
-            return ""
+            return f"辩论运行失败: {e}"
 
-    def close(self):
-        """关闭 HTTP 客户端"""
-        self.http_client.close()
+        return judge_verdict[:500] if judge_verdict else "辩论完成，未获取到裁判裁决"
