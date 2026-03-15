@@ -108,6 +108,14 @@ class DataFetcher:
 
     async def fetch_by_request(self, req) -> Any:
         """按 DataRequest 路由到对应引擎方法或 DataFetcher 自身方法"""
+        import re
+        # 如果 params.code 不是 6 位数字，尝试按名称解析
+        if "code" in req.params and not re.fullmatch(r"\d{6}", str(req.params["code"]).strip()):
+            resolved = self._resolve_code(req.params["code"])
+            if resolved:
+                req.params = {**req.params, "code": resolved}
+            else:
+                return {"error": f"无法解析股票代码: {req.params['code']}"}
         if req.action in ACTION_DISPATCH:
             module_name, getter_fn, method_name, is_async = ACTION_DISPATCH[req.action]
             mod = importlib.import_module(module_name)
@@ -126,6 +134,20 @@ class DataFetcher:
             return result
         else:
             raise ValueError(f"不支持的 action: {req.action}")
+
+    def _resolve_code(self, name: str) -> str:
+        """按名称模糊匹配股票代码，找不到返回空字符串"""
+        try:
+            from data_engine import get_data_engine
+            profiles = get_data_engine().get_profiles()
+            name_lower = name.lower()
+            for code, info in profiles.items():
+                stock_name = info.get("name", "")
+                if stock_name and (stock_name in name or name_lower in stock_name.lower()):
+                    return code
+        except Exception as e:
+            logger.warning(f"_resolve_code 失败: {e}")
+        return ""
 
     def get_financials(self, code: str) -> dict:
         """获取最新一期财报关键指标"""
@@ -175,7 +197,7 @@ class DataFetcher:
             end = datetime.date.today().strftime("%Y-%m-%d")
             start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
             df = de.get_daily_history(code, start, end)
-            if df is None or df.empty:
+            if not isinstance(df, pd.DataFrame) or df.empty:
                 return {"error": f"无日线数据: {code}"}
             rows = df.tail(10).to_dict(orient="records")
             return {"code": code, "days": len(df), "recent": rows}
@@ -193,7 +215,7 @@ class DataFetcher:
             end = datetime.date.today().strftime("%Y-%m-%d")
             start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
             df = de.get_daily_history(code, start, end)
-            if df is None or df.empty:
+            if not isinstance(df, pd.DataFrame) or df.empty:
                 return {"error": f"无日线数据: {code}"}
             qe = get_quant_engine()
             indicators = qe.compute_indicators(df)
@@ -212,7 +234,7 @@ class DataFetcher:
             end = datetime.date.today().strftime("%Y-%m-%d")
             start = (datetime.date.today() - datetime.timedelta(days=90)).strftime("%Y-%m-%d")
             df = de.get_daily_history(code, start, end)
-            if df is None or df.empty:
+            if not isinstance(df, pd.DataFrame) or df.empty:
                 return {"error": f"无日线数据: {code}"}
             qe = get_quant_engine()
             result = qe.predict(code, df)
