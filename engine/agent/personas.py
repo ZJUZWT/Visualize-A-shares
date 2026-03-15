@@ -141,16 +141,13 @@ _DEBATER_SYSTEM_TEMPLATE = """{stance_desc}
 - 如果需要更多数据支撑论点，可通过 data_requests 请求（最后一轮除外）
 - partial_concede 表示承认对方某个具体论点，但整体立场不变
 
-## 输出格式（严格 JSON，不含 markdown 代码块）
-{{
-  "stance": "insist" | "partial_concede" | "concede",
-  "argument": "你的核心发言内容",
-  "challenges": ["你质疑对方的具体论据1", "..."],
-  "confidence": 0.0到1.0的浮点数,
-  "data_requests": [
-    {{"engine": "quant", "action": "get_factor_scores", "params": {{"code": "xxx"}}}}
-  ]
-}}
+## 输出要求
+请直接用自然语言阐述你的观点和论据，不要包裹在 JSON 中。
+要求：
+1. 开头明确你的立场（坚持原有观点 / 部分让步 / 认输）
+2. 详细展开你的核心论点，用数据和金融逻辑支撑
+3. 在论述末尾，用"【质疑】"标记对对方的质疑（每条一行）
+4. 如需补充数据，用"【数据请求】"标记（每条一行，格式：引擎.动作(参数)）
 {final_round_note}"""
 
 _OBSERVER_SYSTEM_TEMPLATE = """{observer_desc}
@@ -159,8 +156,9 @@ _OBSERVER_SYSTEM_TEMPLATE = """{observer_desc}
 如果当前辩论中缺乏{perspective}视角的信息，或你有重要信息要补充，
 选择发言（speak: true）。否则选择沉默（speak: false）。
 
-## 输出格式（严格 JSON，不含 markdown 代码块）
-{output_schema}
+## 输出要求
+如果选择发言，请直接用自然语言阐述你的观察和分析，不要包裹在 JSON 中。
+如果选择沉默，只需回复"【沉默】"即可。
 {final_round_note}"""
 
 _FINAL_ROUND_NOTE = "\n## 重要\n这是最后一轮辩论。请发表你的最终观点，总结你认为最核心的论据。本轮结束后裁判将做出最终裁决。"
@@ -227,12 +225,6 @@ def build_debate_system_prompt(role: str, target: str, is_final_round: bool) -> 
                 "- 你不需要选边站，只提供你观察到的市场情绪信息"
             ),
             perspective="市场情绪",
-            output_schema=(
-                '{\n  "speak": true 或 false,\n'
-                '  "argument": "你的观察内容（speak=false 时为空字符串）",\n'
-                '  "retail_sentiment_score": -1.0到1.0的浮点数,\n'
-                '  "data_requests": []\n}'
-            ),
             final_round_note=final_note,
         )
     elif role == "smart_money":
@@ -245,13 +237,6 @@ def build_debate_system_prompt(role: str, target: str, is_final_round: bool) -> 
                 "- 你不需要选边站，只提供你观察到的资金面信息"
             ),
             perspective="资金面",
-            output_schema=(
-                '{\n  "speak": true 或 false,\n'
-                '  "argument": "你的观察内容（speak=false 时为空字符串）",\n'
-                '  "data_requests": [\n'
-                '    {"engine": "quant", "action": "get_technical_indicators", '
-                '"params": {"code": "xxx"}}\n  ]\n}'
-            ),
             final_round_note=final_note,
         )
     elif role == "judge":

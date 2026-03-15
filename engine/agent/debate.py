@@ -38,14 +38,12 @@ from agent.personas import (
 OBSERVERS = ["retail_investor", "smart_money"]
 
 
-# ── 辅助函数 ──────────────────────────────────────────
+def sse(event: str, data: dict) -> dict:
+    """统一 SSE 事件格式"""
+    return {"event": event, "data": data}
 
-def _extract_json(text: str) -> str:
-    """从 LLM 输出提取 JSON（处理 markdown 代码块）"""
-    match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
+
+# ── 辅助函数 ──────────────────────────────────────────
 
 
 def validate_data_requests(role: str, requests: list[DataRequest]) -> list[DataRequest]:
@@ -78,26 +76,85 @@ def _fallback_entry(role: str, round: int, reason: str) -> DebateEntry:
 
 
 def _parse_debate_entry(role: str, round: int, raw: str) -> DebateEntry:
-    """解析 LLM 输出为 DebateEntry，解析失败时返回 fallback"""
+    """解析自然语言 LLM 输出为 DebateEntry
+
+    辩论者格式：
+      开头一行声明立场（含"坚持"/"部分让步"/"认输"关键词）
+      正文为 argument
+      【质疑】标记后每行一条 challenge
+      【数据请求】标记后每行一条请求（格式：引擎.动作(参数) 或 引擎.动作）
+
+    观察员格式：
+      仅含"【沉默】"时 speak=False
+      否则 speak=True，全文为 argument
+    """
+    text = raw.strip()
+
+    # ── 观察员 ──────────────────────────────────────────
+    if role in OBSERVERS:
+        if "【沉默】" in text:
+            return DebateEntry(role=role, round=round, speak=False, argument="")
+        # 去掉沉默标记后剩余内容作为 argument
+        argument = text.replace("【沉默】", "").strip()
+        return DebateEntry(role=role, round=round, speak=True, argument=argument, confidence=0.5)
+
+    # ── 辩论者 ──────────────────────────────────────────
     try:
-        json_str = _extract_json(raw)
-        data = json.loads(json_str)
-        data["role"] = role
-        data["round"] = round
-        # 将嵌套的 data_requests 列表转为 DataRequest 对象
-        raw_reqs = data.pop("data_requests", [])
-        data_requests = []
-        for r in raw_reqs:
-            if isinstance(r, dict):
-                data_requests.append(DataRequest(
-                    requested_by=role,
-                    engine=r.get("engine", "quant"),
-                    action=r.get("action", ""),
-                    params=r.get("params", {}),
-                    round=round,
-                ))
-        data["data_requests"] = data_requests
-        return DebateEntry(**data)
+        # 1. 识别立场
+        stance = "insist"
+        first_line = text.split("\n")[0]
+        if any(k in first_line for k in ("认输", "concede", "放弃", "承认失败")):
+            stance = "concede"
+        elif any(k in first_line for k in ("部分让步", "partial", "承认", "部分同意")):
+            stance = "partial_concede"
+
+        # 2. 分割【质疑】和【数据请求】块
+        challenges: list[str] = []
+        data_requests: list[DataRequest] = []
+
+        # 提取【数据请求】块
+        data_req_match = re.search(r"【数据请求】(.*?)(?=【|$)", text, re.DOTALL)
+        if data_req_match:
+            for line in data_req_match.group(1).strip().splitlines():
+                line = line.strip().lstrip("-•·").strip()
+                if not line:
+                    continue
+                # 格式：引擎.动作(参数json) 或 引擎.动作
+                m = re.match(r"(\w+)\.(\w+)(?:\((.+)\))?", line)
+                if m:
+                    engine, action = m.group(1), m.group(2)
+                    params: dict = {}
+                    if m.group(3):
+                        try:
+                            params = json.loads(m.group(3))
+                        except Exception:
+                            params = {"raw": m.group(3)}
+                    data_requests.append(DataRequest(
+                        requested_by=role, engine=engine,
+                        action=action, params=params, round=round,
+                    ))
+            text = text[:data_req_match.start()].strip()
+
+        # 提取【质疑】块
+        challenge_match = re.search(r"【质疑】(.*?)(?=【|$)", text, re.DOTALL)
+        if challenge_match:
+            for line in challenge_match.group(1).strip().splitlines():
+                line = line.strip().lstrip("-•·").strip()
+                if line:
+                    challenges.append(line)
+            text = text[:challenge_match.start()].strip()
+
+        # 剩余内容为 argument（去掉立场声明行可选，保留更完整）
+        argument = text.strip()
+
+        return DebateEntry(
+            role=role, round=round,
+            stance=stance, speak=True,
+            argument=argument,
+            challenges=challenges,
+            confidence=0.5,
+            data_requests=data_requests,
+        )
     except Exception as e:
         logger.warning(f"解析辩论发言失败 [{role}]: {e}，使用 fallback")
         return _fallback_entry(role, round, reason=f"parse_error: {e}")
@@ -334,9 +391,6 @@ async def run_debate(
     data_fetcher: DataFetcher,
 ) -> AsyncGenerator[dict, None]:
     """专家辩论主循环 — async generator，推送 SSE 事件"""
-
-    def sse(event: str, data: dict) -> dict:
-        return {"event": event, "data": data}
 
     yield sse("debate_start", {
         "debate_id": blackboard.debate_id,
