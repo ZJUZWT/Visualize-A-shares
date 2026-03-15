@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Clock, Loader2 } from "lucide-react";
+import { Clock, Loader2, Download } from "lucide-react";
 import type { DebateStatus } from "@/types/debate";
 
 interface InputBarProps {
@@ -10,9 +10,10 @@ interface InputBarProps {
   onStart: (code: string, maxRounds: number) => void;
   onHistoryOpen: () => void;
   onStop: () => void;
+  onExport?: () => void;
 }
 
-export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen, onStop }: InputBarProps) {
+export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen, onStop, onExport }: InputBarProps) {
   const [code, setCode] = useState("");
   const [maxRounds, setMaxRounds] = useState(3);
 
@@ -78,6 +79,19 @@ export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen,
             </button>
           )}
         </>
+      )}
+
+      {status === "completed" && onExport && (
+        <button
+          onClick={onExport}
+          className="h-10 px-4 rounded-lg text-sm font-medium border border-[var(--border)]
+                     text-[var(--text-secondary)] hover:bg-[var(--bg-primary)] hover:text-[var(--text-primary)]
+                     flex items-center gap-2 transition-colors shrink-0"
+          title="导出 HTML"
+        >
+          <Download size={15} />
+          <span>导出</span>
+        </button>
       )}
     </div>
   );
