@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 interface StopConfirmModalProps {
   open: boolean;
   onConfirm: () => void;
@@ -7,6 +9,12 @@ interface StopConfirmModalProps {
 }
 
 export default function StopConfirmModal({ open, onConfirm, onCancel }: StopConfirmModalProps) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onCancel]);
+
   if (!open) return null;
 
   return (
@@ -25,6 +33,7 @@ export default function StopConfirmModal({ open, onConfirm, onCancel }: StopConf
             取消
           </button>
           <button
+            autoFocus
             onClick={onConfirm}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white
                        hover:opacity-90 transition-opacity"
