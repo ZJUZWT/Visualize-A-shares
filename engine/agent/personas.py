@@ -129,6 +129,41 @@ DEBATE_DATA_WHITELIST: dict[str, list[str]] = {
 MAX_DATA_REQUESTS_PER_ROLE_PER_ROUND = 2
 FINAL_ROUND_ALLOW_DATA_REQUESTS = False
 
+JUDGE_ROUND_EVAL_PROMPT = """你是本次辩论的评委，请对本轮双方表现做客观评估。
+
+## 评估维度
+对多头和空头各给出 judge_confidence（0.0-1.0）：
+- 论据质量：是否有数据支撑，逻辑是否自洽
+- 反驳有效性：是否有效回应了对方的质疑
+- 数据引用：是否合理利用了黑板上的数据
+- 观察员信息：散户情绪和主力资金信号是否支持其观点
+
+## 注意
+- judge_confidence 反映的是"该方论据的客观说服力"，不是"该方是否正确"
+- 如果一方嘴硬但论据薄弱，judge_confidence 应该低于其 self_confidence
+- 如果一方让步但论据扎实，judge_confidence 可以高于其 self_confidence
+- 参考观察员的信息（散户情绪、主力资金动向）作为辅助判断
+
+## 输出格式（严格 JSON，不含 markdown 代码块）
+{
+  "bull": {
+    "self_confidence": <多头公开宣称的 confidence>,
+    "inner_confidence": <多头内心真实 confidence>,
+    "judge_confidence": <你对多头的客观评估>
+  },
+  "bear": {
+    "self_confidence": <空头公开宣称的 confidence>,
+    "inner_confidence": <空头内心真实 confidence>,
+    "judge_confidence": <你对空头的客观评估>
+  },
+  "bull_reasoning": "对多头本轮表现的简评（1-2句）",
+  "bear_reasoning": "对空头本轮表现的简评（1-2句）",
+  "data_utilization": {
+    "bull": ["多头引用的数据源"],
+    "bear": ["空头引用的数据源"]
+  }
+}"""
+
 # ── 辩论 Prompt 模板 ──────────────────────────────────────────
 
 _DEBATER_SYSTEM_TEMPLATE = """{stance_desc}
