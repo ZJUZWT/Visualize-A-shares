@@ -205,33 +205,26 @@ class ExpertAgent:
             data = json.loads(response)
             output = BeliefUpdateOutput(**data)
             if output.updated:
-                async with self._lock:
-                    for change in output.changes:
-                        old_node = self._graph.get_node(change.old_belief_id)
-                        if not old_node:
-                            logger.warning(f"找不到旧信念节点: {change.old_belief_id}")
-                            continue
-                        new_id = await self._graph.update_belief(
-                            old_belief_id=change.old_belief_id,
-                            new_content=change.new_content,
-                            new_confidence=change.new_confidence,
-                            reason=change.reason,
-                        )
-                        await self._graph.save()
-                        new_node = self._graph.get_node(new_id)
-                        yield {"event": "belief_updated", "data": {
-                            "old": {
-                                "id": change.old_belief_id,
-                                "content": old_node.get("content"),
-                                "confidence": old_node.get("confidence"),
-                            },
-                            "new": {
-                                "id": new_id,
-                                "content": new_node.get("content") if new_node else change.new_content,
-                                "confidence": new_node.get("confidence") if new_node else change.new_confidence,
-                            },
-                            "reason": change.reason,
-                        }}
+                events = []
+                for change in output.changes:
+                    old_node = self._graph.get_node(change.old_belief_id)
+                    if not old_node:
+                        continue
+                    new_id = await self._graph.update_belief(
+                        old_belief_id=change.old_belief_id,
+                        new_content=change.new_content,
+                        new_confidence=change.new_confidence,
+                        reason=change.reason,
+                    )
+                    new_node = self._graph.get_node(new_id)
+                    events.append({"event": "belief_updated", "data": {
+                        "old": {"id": change.old_belief_id, "content": old_node.get("content"), "confidence": old_node.get("confidence")},
+                        "new": {"id": new_id, "content": new_node.get("content"), "confidence": new_node.get("confidence")},
+                        "reason": change.reason,
+                    }})
+                await self._graph.save()  # single save after all changes
+                for event in events:
+                    yield event
         except Exception as e:
             logger.warning(f"belief_update 失败，跳过: {e}")
 

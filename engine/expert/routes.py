@@ -27,6 +27,7 @@ def _get_db():
 
 async def _init_db():
     """初始化 DuckDB expert schema 和表"""
+    con = None
     try:
         con = _get_db()
         con.execute("CREATE SCHEMA IF NOT EXISTS expert")
@@ -40,10 +41,12 @@ async def _init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        con.close()
         logger.info("expert.conversation_log 表初始化完成")
     except Exception as e:
         logger.error(f"expert DB 初始化失败: {e}")
+    finally:
+        if con:
+            con.close()
 
     # 初始化 Agent 实例
     global _expert_agent
@@ -67,7 +70,7 @@ async def _init_db():
             llm_engine=llm_engine,
         )
 
-        kg_path = str(Path("data") / "expert_kg.json")
+        kg_path = str(settings.DATA_DIR / "expert_kg.json")
         Path(kg_path).parent.mkdir(parents=True, exist_ok=True)
 
         chromadb_dir = str(settings.chromadb.persist_dir)
@@ -77,7 +80,6 @@ async def _init_db():
 
     except Exception as e:
         logger.error(f"投资专家 Agent 初始化失败: {e}")
-        raise
 
 
 def get_expert_agent() -> ExpertAgent:
@@ -112,6 +114,7 @@ async def expert_chat(req: ExpertChatRequest):
             return
 
         # 写入 DuckDB 对话历史
+        con = None
         try:
             con = _get_db()
             con.execute(
@@ -125,9 +128,11 @@ async def expert_chat(req: ExpertChatRequest):
                     datetime.now(),
                 ],
             )
-            con.close()
         except Exception as e:
             logger.warning(f"对话历史写入失败: {e}")
+        finally:
+            if con:
+                con.close()
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -156,6 +161,7 @@ async def get_stances():
 @router.get("/history")
 async def get_history(limit: int = 20):
     """返回对话历史（从 DuckDB 按时间倒序）"""
+    con = None
     try:
         con = _get_db()
         rows = con.execute(
@@ -163,7 +169,6 @@ async def get_history(limit: int = 20):
             "FROM expert.conversation_log ORDER BY created_at DESC LIMIT ?",
             [limit],
         ).fetchall()
-        con.close()
         return [
             {
                 "id": r[0],
@@ -178,6 +183,9 @@ async def get_history(limit: int = 20):
     except Exception as e:
         logger.error(f"获取对话历史失败: {e}")
         return []
+    finally:
+        if con:
+            con.close()
 
 
 @router.get("/knowledge-graph/stats")
