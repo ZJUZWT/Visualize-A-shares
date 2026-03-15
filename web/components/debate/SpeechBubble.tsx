@@ -9,16 +9,16 @@ function MarkdownContent({ content }: { content: string }) {
   return (
     <ReactMarkdown
       components={{
-        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-        ul: ({ children }) => <ul className="list-disc pl-4 mb-2 space-y-1">{children}</ul>,
-        ol: ({ children }) => <ol className="list-decimal pl-4 mb-2 space-y-1">{children}</ol>,
-        li: ({ children }) => <li>{children}</li>,
+        p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+        ul: ({ children }) => <ul className="list-disc pl-5 mb-3 space-y-1.5">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5">{children}</ol>,
+        li: ({ children }) => <li className="leading-7">{children}</li>,
         strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
-        code: ({ children }) => <code className="px-1 py-0.5 rounded text-xs bg-black/10 font-mono">{children}</code>,
-        h1: ({ children }) => <h1 className="text-base font-bold mb-1">{children}</h1>,
-        h2: ({ children }) => <h2 className="text-sm font-bold mb-1">{children}</h2>,
-        h3: ({ children }) => <h3 className="text-sm font-semibold mb-1">{children}</h3>,
+        code: ({ children }) => <code className="px-1.5 py-0.5 rounded text-xs bg-[var(--bg-primary)] font-mono">{children}</code>,
+        h1: ({ children }) => <h1 className="text-base font-bold mb-2">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-sm font-bold mb-2">{children}</h2>,
+        h3: ({ children }) => <h3 className="text-sm font-semibold mb-1.5">{children}</h3>,
       }}
     >
       {content}
@@ -64,12 +64,12 @@ export default function SpeechBubble({ entry }: SpeechBubbleProps) {
     if (!entry.speak) return null;
     return (
       <div className="flex justify-center">
-        <div className="max-w-[85%] rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] px-4 py-3">
-          <div className="flex items-center gap-2 mb-1.5">
+        <div className="max-w-[85%] rounded-2xl border border-[var(--border)] bg-[var(--bg-primary)] px-6 py-4">
+          <div className="flex items-center gap-2 mb-3">
             <span className="text-xs text-[var(--text-tertiary)]">Round {entry.round}</span>
             <span className="text-xs font-semibold" style={{ color }}>{label}</span>
           </div>
-          <div className="text-sm text-[var(--text-primary)] leading-relaxed">
+          <div className="text-[13px] text-[var(--text-primary)] leading-7">
             <MarkdownContent content={entry.argument} />
           </div>
         </div>
@@ -83,13 +83,13 @@ export default function SpeechBubble({ entry }: SpeechBubbleProps) {
 
   return (
     <div className={`flex ${isBull ? "justify-start" : "justify-end"}`}>
-      <div className={`max-w-[78%] rounded-xl p-4 ${bgColor} ${borderSide}`}
+      <div className={`max-w-[78%] rounded-2xl px-6 py-4 ${bgColor} ${borderSide}`}
            style={{ borderColor: color }}>
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-3">
           <span className="text-xs text-[var(--text-tertiary)]">Round {entry.round}</span>
-          <span className="text-sm font-semibold" style={{ color }}>{label}</span>
+          <span className="text-[13px] font-semibold" style={{ color }}>{label}</span>
           {entry.stance && entry.stance !== "insist" && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-tertiary)]">
+            <span className="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-tertiary)]">
               {STANCE_LABEL[entry.stance] ?? entry.stance}
             </span>
           )}
@@ -97,12 +97,12 @@ export default function SpeechBubble({ entry }: SpeechBubbleProps) {
             置信度 {Math.round(entry.confidence * 100)}%
           </span>
         </div>
-        <div className="text-sm text-[var(--text-primary)] leading-7">
+        <div className="text-[13px] text-[var(--text-primary)] leading-7">
           <MarkdownContent content={entry.argument} />
         </div>
 
         {entry.challenges && entry.challenges.length > 0 && (
-          <div className="mt-3">
+          <div className="mt-4 pt-3 border-t border-[var(--border)]">
             <button
               onClick={() => setExpanded(!expanded)}
               className="flex items-center gap-1.5 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
@@ -111,9 +111,9 @@ export default function SpeechBubble({ entry }: SpeechBubbleProps) {
               质疑 ({entry.challenges.length})
             </button>
             {expanded && (
-              <ul className="mt-2 space-y-2">
+              <ul className="mt-3 space-y-2.5">
                 {entry.challenges.map((c, i) => (
-                  <li key={i} className="text-sm text-[var(--text-secondary)] pl-3 border-l-2 border-[var(--border)] leading-relaxed">
+                  <li key={i} className="text-[13px] text-[var(--text-secondary)] pl-4 border-l-2 border-[var(--border)] leading-relaxed">
                     {c}
                   </li>
                 ))}
