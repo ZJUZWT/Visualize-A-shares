@@ -289,20 +289,35 @@ class DataFetcher:
             return {"error": str(e)}
 
     def get_margin_balance(self, code: str) -> dict:
-        """获取融资融券余额（按交易所路由：6xxxxx=上交所，其余=深交所）"""
+        """获取融资融券余额 — 仅上交所(6开头)可用，深交所 AKShare 接口暂不可用"""
         try:
             import akshare as ak
-            if code.startswith("6"):
-                df = ak.stock_margin_detail_sse(symbol=code)
-            else:
-                df = ak.stock_margin_detail_szse(symbol=code)
+            import datetime
+            if not code.startswith("6"):
+                return {"error": f"深交所融资融券明细接口暂不可用: {code}"}
+            # 尝试最近 5 个交易日（非交易日 API 会报错）
+            df = None
+            date_str = ""
+            for offset in range(5):
+                d = (datetime.date.today() - datetime.timedelta(days=offset)).strftime("%Y%m%d")
+                try:
+                    df = ak.stock_margin_detail_sse(date=d)
+                    if df is not None and not df.empty:
+                        date_str = d
+                        break
+                except Exception:
+                    continue
             if df is None or df.empty:
-                return {"error": f"无融资融券数据: {code}"}
-            row = df.iloc[-1]
+                return {"error": f"无融资融券数据: {code}（最近5日均无数据）"}
+            # 按 标的证券代码 过滤
+            match = df[df["标的证券代码"].astype(str) == code]
+            if match.empty:
+                return {"error": f"融资融券数据中未找到 {code}"}
+            row = match.iloc[0]
             return {
-                "code": code,
-                "date": str(row.iloc[0]),
+                "code": code, "date": date_str,
                 "融资余额": str(row.get("融资余额", "")),
+                "融资买入额": str(row.get("融资买入额", "")),
                 "融券余量": str(row.get("融券余量", "")),
             }
         except Exception as e:
