@@ -36,7 +36,7 @@ export default function Home() {
     }
   }, [isStaticMode, terrainData, loadSnapshot]);
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-transparent ml-12">
+    <main className="relative w-screen h-screen overflow-hidden bg-transparent">
       <NavSidebar />
       {/* Layer 0: 3D 场景 */}
       <TerrainScene />

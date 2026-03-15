@@ -57,7 +57,7 @@ export default function TopBar() {
     : null;
 
   return (
-    <div className="overlay fixed top-4 left-[280px] right-4 flex items-center gap-3">
+    <div className="overlay fixed top-4 left-[340px] right-4 flex items-center gap-3">
       {/* 搜索框 */}
       <div className="glass-panel relative">
         <div className="flex items-center px-4 py-2.5">

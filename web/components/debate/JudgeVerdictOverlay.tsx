@@ -171,9 +171,9 @@ function VerdictContent({ verdict }: { verdict: JudgeVerdict }) {
 
 function StaticVerdictCard({ verdict, finalColor, finalLabel }: { verdict: JudgeVerdict; finalColor: string; finalLabel: string }) {
   return (
-    <div className="mx-4 my-4 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden">
+    <div className="mx-4 my-3 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden max-h-[280px] overflow-y-auto">
       <div className="h-1.5" style={{ backgroundColor: finalColor }} />
-      <div className="px-5 py-4 space-y-4">
+      <div className="px-5 py-4 space-y-3">
         <div className="flex items-center gap-3">
           <span className="text-xl font-bold" style={{ color: finalColor }}>{finalLabel}</span>
           {verdict.score !== null && (

@@ -72,7 +72,7 @@ function LeftPanel() {
   } = useTerrainStore();
 
   return (
-    <div className="overlay fixed top-4 left-4 bottom-4 w-[260px] flex flex-col gap-2.5 overflow-y-auto scrollbar-thin">
+    <div className="overlay fixed top-4 left-16 bottom-4 w-[260px] flex flex-col gap-2.5 overflow-y-auto scrollbar-thin">
       {/* ─── Logo & 状态 ─────────────────── */}
       <div className="glass-panel px-4 py-3">
         <div className="flex items-center gap-3">
@@ -372,7 +372,7 @@ function BottomToolbar() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="overlay fixed bottom-16 left-[280px] w-[360px] z-30"
+            className="overlay fixed bottom-16 left-[340px] w-[360px] z-30"
           >
             <div className="glass-panel p-4 max-h-[400px] overflow-y-auto scrollbar-thin">
               {activePopup === "playback" && (
@@ -425,7 +425,7 @@ function BottomToolbar() {
       </AnimatePresence>
 
       {/* 底部工具栏 */}
-      <div className="overlay fixed bottom-4 left-[280px] right-4 flex justify-center z-20">
+      <div className="overlay fixed bottom-4 left-[340px] right-4 flex justify-center z-20">
         <div className="glass-panel px-4 py-2 flex items-center gap-1">
           <button
             onClick={() => togglePopup("playback")}

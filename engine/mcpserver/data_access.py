@@ -180,6 +180,27 @@ class DataAccess:
             ORDER BY code
         """)
 
+    def get_stock_detail(self, code: str) -> dict | None:
+        """获取单只股票的快照数据（行情+因子字段）"""
+        if self.is_online():
+            # 优先从内存聚类结果搜索（含 cluster_id/rise_prob）
+            data = self.api_get("/api/v1/stocks/search", params={"q": code})
+            if data and data.get("results"):
+                for s in data["results"]:
+                    if s.get("code") == code:
+                        return s
+            # fallback: snapshot 接口
+            stock = self.api_get(f"/api/v1/data/snapshot/{code}")
+            if stock and "code" in stock:
+                return stock
+        # 离线降级：从 DuckDB snapshot 取
+        df = self.db_query(
+            "SELECT * FROM stock_snapshot WHERE code = ? LIMIT 1", [code]
+        )
+        if df.empty:
+            return None
+        return df.iloc[0].to_dict()
+
     def get_daily_history(self, code: str, days: int = 60) -> pd.DataFrame:
         """获取指定股票的日线历史"""
         return self.db_query(
