@@ -245,6 +245,10 @@ function VerdictCard({ verdict }: { verdict: JudgeVerdict }) {
   const color = verdict.signal ? SIGNAL_COLOR[verdict.signal] : "#9CA3AF";
   const label = verdict.signal ? SIGNAL_LABEL[verdict.signal] : "中性";
 
+  const QUALITY_LABEL: Record<string, string> = {
+    consensus: "共识", strong_disagreement: "激烈分歧", one_sided: "一边倒",
+  };
+
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden mt-4">
       <div className="h-1.5" style={{ backgroundColor: color }} />
@@ -254,17 +258,30 @@ function VerdictCard({ verdict }: { verdict: JudgeVerdict }) {
           {verdict.score !== null && (
             <span className="text-sm text-[var(--text-tertiary)]">评分 {verdict.score}</span>
           )}
+          <span className="text-xs text-[var(--text-tertiary)] ml-auto px-2 py-0.5 rounded bg-[var(--bg-primary)]">
+            {QUALITY_LABEL[verdict.debate_quality] ?? verdict.debate_quality}
+          </span>
         </div>
+
+        <div className="text-sm text-[var(--text-primary)] leading-relaxed">
+          <MarkdownContent content={verdict.summary} />
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div className="p-3 rounded-lg text-sm bg-red-500/5 border-l-2 border-red-500">
             <div className="font-medium text-[var(--text-secondary)] mb-1.5">多头核心论点</div>
-            <p className="text-[var(--text-primary)] leading-relaxed">{verdict.bull_core_thesis}</p>
+            <div className="text-[var(--text-primary)] leading-relaxed">
+              <MarkdownContent content={verdict.bull_core_thesis} />
+            </div>
           </div>
           <div className="p-3 rounded-lg text-sm bg-emerald-500/5 border-l-2 border-emerald-500">
             <div className="font-medium text-[var(--text-secondary)] mb-1.5">空头核心论点</div>
-            <p className="text-[var(--text-primary)] leading-relaxed">{verdict.bear_core_thesis}</p>
+            <div className="text-[var(--text-primary)] leading-relaxed">
+              <MarkdownContent content={verdict.bear_core_thesis} />
+            </div>
           </div>
         </div>
+
         {verdict.risk_warnings.length > 0 && (
           <ul className="space-y-1.5">
             {verdict.risk_warnings.map((w, i) => (
@@ -274,9 +291,11 @@ function VerdictCard({ verdict }: { verdict: JudgeVerdict }) {
             ))}
           </ul>
         )}
-        <p className="text-base text-[var(--text-primary)] leading-relaxed border-t border-[var(--border)] pt-4">
-          {verdict.summary}
-        </p>
+
+        <div className="text-xs text-[var(--text-tertiary)] border-t border-[var(--border)] pt-3 flex gap-4">
+          <span>散户情绪：{verdict.retail_sentiment_note}</span>
+          <span>主力资金：{verdict.smart_money_note}</span>
+        </div>
       </div>
     </div>
   );

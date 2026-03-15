@@ -42,6 +42,12 @@ const ROLE_COLOR: Record<string, string> = {
   judge: "#6B7280",
 };
 
+const STANCE_LABEL: Record<string, string> = {
+  insist: "坚持",
+  partial_concede: "部分让步",
+  concede: "认输",
+};
+
 interface SpeechBubbleProps {
   entry: DebateEntry;
 }
@@ -82,6 +88,14 @@ export default function SpeechBubble({ entry }: SpeechBubbleProps) {
         <div className="flex items-center gap-2 mb-2">
           <span className="text-xs text-[var(--text-tertiary)]">Round {entry.round}</span>
           <span className="text-sm font-semibold" style={{ color }}>{label}</span>
+          {entry.stance && entry.stance !== "insist" && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-tertiary)]">
+              {STANCE_LABEL[entry.stance] ?? entry.stance}
+            </span>
+          )}
+          <span className="text-[10px] text-[var(--text-tertiary)] ml-auto">
+            置信度 {Math.round(entry.confidence * 100)}%
+          </span>
         </div>
         <div className="text-sm text-[var(--text-primary)] leading-7">
           <MarkdownContent content={entry.argument} />
