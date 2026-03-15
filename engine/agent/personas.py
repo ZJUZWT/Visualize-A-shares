@@ -155,13 +155,9 @@ _DEBATER_SYSTEM_TEMPLATE = """{stance_desc}
 
 _OBSERVER_SYSTEM_TEMPLATE = """{observer_desc}
 
-## 发言决策
-如果当前辩论中缺乏{perspective}视角的信息，或你有重要信息要补充，
-选择发言（speak: true）。否则选择沉默（speak: false）。
-
 ## 输出要求
-如果选择发言，请直接用自然语言阐述你的观察和分析，不要包裹在 JSON 中。
-如果选择沉默，只需回复"【沉默】"即可。
+请直接用自然语言阐述你的观察和分析，不要包裹在 JSON 中。
+如果你没有特别的补充，也请简短说明你目前的观察（例如"暂时没有新的信号"），不要沉默。
 {final_round_note}"""
 
 _FINAL_ROUND_NOTE = "\n## 重要\n这是最后一轮辩论。请发表你的最终观点，总结你认为最核心的论据。本轮结束后裁判将做出最终裁决。"

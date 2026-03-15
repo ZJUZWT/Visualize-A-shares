@@ -48,11 +48,14 @@ def sse(event: str, data: dict) -> dict:
 
 
 def _extract_json(text: str) -> str:
-    """从 LLM 输出提取 JSON（处理 markdown 代码块）"""
+    """从 LLM 输出提取 JSON（处理 markdown 代码块 + 中文引号 + 控制字符）"""
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return text.strip()
+    result = match.group(1).strip() if match else text.strip()
+    # 替换中文引号为英文引号
+    result = result.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+    # 移除 JSON 字符串值以外的控制字符（保留 \n \r \t）
+    result = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', result)
+    return result
 
 
 def _parse_sentiment_score(value) -> float | None:
@@ -80,7 +83,9 @@ async def extract_structure(
 
 角色: {role}
 发言内容:
+<speech>
 {argument}
+</speech>
 
 返回格式:
 {{
@@ -543,11 +548,20 @@ async def judge_summarize_stream(
     summary_text = "".join(tokens)
 
     # Phase 2: 提取结构化裁决
+    # 裁判 system prompt 要求直接输出 JSON，先尝试直接解析 summary_text
+    # 失败时才回退到二次 LLM 提取
     try:
-        verdict = await asyncio.wait_for(
-            _extract_judge_verdict(summary_text, blackboard, llm),
-            timeout=30.0,
-        )
+        json_str = _extract_json(summary_text)
+        if json_str:
+            verdict = await asyncio.wait_for(
+                _parse_judge_json(json_str, blackboard),
+                timeout=5.0,
+            )
+        else:
+            verdict = await asyncio.wait_for(
+                _extract_judge_verdict(summary_text, blackboard, llm),
+                timeout=30.0,
+            )
     except Exception as e:
         logger.error(f"裁判结构化提取失败: {e}，生成降级 verdict")
         verdict = JudgeVerdict(
@@ -578,6 +592,16 @@ async def judge_summarize_stream(
         logger.warning(f"裁判记忆存储失败: {e}")
 
     yield sse("judge_verdict", verdict.model_dump(mode="json"))
+
+
+async def _parse_judge_json(json_str: str, blackboard: Blackboard) -> JudgeVerdict:
+    """直接从 JSON 字符串构建 JudgeVerdict"""
+    data = json.loads(json_str)
+    data["target"] = blackboard.target
+    data["debate_id"] = blackboard.debate_id
+    data["termination_reason"] = blackboard.termination_reason or "max_rounds"
+    data["timestamp"] = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
+    return JudgeVerdict(**data)
 
 
 async def _extract_judge_verdict(
@@ -711,16 +735,10 @@ async def run_debate(
             if event["event"] == "debate_entry_complete":
                 last_bear = event["data"]
 
-        # 3. 观察员（沉默时不推送 token）
+        # 3. 观察员（直接流式输出，不再缓冲）
         for observer in OBSERVERS:
-            buf: list[dict] = []
             async for event in speak_stream(observer, blackboard, llm, memory, is_final):
-                buf.append(event)
-                if event["event"] == "debate_entry_complete":
-                    if event["data"].get("speak", True):
-                        for e in buf:
-                            yield e
-                    buf = []
+                yield event
 
         # 4. concede 检查
         if last_bull and last_bull.get("stance") == "concede":
