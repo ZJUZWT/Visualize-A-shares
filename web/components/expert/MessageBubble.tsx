@@ -1,7 +1,3 @@
-/**
- * 消息气泡组件 — 含内嵌思考面板
- */
-
 "use client";
 
 import type { ExpertMessage } from "@/types/expert";
@@ -14,30 +10,38 @@ interface MessageBubbleProps {
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === "user";
 
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[72%] px-4 py-2.5 rounded-2xl rounded-br-sm
+                        bg-[var(--accent)] text-white text-sm leading-relaxed">
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
-      <div
-        className={`max-w-xs lg:max-w-2xl px-4 py-3 rounded-lg ${
-          isUser
-            ? "bg-blue-500 text-white rounded-br-none"
-            : "bg-gray-100 text-gray-900 rounded-bl-none"
-        }`}
-      >
-        {/* 思考面板（仅专家消息） */}
-        {!isUser && <ThinkingPanel thinking={message.thinking} />}
+    <div className="flex justify-start gap-3">
+      {/* 头像 */}
+      <div className="shrink-0 w-7 h-7 rounded-lg bg-[var(--accent-light)]
+                      flex items-center justify-center mt-0.5">
+        <span className="text-[10px] font-bold text-[var(--accent)]">专</span>
+      </div>
+
+      <div className="flex-1 min-w-0 max-w-[80%]">
+        {/* 思考面板 */}
+        {message.thinking.length > 0 && (
+          <ThinkingPanel thinking={message.thinking} />
+        )}
 
         {/* 正文 */}
-        <p className="text-sm whitespace-pre-wrap break-words">
+        <div className="text-sm text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap break-words">
           {message.content}
-        </p>
-
-        {/* 流式光标 */}
-        {message.isStreaming && (
-          <div className="mt-1 flex items-center gap-1">
-            <div className="w-1.5 h-1.5 bg-current rounded-full animate-pulse" />
-            <span className="text-xs opacity-60">输入中...</span>
-          </div>
-        )}
+          {message.isStreaming && (
+            <span className="inline-block w-0.5 h-3.5 bg-[var(--accent)] ml-0.5 align-middle animate-pulse" />
+          )}
+        </div>
       </div>
     </div>
   );
