@@ -22,10 +22,13 @@ interface DebateStore {
   isReplayMode: boolean;
   error: string | null;
   _observerSpokenThisRound: Record<string, boolean>;
+  currentTarget: string | null;
+  _abortController: AbortController | null;
 
   startDebate: (code: string, maxRounds: number) => Promise<void>;
   loadReplay: (debateId: string) => Promise<void>;
   reset: () => void;
+  stopDebate: () => void;
 }
 
 const INITIAL_ROLE_STATE: RoleState = { stance: null, confidence: 0.5, conceded: false };
@@ -42,6 +45,8 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
   isReplayMode: false,
   error: null,
   _observerSpokenThisRound: {},
+  currentTarget: null,
+  _abortController: null,
 
   reset: () => set({
     status: "idle",
@@ -53,17 +58,26 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
     isReplayMode: false,
     error: null,
     _observerSpokenThisRound: {},
+    currentTarget: null,
+    _abortController: null,
   }),
+
+  stopDebate: () => {
+    get()._abortController?.abort();
+    set({ status: "stopped" });
+  },
 
   startDebate: async (code, maxRounds) => {
     get().reset();
-    set({ status: "debating" });
+    const controller = new AbortController();
+    set({ status: "debating", currentTarget: code, _abortController: controller });
 
     try {
       const res = await fetch(`${API_BASE}/api/v1/debate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, max_rounds: maxRounds }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -103,6 +117,7 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
         }
       }
     } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       const msg = e instanceof Error ? e.message : "连接失败";
       set({ error: msg, status: "idle" });
     }
@@ -166,6 +181,7 @@ function _handleSSEEvent(
   get: () => DebateStore,
 ) {
   const state = get();
+  if (state.status === "stopped") return;
 
   switch (eventType) {
     case "debate_start": {
