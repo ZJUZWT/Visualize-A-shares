@@ -79,3 +79,12 @@ export interface RoleState {
   confidence: number;
   conceded: boolean;
 }
+
+export interface DataRequestItem {
+  id: string;
+  requested_by: string;
+  action: string;
+  status: "pending" | "done" | "failed";
+  result_summary?: string;
+  duration_ms?: number;
+}
