@@ -77,8 +77,6 @@ async def extract_structure(
     llm: BaseLLMProvider,
 ) -> dict:
     """从 argument 正文提取结构化字段，返回可解包到 DebateEntry 的 dict。"""
-    allowed_actions = DEBATE_DATA_WHITELIST.get(role, [])
-    allowed_actions_str = ", ".join(f'"{a}"' for a in allowed_actions) if allowed_actions else "（无，data_requests 必须为空数组）"
     extract_prompt = f"""请从以下辩论发言中提取结构化信息，只返回 JSON，不要其他内容。
 
 角色: {role}
@@ -92,15 +90,11 @@ async def extract_structure(
   "stance": "insist" | "partial_concede" | "concede",
   "confidence": 0.0-1.0,
   "challenges": ["对对方的质疑1", "质疑2"],
-  "data_requests": [{{"engine": "quant|data|info", "action": "动作名", "params": {{"code": "<股票代码>"}}}}],
   "retail_sentiment_score": null,
   "speak": true
 }}
 
 重要约束：
-- data_requests 中的 action 必须且只能从以下列表中选择：{allowed_actions_str}
-- action 必须是英文字符串，严禁使用中文或自造名称，不在列表中的一律不填
-- 如果发言中没有明确的数据请求，或所需 action 不在列表中，data_requests 填空数组 []
 - retail_sentiment_score 仅 retail_investor 角色填写（-1.0 到 +1.0），其他角色必须为 null
 - 只返回 JSON，不要任何其他文字"""
 
@@ -115,14 +109,7 @@ async def extract_structure(
             "stance": parsed.get("stance", "insist"),
             "confidence": float(parsed.get("confidence", 0.5)),
             "challenges": parsed.get("challenges", []),
-            "data_requests": [
-                DataRequest(
-                    requested_by=role, round=blackboard.round,
-                    status="pending", engine=dr.get("engine", ""),
-                    action=dr.get("action", ""), params=dr.get("params", {}),
-                )
-                for dr in parsed.get("data_requests", [])
-            ],
+            "data_requests": [],
             "retail_sentiment_score": _parse_sentiment_score(score),
             "speak": parsed.get("speak", True),
         }
@@ -197,34 +184,8 @@ def _parse_debate_entry(role: str, round: int, raw: str) -> DebateEntry:
         elif any(k in first_line for k in ("部分让步", "partial", "承认", "部分同意")):
             stance = "partial_concede"
 
-        # 2. 分割【质疑】和【数据请求】块
+        # 2. 提取【质疑】块
         challenges: list[str] = []
-        data_requests: list[DataRequest] = []
-
-        # 提取【数据请求】块
-        data_req_match = re.search(r"【数据请求】(.*?)(?=【|$)", text, re.DOTALL)
-        if data_req_match:
-            for line in data_req_match.group(1).strip().splitlines():
-                line = line.strip().lstrip("-•·").strip()
-                if not line:
-                    continue
-                # 格式：引擎.动作(参数json) 或 引擎.动作
-                m = re.match(r"(\w+)\.(\w+)(?:\((.+)\))?", line)
-                if m:
-                    engine, action = m.group(1), m.group(2)
-                    params: dict = {}
-                    if m.group(3):
-                        try:
-                            params = json.loads(m.group(3))
-                        except Exception:
-                            params = {"raw": m.group(3)}
-                    data_requests.append(DataRequest(
-                        requested_by=role, engine=engine,
-                        action=action, params=params, round=round,
-                    ))
-            text = text[:data_req_match.start()].strip()
-
-        # 提取【质疑】块
         challenge_match = re.search(r"【质疑】(.*?)(?=【|$)", text, re.DOTALL)
         if challenge_match:
             for line in challenge_match.group(1).strip().splitlines():
@@ -242,7 +203,6 @@ def _parse_debate_entry(role: str, round: int, raw: str) -> DebateEntry:
             argument=argument,
             challenges=challenges,
             confidence=0.5,
-            data_requests=data_requests,
         )
     except Exception as e:
         logger.warning(f"解析辩论发言失败 [{role}]: {e}，使用 fallback")
@@ -373,9 +333,6 @@ async def speak_stream(
     )
 
     # Phase 3: blackboard 更新
-    if not is_final_round:
-        validated = validate_data_requests(role, entry.data_requests)
-        blackboard.data_requests.extend(validated)
     blackboard.transcript.append(entry)
 
     yield sse("debate_entry_complete", entry.model_dump(mode="json"))
@@ -414,10 +371,6 @@ async def speak(
     except Exception as e:
         logger.warning(f"辩论角色 [{role}] LLM 失败: {e}，使用 fallback")
         entry = _fallback_entry(role, blackboard.round, reason=str(e))
-
-    if not is_final_round:
-        validated = validate_data_requests(role, entry.data_requests)
-        blackboard.data_requests.extend(validated)
 
     return entry
 
