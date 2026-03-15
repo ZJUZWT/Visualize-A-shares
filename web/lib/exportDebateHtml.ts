@@ -79,7 +79,7 @@ function renderTranscript(transcript: TranscriptItem[]): string {
       const roleColor = isBull ? "#f87171" : isBear ? "#34d399" : "#94a3b8";
       const align = isBull ? "flex-start" : isBear ? "flex-end" : "center";
       const stanceText = entry.stance === "concede" ? " · 认输" : entry.stance === "partial_concede" ? " · 部分让步" : "";
-      const confidencePct = Math.round(entry.confidence * 100);
+      const confidencePct = Number.isFinite(entry.confidence) ? Math.round(entry.confidence * 100) : 0;
       return `<div style='display:flex;justify-content:${align};margin:8px 0'>
         <div style='max-width:70%;background:#1e293b;border-radius:12px;padding:12px 16px;${isObserver ? "max-width:90%;background:#0f172a;border:1px solid #1e293b" : ""}'>
           <div style='font-size:11px;color:${roleColor};margin-bottom:6px;font-weight:600'>
@@ -140,7 +140,7 @@ export function exportDebateHtml(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>辩论记录 · ${escapeHtml(target)} · ${now}</title>
+<title>辩论记录 · ${escapeHtml(target)} · ${escapeHtml(now)}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0a0f1e; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; padding: 24px; }
@@ -183,7 +183,8 @@ export function exportDebateHtml(
   a.href = url;
   const safeTarget = target.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "_");
   a.download = `debate-${safeTarget}-${Date.now()}.html`;
+  document.body.appendChild(a);
   a.click();
-  // 延迟 revoke，确保浏览器有时间启动下载
+  document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
