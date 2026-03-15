@@ -7,7 +7,8 @@ import { useExpertStore } from "@/stores/useExpertStore";
 
 export function InputBar() {
   const [input, setInput] = useState("");
-  const { sendMessage, isStreaming, error } = useExpertStore();
+  const { sendMessage, status, error } = useExpertStore();
+  const isStreaming = status === "thinking";
 
   const handleSend = async () => {
     if (!input.trim() || isStreaming) return;
