@@ -15,9 +15,9 @@ interface InputBarProps {
 export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen, onStop }: InputBarProps) {
   const [code, setCode] = useState("");
   const [maxRounds, setMaxRounds] = useState(3);
-  const [stopping, setStopping] = useState(false);
 
   const busy = status === "debating" || status === "final_round" || status === "judging";
+  const stopping = status === "stopped";
 
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] shadow-md px-5 py-3 flex items-center gap-3">
@@ -58,7 +58,7 @@ export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen,
 
           {busy ? (
             <button
-              onClick={() => { setStopping(true); onStop(); }}
+              onClick={() => { onStop(); }}
               disabled={stopping}
               className="h-10 px-5 rounded-lg text-sm font-medium bg-red-500 text-white
                          hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed
@@ -68,7 +68,7 @@ export default function InputBar({ status, isReplayMode, onStart, onHistoryOpen,
             </button>
           ) : (
             <button
-              onClick={() => { setStopping(false); code && onStart(code, maxRounds); }}
+              onClick={() => { code && onStart(code, maxRounds); }}
               disabled={!code}
               className="h-10 px-5 rounded-lg text-sm font-medium bg-[var(--accent)] text-white
                          hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed

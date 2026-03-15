@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useDebateStore } from "@/stores/useDebateStore";
 import BullBearArena from "./BullBearArena";
 import InputBar from "./InputBar";
@@ -25,9 +25,9 @@ export default function DebatePage() {
   const [partialSummary, setPartialSummary] = useState<PartialSummary | null>(null);
 
   // 收到新裁决时自动展示
-  const prevVerdictRef = useState<string | null>(null);
-  if (judgeVerdict && judgeVerdict.debate_id !== prevVerdictRef[0]) {
-    prevVerdictRef[0] = judgeVerdict.debate_id;
+  const prevVerdictRef = useRef<string | null>(null);
+  if (judgeVerdict && judgeVerdict.debate_id !== prevVerdictRef.current) {
+    prevVerdictRef.current = judgeVerdict.debate_id;
     if (!isReplayMode) setShowVerdict(true);
   }
 
@@ -35,6 +35,7 @@ export default function DebatePage() {
   useEffect(() => {
     if (status !== "stopped" || !currentTarget) return;
     setPartialSummary(null);
+    const { transcript } = useDebateStore.getState();
     fetch(`${API_BASE}/api/v1/debate/summarize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -43,7 +44,7 @@ export default function DebatePage() {
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setPartialSummary(data as PartialSummary); })
       .catch(() => {});
-  }, [status, currentTarget]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, currentTarget]);
 
   const handleStopConfirm = () => {
     setShowStopConfirm(false);

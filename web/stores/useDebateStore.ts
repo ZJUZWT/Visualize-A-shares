@@ -6,6 +6,9 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
+// 模块级变量，不放入 Zustand state，避免序列化问题
+let _abortController: AbortController | null = null;
+
 export type TranscriptItem =
   | { type: "entry"; data: DebateEntry }
   | { type: "round_divider"; round: number; is_final: boolean }
@@ -23,7 +26,6 @@ interface DebateStore {
   error: string | null;
   _observerSpokenThisRound: Record<string, boolean>;
   currentTarget: string | null;
-  _abortController: AbortController | null;
 
   startDebate: (code: string, maxRounds: number) => Promise<void>;
   loadReplay: (debateId: string) => Promise<void>;
@@ -46,7 +48,6 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
   error: null,
   _observerSpokenThisRound: {},
   currentTarget: null,
-  _abortController: null,
 
   reset: () => set({
     status: "idle",
@@ -59,25 +60,25 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
     error: null,
     _observerSpokenThisRound: {},
     currentTarget: null,
-    _abortController: null,
   }),
 
   stopDebate: () => {
-    get()._abortController?.abort();
+    _abortController?.abort();
+    _abortController = null;
     set({ status: "stopped" });
   },
 
   startDebate: async (code, maxRounds) => {
     get().reset();
-    const controller = new AbortController();
-    set({ status: "debating", currentTarget: code, _abortController: controller });
+    _abortController = new AbortController();
+    set({ status: "debating", currentTarget: code });
 
     try {
       const res = await fetch(`${API_BASE}/api/v1/debate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, max_rounds: maxRounds }),
-        signal: controller.signal,
+        signal: _abortController.signal,
       });
 
       if (!res.ok) {
