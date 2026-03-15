@@ -275,72 +275,78 @@ def _build_context_for_role(blackboard: Blackboard) -> str:
     if blackboard.as_of_date:
         parts.append(f"## 辩论时间基准\n当前讨论基于 {blackboard.as_of_date} 收盘后的市场环境。所有数据截止到该日期。\n")
 
-    # 行业底层逻辑
-    if blackboard.industry_cognition:
-        ic = blackboard.industry_cognition
-        parts.append(f"## 行业底层逻辑（{ic.industry}）")
-        parts.append(f"\n### 产业链")
-        parts.append(f"上游: {', '.join(ic.upstream)}")
-        parts.append(f"下游: {', '.join(ic.downstream)}")
-        parts.append(f"核心驱动变量: {', '.join(ic.core_drivers)}")
-        parts.append(f"\n### 成本结构\n{ic.cost_structure}")
-        parts.append(f"\n### 行业壁垒\n{ic.barriers}")
-        parts.append(f"\n### 供需格局\n{ic.supply_demand}")
-        if ic.common_traps:
-            parts.append(f"\n### ⚠ 常见认知陷阱（务必注意）")
-            for i, trap in enumerate(ic.common_traps, 1):
-                parts.append(f"{i}. {trap}")
-        parts.append(f"\n### 周期定位\n{ic.cycle_position}：{ic.cycle_reasoning}")
-        if ic.catalysts:
-            parts.append(f"\n### 潜在催化剂")
-            for c in ic.catalysts:
-                parts.append(f"- {c}")
-        if ic.risks:
-            parts.append(f"\n### 关键风险")
-            for r in ic.risks:
-                parts.append(f"- {r}")
+    # 快速模式：用压缩摘要替代 facts + industry_cognition
+    if blackboard.mode == "fast" and blackboard.facts_summary:
+        parts.append("## 市场数据摘要（压缩版）")
+        parts.append(blackboard.facts_summary)
         parts.append("")
+    else:
+        # 行业底层逻辑
+        if blackboard.industry_cognition:
+            ic = blackboard.industry_cognition
+            parts.append(f"## 行业底层逻辑（{ic.industry}）")
+            parts.append(f"\n### 产业链")
+            parts.append(f"上游: {', '.join(ic.upstream)}")
+            parts.append(f"下游: {', '.join(ic.downstream)}")
+            parts.append(f"核心驱动变量: {', '.join(ic.core_drivers)}")
+            parts.append(f"\n### 成本结构\n{ic.cost_structure}")
+            parts.append(f"\n### 行业壁垒\n{ic.barriers}")
+            parts.append(f"\n### 供需格局\n{ic.supply_demand}")
+            if ic.common_traps:
+                parts.append(f"\n### ⚠ 常见认知陷阱（务必注意）")
+                for i, trap in enumerate(ic.common_traps, 1):
+                    parts.append(f"{i}. {trap}")
+            parts.append(f"\n### 周期定位\n{ic.cycle_position}：{ic.cycle_reasoning}")
+            if ic.catalysts:
+                parts.append(f"\n### 潜在催化剂")
+                for c in ic.catalysts:
+                    parts.append(f"- {c}")
+            if ic.risks:
+                parts.append(f"\n### 关键风险")
+                for r in ic.risks:
+                    parts.append(f"- {r}")
+            parts.append("")
 
-    # 公用初始数据（facts）
-    if blackboard.facts:
-        parts.append("## 初始数据")
-        for action, data in blackboard.facts.items():
-            label = ACTION_TITLE_MAP.get(action, action)
-            parts.append(f"\n### {label}")
-            if isinstance(data, dict):
-                # 日线数据特殊处理：展示全部 recent 记录
-                if action == "get_daily_history" and "recent" in data:
-                    parts.append(f"共 {data.get('days', '?')} 个交易日，最近 {len(data['recent'])} 条：")
-                    for row in data["recent"]:
-                        date_str = str(row.get("date", ""))[:10]
-                        parts.append(
-                            f"  {date_str} 开:{row.get('open','')} 高:{row.get('high','')} "
-                            f"低:{row.get('low','')} 收:{row.get('close','')} "
-                            f"涨跌:{row.get('pct_chg','')}% 换手:{row.get('turnover_rate','')}%"
-                        )
-                # 新闻数据特殊处理：逐条展示标题和情感
-                elif action == "get_news" and isinstance(data, list):
-                    for item in data:
-                        if hasattr(item, "model_dump"):
-                            item = item.model_dump()
-                        title = item.get("title", "")
-                        sentiment = item.get("sentiment", "")
-                        source = item.get("source", "")
-                        time_str = item.get("publish_time", "")
-                        parts.append(f"  [{sentiment}] {title} ({source} {time_str})")
-                else:
-                    parts.append(_format_fact(data))
-            elif isinstance(data, list):
-                # 新闻/公告列表
-                for item in data:
-                    if isinstance(item, dict):
-                        title = item.get("title", "")
-                        sentiment = item.get("sentiment", "")
-                        parts.append(f"  [{sentiment}] {title}")
+        # 公用初始数据（facts）
+        if blackboard.facts:
+            parts.append("## 初始数据")
+            for action, data in blackboard.facts.items():
+                label = ACTION_TITLE_MAP.get(action, action)
+                parts.append(f"\n### {label}")
+                if isinstance(data, dict):
+                    # 日线数据特殊处理：展示全部 recent 记录
+                    if action == "get_daily_history" and "recent" in data:
+                        parts.append(f"共 {data.get('days', '?')} 个交易日，最近 {len(data['recent'])} 条：")
+                        for row in data["recent"]:
+                            date_str = str(row.get("date", ""))[:10]
+                            parts.append(
+                                f"  {date_str} 开:{row.get('open','')} 高:{row.get('high','')} "
+                                f"低:{row.get('low','')} 收:{row.get('close','')} "
+                                f"涨跌:{row.get('pct_chg','')}% 换手:{row.get('turnover_rate','')}%"
+                            )
+                    # 新闻数据特殊处理：逐条展示标题和情感
+                    elif action == "get_news" and isinstance(data, list):
+                        for item in data:
+                            if hasattr(item, "model_dump"):
+                                item = item.model_dump()
+                            title = item.get("title", "")
+                            sentiment = item.get("sentiment", "")
+                            source = item.get("source", "")
+                            time_str = item.get("publish_time", "")
+                            parts.append(f"  [{sentiment}] {title} ({source} {time_str})")
                     else:
-                        parts.append(f"  {item}")
-            else:
-                parts.append(str(data))
+                        parts.append(_format_fact(data))
+                elif isinstance(data, list):
+                    # 新闻/公告列表
+                    for item in data:
+                        if isinstance(item, dict):
+                            title = item.get("title", "")
+                            sentiment = item.get("sentiment", "")
+                            parts.append(f"  [{sentiment}] {title}")
+                        else:
+                            parts.append(f"  {item}")
+                else:
+                    parts.append(str(data))
 
     # Worker 初步判断
     if blackboard.worker_verdicts:
@@ -1382,6 +1388,7 @@ async def run_debate(
         "target": blackboard.target,
         "as_of_date": blackboard.as_of_date,
         "max_rounds": blackboard.max_rounds,
+        "mode": blackboard.mode,
         "participants": ["bull_expert", "bear_expert", "retail_investor", "smart_money", "judge"],
     })
 
@@ -1392,6 +1399,11 @@ async def run_debate(
     # 行业产业链认知
     async for event in generate_industry_cognition(blackboard, llm):
         yield event
+
+    # 快速模式：LLM 预压缩
+    if blackboard.mode == "fast":
+        async for event in compress_facts(blackboard, llm):
+            yield event
 
     while blackboard.round < blackboard.max_rounds:
         blackboard.round += 1
