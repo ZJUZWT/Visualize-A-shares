@@ -69,3 +69,96 @@ async def test_extract_structure_fallback_on_invalid_json(bb):
 
     assert result["stance"] == "insist"
     assert result["confidence"] == 0.5
+
+
+# ── speak_stream ──────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_speak_stream_yields_tokens_then_complete(bb):
+    from agent.debate import speak_stream
+    from agent.memory import AgentMemory
+
+    mock_llm = AsyncMock()
+
+    async def fake_stream(messages):
+        for char in ["国", "电", "南", "瑞", "是"]:
+            yield char
+
+    mock_llm.chat_stream = fake_stream
+    mock_llm.chat = AsyncMock(return_value=json.dumps({
+        "stance": "insist", "confidence": 0.8,
+        "challenges": ["质疑1"], "data_requests": [],
+        "retail_sentiment_score": None, "speak": True,
+    }))
+
+    mock_memory = MagicMock(spec=AgentMemory)
+    mock_memory.recall = MagicMock(return_value=[])
+
+    events = []
+    async for event in speak_stream("bull_expert", bb, mock_llm, mock_memory, False):
+        events.append(event)
+
+    token_events = [e for e in events if e["event"] == "debate_token"]
+    complete_events = [e for e in events if e["event"] == "debate_entry_complete"]
+
+    assert len(token_events) >= 1
+    assert len(complete_events) == 1
+    assert complete_events[0]["data"]["argument"] == "国电南瑞是"
+    assert complete_events[0]["data"]["stance"] == "insist"
+    assert len(bb.transcript) == 1
+
+
+@pytest.mark.asyncio
+async def test_speak_stream_handles_llm_interruption(bb):
+    from agent.debate import speak_stream
+    from agent.memory import AgentMemory
+
+    mock_llm = AsyncMock()
+
+    async def failing_stream(messages):
+        yield "部分"
+        yield "内容"
+        raise ConnectionError("stream broken")
+
+    mock_llm.chat_stream = failing_stream
+    mock_llm.chat = AsyncMock(return_value='{"stance":"insist","confidence":0.5,"challenges":[],"data_requests":[],"speak":true}')
+
+    mock_memory = MagicMock(spec=AgentMemory)
+    mock_memory.recall = MagicMock(return_value=[])
+
+    events = []
+    async for event in speak_stream("bull_expert", bb, mock_llm, mock_memory, False):
+        events.append(event)
+
+    complete = [e for e in events if e["event"] == "debate_entry_complete"][0]
+    assert "(发言中断)" in complete["data"]["argument"]
+    assert "部分内容" in complete["data"]["argument"]
+
+
+@pytest.mark.asyncio
+async def test_speak_stream_token_batching(bb):
+    from agent.debate import speak_stream
+    from agent.memory import AgentMemory
+
+    mock_llm = AsyncMock()
+
+    async def stream_with_punctuation(messages):
+        for t in ["一", "二", "三", "。", "四", "五", "六", "七", "八", "九", "十", "末"]:
+            yield t
+
+    mock_llm.chat_stream = stream_with_punctuation
+    mock_llm.chat = AsyncMock(return_value='{"stance":"insist","confidence":0.5,"challenges":[],"data_requests":[],"speak":true}')
+
+    mock_memory = MagicMock(spec=AgentMemory)
+    mock_memory.recall = MagicMock(return_value=[])
+
+    events = []
+    async for event in speak_stream("bull_expert", bb, mock_llm, mock_memory, False):
+        events.append(event)
+
+    token_events = [e for e in events if e["event"] == "debate_token"]
+    # 批次: ["一二三。"] (遇句号flush) + ["四五六七八"] (满5) + ["九十末"] (剩余flush)
+    assert len(token_events) == 3
+    assert token_events[0]["data"]["tokens"] == "一二三。"
+    assert token_events[1]["data"]["tokens"] == "四五六七八"
+    assert token_events[2]["data"]["tokens"] == "九十末"
