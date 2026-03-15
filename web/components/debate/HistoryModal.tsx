@@ -35,9 +35,10 @@ function relativeTime(iso: string): string {
 interface HistoryModalProps {
   onClose: () => void;
   onSelect: (debateId: string) => void;
+  onNew: () => void;
 }
 
-export default function HistoryModal({ onClose, onSelect }: HistoryModalProps) {
+export default function HistoryModal({ onClose, onSelect, onNew }: HistoryModalProps) {
   const [items, setItems] = useState<DebateHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -52,14 +53,22 @@ export default function HistoryModal({ onClose, onSelect }: HistoryModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
          onClick={onClose}>
-      <div className="relative bg-[var(--bg-secondary)] rounded-xl border border-[var(--border)]
-                      w-full max-w-md max-h-[60vh] flex flex-col"
+      <div className="relative bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border)]
+                      w-full max-w-md max-h-[60vh] flex flex-col shadow-xl"
            onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-          <span className="text-sm font-semibold text-[var(--text-primary)]">历史辩论</span>
-          <button onClick={onClose} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
-            <X size={16} />
-          </button>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
+          <span className="text-base font-semibold text-[var(--text-primary)]">历史辩论</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { onNew(); onClose(); }}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
+            >
+              + 新建对话
+            </button>
+            <button onClick={onClose} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="overflow-y-auto flex-1">
@@ -80,7 +89,7 @@ export default function HistoryModal({ onClose, onSelect }: HistoryModalProps) {
               <button
                 key={item.debate_id}
                 onClick={() => { onSelect(item.debate_id); onClose(); }}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[var(--bg-primary)]
+                className="w-full flex items-center gap-4 px-6 py-4 hover:bg-[var(--bg-primary)]
                            border-b border-[var(--border)] last:border-0 text-left transition-colors"
               >
                 <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: signalColor }} />

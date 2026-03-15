@@ -53,16 +53,20 @@ def query_market_overview(da: DataAccess) -> str:
     """全市场概览快照"""
 
     if da.is_online():
-        # 尝试从 API 获取
         health = da.api_get("/api/v1/health")
-        # 尝试获取地形数据摘要（从搜索接口间接获取）
-        search_all = da.api_get("/api/v1/stocks/search", params={"q": ""})
         factor_data = da.api_get("/api/v1/factor/weights")
 
-        if search_all and "results" in search_all:
-            stocks = search_all["results"]
-            if stocks:
-                return _format_market_overview_online(stocks, health, factor_data)
+        # 优先用带 cluster_id 的全量数据
+        all_stocks = da.api_get("/api/v1/stocks/all")
+        if all_stocks and all_stocks.get("results"):
+            return _format_market_overview_online(all_stocks["results"], health, factor_data)
+
+        # fallback: 用 snapshot 接口（无 cluster_id）
+        snapshot_data = da.api_get("/api/v1/data/snapshot")
+        if snapshot_data and snapshot_data.get("stocks"):
+            return _format_market_overview_online(snapshot_data["stocks"], health, factor_data)
+
+        return error_msg("NO_DATA", "无可用市场数据", "后端在线但暂无数据，请先运行 compute_terrain。")
 
     # 离线模式
     snapshot = da.get_latest_snapshot()
@@ -356,11 +360,17 @@ def query_stock(da: DataAccess, code: str) -> str:
     profile = profiles.get(code, {})
 
     if da.is_online():
+        # 优先从内存聚类结果搜索（含 cluster_id/rise_prob）
         result = da.api_get("/api/v1/stocks/search", params={"q": code})
         if result and result.get("results"):
             matches = [s for s in result["results"] if s.get("code") == code]
             if matches:
                 return _format_stock_online(matches[0], profile, da)
+        # fallback: 用 snapshot 接口
+        stock = da.api_get(f"/api/v1/data/snapshot/{code}")
+        if stock and "code" in stock:
+            return _format_stock_online(stock, profile, da)
+        return error_msg("NOT_FOUND", f"未找到股票 {code}", "可使用 search_stocks 搜索。")
 
     # 离线
     df = da.db_query("SELECT * FROM stock_snapshot WHERE code = ?", [code])
@@ -981,54 +991,59 @@ def compute_terrain(
 def get_technical_indicators(da: "DataAccess", code: str) -> str:
     """获取技术指标"""
     import json
-    import datetime
 
+    # 在线时走 REST API，避免 DuckDB 连接冲突
+    if da.is_online():
+        data = da.api_get(f"/api/v1/quant/indicators/{code}")
+        if data:
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+    # 离线降级：本地计算
     try:
         from quant_engine import get_quant_engine
     except ImportError:
         return json.dumps({"error": "QuantEngine 未安装"}, ensure_ascii=False)
 
-    # 获取日线数据
     daily = da.get_daily_history(code, days=90)
     if daily is None or daily.empty:
         return json.dumps({"error": f"无 {code} 日线数据"}, ensure_ascii=False)
 
     qe = get_quant_engine()
     indicators = qe.compute_indicators(daily)
-    return json.dumps({
-        "code": code,
-        "indicators": indicators,
-    }, ensure_ascii=False, indent=2)
+    return json.dumps({"code": code, "indicators": indicators}, ensure_ascii=False, indent=2)
 
 
 def get_factor_scores(da: "DataAccess", code: str) -> str:
     """获取多因子评分"""
     import json
 
-    try:
-        from quant_engine import get_quant_engine
-    except ImportError:
-        return json.dumps({"error": "QuantEngine 未安装"}, ensure_ascii=False)
+    if not da.is_online():
+        return json.dumps({"error": "后端未在线，无法获取因子评分"}, ensure_ascii=False)
 
     stock_data = da.get_stock_detail(code)
     if not stock_data:
         return json.dumps({"error": f"无 {code} 数据"}, ensure_ascii=False)
 
-    qe = get_quant_engine()
-    weights, source = qe.get_factor_weights()
-    factor_defs = qe.get_factor_defs()
+    weights_data = da.api_get("/api/v1/quant/factor/weights")
+    defs_data = da.api_get("/api/v1/quant/factor/defs")
+    if not weights_data or not defs_data:
+        return json.dumps({"error": "无法获取因子定义"}, ensure_ascii=False)
+
+    weight_map = {f["name"]: f["weight"] for f in weights_data.get("factors", [])}
+    source = weights_data.get("weight_source", "default")
+
     scores = {}
-    for fdef in factor_defs:
-        col = fdef.source_col
+    for fdef in defs_data:
+        col = fdef.get("source_col", "")
         if col.startswith("_"):
             continue
         val = stock_data.get(col)
         if val is not None:
-            scores[fdef.name] = {
+            scores[fdef["name"]] = {
                 "value": round(float(val), 4),
-                "direction": fdef.direction,
-                "weight": weights.get(fdef.name, fdef.default_weight),
-                "desc": fdef.desc,
+                "direction": fdef.get("direction", 1),
+                "weight": weight_map.get(fdef["name"], fdef.get("default_weight", 0)),
+                "desc": fdef.get("desc", ""),
             }
     return json.dumps({
         "code": code,

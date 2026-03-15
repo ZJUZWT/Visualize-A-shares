@@ -1,7 +1,9 @@
 {
   "mcpServers": {
     "stockterrain": {
-      "url": "http://localhost:8001/mcp"
+      "command": "/Users/swannzhang/Workspace/AIProjects/A_Claude/engine/.venv/bin/python",
+      "args": ["-m", "mcpserver"],
+      "cwd": "/Users/swannzhang/Workspace/AIProjects/A_Claude/engine"
     },
     "memory": {
       "command": "npx",

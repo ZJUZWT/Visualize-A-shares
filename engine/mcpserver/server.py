@@ -198,10 +198,7 @@ def get_judge_verdict(debate_id: str) -> str:
 # ─── 入口 ─────────────────────────────────────────────
 
 def main():
-    import os
-    server.settings.host = os.getenv("MCP_HOST", "0.0.0.0")
-    server.settings.port = int(os.getenv("MCP_PORT", "8001"))
-    server.run(transport="streamable-http")
+    server.run(transport="stdio")
 
 
 if __name__ == "__main__":

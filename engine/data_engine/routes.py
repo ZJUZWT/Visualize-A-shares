@@ -62,6 +62,19 @@ async def get_snapshot_history(
     return {"days": len(result), "snapshots": result}
 
 
+@router.get("/snapshot/{code}")
+async def get_snapshot_by_code(code: str):
+    """获取单只股票的行情快照"""
+    de = get_data_engine()
+    df = await asyncio.to_thread(de.get_snapshot)
+    if df.empty:
+        raise HTTPException(status_code=404, detail=f"未找到股票: {code}")
+    row = df[df["code"] == code]
+    if row.empty:
+        raise HTTPException(status_code=404, detail=f"未找到股票: {code}")
+    return row.iloc[0].to_dict()
+
+
 @router.get("/daily/{code}")
 async def get_daily(
     code: str,

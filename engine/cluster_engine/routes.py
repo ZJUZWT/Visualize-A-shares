@@ -509,6 +509,16 @@ async def search_stocks(q: str = Query(..., min_length=1)):
     return {"results": results}
 
 
+@router.get("/stocks/all")
+async def get_all_stocks():
+    """返回全量股票（含 cluster_id），来自最近一次地形计算的内存结果"""
+    ce = get_cluster_engine()
+    pipeline = ce.pipeline
+    if pipeline.last_result and pipeline.last_result.stocks:
+        return {"results": pipeline.last_result.stocks, "total": len(pipeline.last_result.stocks)}
+    return {"results": [], "total": 0}
+
+
 @router.post("/factor/backtest")
 async def run_factor_backtest(
     rolling_window: int = Query(20, description="ICIR 滚动窗口天数"),

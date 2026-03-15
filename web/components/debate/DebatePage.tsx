@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useDebateStore } from "@/stores/useDebateStore";
 import BullBearArena from "./BullBearArena";
-import ObserverBar from "./ObserverBar";
 import InputBar from "./InputBar";
 import HistoryModal from "./HistoryModal";
 import JudgeVerdictOverlay from "./JudgeVerdictOverlay";
@@ -12,7 +11,7 @@ export default function DebatePage() {
   const {
     status, transcript, observerState, roleState,
     judgeVerdict, isReplayMode, error,
-    startDebate, loadReplay,
+    startDebate, loadReplay, reset,
   } = useDebateStore();
 
   const [showHistory, setShowHistory] = useState(false);
@@ -26,21 +25,23 @@ export default function DebatePage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-hidden gap-3">
       {/* 错误提示 */}
       {error && (
-        <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-xs text-red-400">
+        <div className="px-5 py-3 bg-red-500/10 border-b border-red-500/20 text-sm text-red-400">
           {error}
         </div>
       )}
 
-      {/* 主体：多头/发言流/空头 */}
-      <BullBearArena transcript={transcript} roleState={roleState} />
+      {/* 主体：多头/发言流/空头 — flex-1 撑满剩余空间 */}
+      <BullBearArena
+        transcript={transcript}
+        roleState={roleState}
+        verdict={isReplayMode ? judgeVerdict : null}
+        observerState={observerState}
+      />
 
-      {/* 观察员栏 */}
-      <ObserverBar observerState={observerState} />
-
-      {/* 输入栏 */}
+      {/* 输入栏 — 始终在底部 */}
       <InputBar
         status={status}
         isReplayMode={isReplayMode}
@@ -48,16 +49,7 @@ export default function DebatePage() {
         onHistoryOpen={() => setShowHistory(true)}
       />
 
-      {/* 回放模式：静态裁判结果嵌入页面 */}
-      {isReplayMode && judgeVerdict && (
-        <JudgeVerdictOverlay
-          verdict={judgeVerdict}
-          isReplay={true}
-          onClose={() => {}}
-        />
-      )}
-
-      {/* 实时模式：裁判揭幕动画 */}
+      {/* 实时模式：裁判揭幕动画（全屏遮罩） */}
       {!isReplayMode && judgeVerdict && showVerdict && (
         <JudgeVerdictOverlay
           verdict={judgeVerdict}
@@ -71,6 +63,7 @@ export default function DebatePage() {
         <HistoryModal
           onClose={() => setShowHistory(false)}
           onSelect={loadReplay}
+          onNew={() => { reset(); setShowHistory(false); }}
         />
       )}
     </div>
