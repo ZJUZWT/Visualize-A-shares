@@ -105,12 +105,44 @@ class RoundEval(BaseModel):
     data_utilization: dict = Field(default_factory=dict)
 
 
+class IndustryCognition(BaseModel):
+    """行业产业链认知 — LLM 生成，缓存复用"""
+    industry: str                    # 行业名称（如"小金属"、"半导体"）
+    target: str                      # 触发股票代码
+
+    # 产业链结构
+    upstream: list[str] = Field(default_factory=list)
+    downstream: list[str] = Field(default_factory=list)
+    core_drivers: list[str] = Field(default_factory=list)
+    cost_structure: str = ""
+    barriers: str = ""
+
+    # 供需格局
+    supply_demand: str = ""
+
+    # 认知陷阱
+    common_traps: list[str] = Field(default_factory=list)
+
+    # 周期定位
+    cycle_position: str = ""         # 景气上行|下行|拐点向上|拐点向下|高位震荡|底部盘整
+    cycle_reasoning: str = ""
+
+    # 催化剂/风险
+    catalysts: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+
+    # 元数据
+    generated_at: str = ""
+    as_of_date: str = ""
+
+
 class Blackboard(BaseModel):
     """辩论共享状态 — 所有参与者读写的中心桌面"""
     target: str
     code: str = ""                       # 解析出的股票代码，空字符串表示未解析或非股票辩题
     debate_id: str                       # "{target}_{YYYYMMDDHHMMSS}"
     as_of_date: str = ""                 # 辩论时间锚点（最新交易日 YYYY-MM-DD），数据拉取以此为 end
+    industry_cognition: IndustryCognition | None = None  # 行业认知
 
     # 事实层（Phase 2/3 产出，只读）
     facts: dict[str, Any] = Field(default_factory=dict)
