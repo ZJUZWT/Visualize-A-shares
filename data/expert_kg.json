@@ -1,0 +1,33 @@
+{
+  "nodes": [
+    {
+      "id": "543b127f-ef75-4058-8efc-8fcc2be282d9",
+      "type": "belief",
+      "content": "基本面是长期定价的锚，但短期价格由情绪和资金驱动",
+      "confidence": 0.7,
+      "created_at": "2026-03-15T16:30:24.854185"
+    },
+    {
+      "id": "b685cdce-d062-4121-8971-ee2bb0422cfc",
+      "type": "belief",
+      "content": "分散投资优于集中押注，除非有极高确定性",
+      "confidence": 0.65,
+      "created_at": "2026-03-15T16:30:24.854250"
+    },
+    {
+      "id": "381142df-4138-424b-9dce-9eb2041f55a8",
+      "type": "belief",
+      "content": "政策是A股不可忽视的系统性变量",
+      "confidence": 0.75,
+      "created_at": "2026-03-15T16:30:24.854277"
+    },
+    {
+      "id": "ab207cd4-153c-4c05-8cd2-fee3b16ac212",
+      "type": "belief",
+      "content": "散户情绪是反向指标，极度乐观时需警惕",
+      "confidence": 0.6,
+      "created_at": "2026-03-15T16:30:24.854302"
+    }
+  ],
+  "edges": []
+}

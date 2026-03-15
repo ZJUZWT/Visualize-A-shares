@@ -85,7 +85,24 @@ class DebateEntry(BaseModel):
     challenges: list[str] = Field(default_factory=list)
     data_requests: list[DataRequest] = Field(default_factory=list)
     confidence: float = 0.5
+    inner_confidence: float | None = None  # 专家内心真实 confidence（评委小评系统用）
     retail_sentiment_score: float | None = None  # 仅 retail_investor：+1极度乐观，-1极度悲观
+
+
+class RoundEvalSide(BaseModel):
+    """评委对单方的每轮评估"""
+    self_confidence: float = Field(ge=0.0, le=1.0, description="专家公开宣称的 confidence")
+    inner_confidence: float = Field(ge=0.0, le=1.0, description="专家内心真实 confidence")
+    judge_confidence: float = Field(ge=0.0, le=1.0, description="评委客观评估的 confidence")
+
+class RoundEval(BaseModel):
+    """评委每轮小评"""
+    round: int
+    bull: RoundEvalSide
+    bear: RoundEvalSide
+    bull_reasoning: str = ""
+    bear_reasoning: str = ""
+    data_utilization: dict = Field(default_factory=dict)
 
 
 class Blackboard(BaseModel):
@@ -104,6 +121,9 @@ class Blackboard(BaseModel):
 
     # 数据请求层
     data_requests: list[DataRequest] = Field(default_factory=list)
+
+    # 评委每轮评估
+    round_evals: list[RoundEval] = Field(default_factory=list)
 
     # 控制层
     round: int = 0

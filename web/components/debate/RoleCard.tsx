@@ -48,19 +48,16 @@ export default function RoleCard({ role, state }: RoleCardProps) {
         </span>
       )}
 
-      {/* 置信度 */}
+      {/* 三维置信度 */}
       {state && (
-        <div className="w-full space-y-1.5">
-          <div className="flex justify-between text-sm text-[var(--text-tertiary)]">
-            <span>置信度</span>
-            <span className="font-medium" style={{ color }}>{Math.round(state.confidence * 100)}%</span>
-          </div>
-          <div className="w-full h-2 rounded-full bg-[var(--bg-primary)]">
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${state.confidence * 100}%`, backgroundColor: color }}
-            />
-          </div>
+        <div className="w-full space-y-2">
+          <ConfidenceBar label="公开" value={state.confidence} color={color} />
+          {state.inner_confidence !== null && (
+            <ConfidenceBar label="内心" value={state.inner_confidence} color="#F59E0B" />
+          )}
+          {state.judge_confidence !== null && (
+            <ConfidenceBar label="评委" value={state.judge_confidence} color="#8B5CF6" />
+          )}
         </div>
       )}
 
@@ -70,6 +67,23 @@ export default function RoleCard({ role, state }: RoleCardProps) {
           <span className="text-3xl">🏳️</span>
         </div>
       )}
+    </div>
+  );
+}
+
+function ConfidenceBar({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="w-full space-y-1">
+      <div className="flex justify-between text-xs text-[var(--text-tertiary)]">
+        <span>{label}</span>
+        <span className="font-medium" style={{ color }}>{Math.round(value * 100)}%</span>
+      </div>
+      <div className="w-full h-1.5 rounded-full bg-[var(--bg-primary)]">
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${value * 100}%`, backgroundColor: color }}
+        />
+      </div>
     </div>
   );
 }
