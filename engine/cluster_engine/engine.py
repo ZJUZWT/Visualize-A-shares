@@ -58,3 +58,20 @@ class ClusterEngine:
                 )
         except Exception as e:
             logger.warning(f"⚠️ 启动时 ICIR 自动校准跳过: {e}")
+
+    def get_cluster_for_stock(self, code: str) -> dict | None:
+        """获取某只股票的聚类信息及关联/相似股票（供辩论系统使用）"""
+        if not self._pipeline.last_result:
+            return None
+        for s in self._pipeline.last_result.stocks:
+            if s["code"] == code:
+                return {
+                    "code": s["code"],
+                    "name": s["name"],
+                    "cluster_id": s.get("cluster_id"),
+                    "industry": s.get("industry", ""),
+                    "related_stocks": s.get("related_stocks", []),
+                    "similar_stocks": s.get("similar_stocks", []),
+                    "cluster_affinities": s.get("cluster_affinities", []),
+                }
+        return None
