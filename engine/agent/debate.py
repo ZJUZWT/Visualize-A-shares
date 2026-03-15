@@ -273,6 +273,85 @@ def _build_context_for_role(blackboard: Blackboard) -> str:
 
 # ── 核心函数 ──────────────────────────────────────────
 
+async def speak_stream(
+    role: str,
+    blackboard: Blackboard,
+    llm: BaseLLMProvider,
+    memory: AgentMemory,
+    is_final_round: bool,
+) -> AsyncGenerator[dict, None]:
+    """流式辩论发言：逐 token 推送 debate_token，最后推送 debate_entry_complete"""
+    memory_ctx = memory.recall(role, f"辩论 {blackboard.target}", top_k=3)
+    system_prompt = build_debate_system_prompt(role, blackboard.target, is_final_round)
+    context = _build_context_for_role(blackboard)
+    memory_text = ""
+    if memory_ctx:
+        memory_text = "\n## 你的历史辩论记忆\n" + "\n".join(
+            f"- {m.get('content', '')}" for m in memory_ctx[:3]
+        )
+    user_content = (
+        f"## 当前辩论状态（Round {blackboard.round}）\n\n"
+        f"{context}{memory_text}\n\n请发表你的观点。"
+    )
+    messages = [
+        ChatMessage(role="system", content=system_prompt),
+        ChatMessage(role="user", content=user_content),
+    ]
+
+    # Phase 1: 流式输出
+    tokens: list[str] = []
+    token_buf: list[str] = []
+    seq = 0
+
+    def _flush() -> dict | None:
+        nonlocal seq
+        if token_buf:
+            ev = sse("debate_token", {
+                "role": role, "round": blackboard.round,
+                "tokens": "".join(token_buf), "seq": seq,
+            })
+            seq += 1
+            token_buf.clear()
+            return ev
+        return None
+
+    try:
+        async for token in llm.chat_stream(messages):
+            tokens.append(token)
+            token_buf.append(token)
+            if len(token_buf) >= 5 or token in ("。", "\n", ".", "！", "？", "；"):
+                ev = _flush()
+                if ev:
+                    yield ev
+        ev = _flush()
+        if ev:
+            yield ev
+    except Exception as e:
+        logger.warning(f"流式中断 ({role}): {e}")
+        tokens.append("(发言中断)")
+        ev = _flush()
+        if ev:
+            yield ev
+
+    argument = "".join(tokens)
+
+    # Phase 2: 提取结构化字段
+    structure = await extract_structure(argument, role, blackboard, llm)
+
+    entry = DebateEntry(
+        role=role, round=blackboard.round,
+        argument=argument, **structure,
+    )
+
+    # Phase 3: blackboard 更新
+    if not is_final_round:
+        validated = validate_data_requests(role, entry.data_requests)
+        blackboard.data_requests.extend(validated)
+    blackboard.transcript.append(entry)
+
+    yield sse("debate_entry_complete", entry.model_dump(mode="json"))
+
+
 async def speak(
     role: str,
     blackboard: Blackboard,
