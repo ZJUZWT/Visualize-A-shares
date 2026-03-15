@@ -16,6 +16,7 @@ Blackboard 模式：
 import asyncio
 import json
 import re
+import time
 from datetime import datetime
 from typing import AsyncGenerator
 from zoneinfo import ZoneInfo
@@ -719,7 +720,6 @@ async def run_debate(
             blackboard.bear_conceded = True
 
         # 5. 数据请求逐个事件化
-        import time
         pending = [r for r in blackboard.data_requests if r.status == "pending"]
         if pending and not is_final:
             success = 0
