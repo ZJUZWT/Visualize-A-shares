@@ -446,9 +446,12 @@ async def fetch_initial_data(
             "engine": engine, "action": action, "title": title,
             "status": "pending", "result_summary": "", "round": 0,
         })
+        params: dict = {"code": blackboard.code or blackboard.target}
+        if action in ("get_news", "get_announcements"):
+            params["limit"] = 10  # 限制条数，避免情感分析超时
         req = DataRequest(
             requested_by="public", engine=engine,
-            action=action, params={"code": blackboard.code or blackboard.target}, round=0,
+            action=action, params=params, round=0,
         )
         try:
             result = await asyncio.wait_for(

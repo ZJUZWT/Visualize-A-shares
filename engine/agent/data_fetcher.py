@@ -122,10 +122,15 @@ class DataFetcher:
             mod = importlib.import_module(module_name)
             engine = getattr(mod, getter_fn)()
             method = getattr(engine, method_name)
+            # 限制新闻/公告条数，避免情感分析超时
+            params = dict(req.params)
+            if req.action in ("get_news", "get_announcements"):
+                params.setdefault("limit", 10)
+                params["limit"] = min(params["limit"], 10)
             if is_async:
-                return await method(**req.params)
+                return await method(**params)
             else:
-                return await asyncio.to_thread(method, **req.params)
+                return await asyncio.to_thread(method, **params)
         elif req.action in SELF_DISPATCH:
             method = getattr(self, req.action)
             result = await asyncio.to_thread(method, **req.params)
@@ -238,7 +243,7 @@ class DataFetcher:
             return {"error": str(e)}
 
     def get_factor_scores(self, code: str) -> dict:
-        """获取多因子评分"""
+        """获取个股因子评分（技术指标 + 因子权重）"""
         try:
             import datetime
             from data_engine import get_data_engine
@@ -250,7 +255,7 @@ class DataFetcher:
             if not isinstance(df, pd.DataFrame) or df.empty:
                 return {"error": f"无日线数据: {code}"}
             qe = get_quant_engine()
-            result = qe.predict(code, df)
+            indicators = qe.compute_indicators(df)
             weights, weight_source = qe.get_factor_weights()
             factor_defs = [
                 {"name": f.name, "direction": f.direction, "weight": weights.get(f.name, f.default_weight)}
@@ -258,9 +263,7 @@ class DataFetcher:
             ]
             return {
                 "code": code,
-                "signal": result.signal,
-                "score": result.score,
-                "confidence": result.confidence,
+                "indicators": indicators,
                 "factor_defs": factor_defs,
                 "weight_source": weight_source,
             }
