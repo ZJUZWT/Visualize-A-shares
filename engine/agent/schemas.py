@@ -91,6 +91,7 @@ class DebateEntry(BaseModel):
 class Blackboard(BaseModel):
     """辩论共享状态 — 所有参与者读写的中心桌面"""
     target: str
+    code: str = ""                       # 解析出的股票代码，空字符串表示未解析或非股票辩题
     debate_id: str                       # "{target}_{YYYYMMDDHHMMSS}"
 
     # 事实层（Phase 2/3 产出，只读）
