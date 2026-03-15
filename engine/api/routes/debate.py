@@ -137,3 +137,58 @@ async def get_debate_record(debate_id: str):
     except Exception as e:
         logger.error(f"查询辩论记录失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class SummarizeRequest(BaseModel):
+    target: str = Field(description="股票代码")
+    transcript: list[dict] = Field(description="已有辩论记录，DebateEntry 列表")
+
+
+@router.post("/debate/summarize")
+async def summarize_debate(req: SummarizeRequest):
+    """对中途终止的辩论生成简短总结"""
+    from llm.config import llm_settings
+    if not llm_settings.api_key:
+        raise HTTPException(status_code=503, detail="LLM 未配置")
+
+    if not req.transcript:
+        raise HTTPException(status_code=400, detail="transcript 为空，无法总结")
+
+    try:
+        from agent import get_orchestrator
+        orch = get_orchestrator()
+        llm = orch._llm._provider
+
+        # 构建 transcript 文本
+        lines = []
+        for entry in req.transcript:
+            role = "多头" if entry.get("role") == "bull_expert" else "空头"
+            lines.append(f"[{role} 第{entry.get('round', '?')}轮] {entry.get('argument', '')}")
+        transcript_text = "\n\n".join(lines)
+
+        prompt = f"""以下是关于股票 {req.target} 的多空辩论记录（辩论被用户中途终止）：
+
+{transcript_text}
+
+请基于已有内容，给出：
+1. 一段简短总结（100字以内），概括双方核心分歧
+2. 当前倾向：bullish（看多）/ bearish（看空）/ neutral（中性）
+
+以 JSON 格式返回：{{"summary": "...", "signal": "bullish|bearish|neutral"}}"""
+
+        response = await llm.chat([{"role": "user", "content": prompt}])
+        import json as _json
+        # 提取 JSON
+        text = response.strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        result = _json.loads(text.strip())
+        return {
+            "summary": result.get("summary", ""),
+            "signal": result.get("signal") if result.get("signal") in ("bullish", "bearish", "neutral") else None,
+        }
+    except Exception as e:
+        logger.error(f"生成总结失败: {e}")
+        raise HTTPException(status_code=500, detail=f"生成总结失败: {str(e)}")
