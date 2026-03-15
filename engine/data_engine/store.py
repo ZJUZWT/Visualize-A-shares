@@ -218,6 +218,18 @@ class DuckDBStore:
             ON shared.chat_history(session_id, created_at)
         """)
 
+        # 行业认知缓存
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS shared.industry_cognition (
+                industry    VARCHAR NOT NULL,
+                as_of_date  VARCHAR NOT NULL,
+                target      VARCHAR NOT NULL,
+                cognition_json TEXT NOT NULL,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (industry, as_of_date)
+            )
+        """)
+
         logger.info("数据表初始化完成")
 
         # ─── 迁移：为已有表添加新列 ────────────────────
