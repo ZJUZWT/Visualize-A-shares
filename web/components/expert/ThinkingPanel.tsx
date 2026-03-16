@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Sparkles,
   Users,
+  Loader2,
 } from "lucide-react";
 
 interface ThinkingPanelProps {
@@ -86,12 +87,12 @@ function MiniMarkdown({ content }: { content: string }) {
   );
 }
 
-/** 可折叠的专家回复详情 — 默认展开 */
+/** 可折叠的专家回复详情 — 默认折叠 */
 function ExpertReplyDetail({
   content,
   label,
   hasError,
-  defaultOpen = true,
+  defaultOpen = false,
 }: {
   content: string;
   label: string;
@@ -122,7 +123,8 @@ function ExpertReplyDetail({
       {expanded && (
         <div
           className={`mt-1 p-2.5 rounded-lg text-[11px] leading-relaxed max-h-[400px] overflow-y-auto
-                      border ${
+                      border text-[var(--text-primary)]
+                      ${
                         hasError
                           ? "bg-red-500/5 border-red-500/20"
                           : "bg-[var(--bg-secondary)] border-[var(--border)]"
@@ -139,12 +141,14 @@ export function ThinkingPanel({
   thinking,
   color = "var(--accent)",
 }: ThinkingPanelProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   if (thinking.length === 0) return null;
 
   // 计算错误数
   const errorCount = thinking.filter(
-    (item) => item.type === "tool_result" && item.data.hasError
+    (item) =>
+      (item.type === "tool_result" && item.data.hasError) ||
+      (item.type === "tool_call" && item.status === "error")
   ).length;
 
   return (
@@ -214,40 +218,60 @@ export function ThinkingPanel({
 
             if (item.type === "tool_call") {
               const isExpert = item.data.engine === "expert";
+              const status = item.status ?? "pending";
+              const hasResult = !!item.result;
+
+              const StatusIcon = status === "pending" ? (
+                <Loader2 size={13} className="animate-spin shrink-0 mt-0.5" style={{ color }} />
+              ) : status === "error" ? (
+                <AlertTriangle size={13} className="text-red-500 shrink-0 mt-0.5" />
+              ) : (
+                <CheckCircle2 size={13} className={isExpert ? "text-pink-500 shrink-0 mt-0.5" : "text-emerald-500 shrink-0 mt-0.5"} />
+              );
+
               return (
-                <div key={i} className="px-3 py-2 flex gap-2">
-                  {isExpert ? (
-                    <Users
-                      size={13}
-                      className="text-pink-500 shrink-0 mt-0.5"
-                    />
-                  ) : (
-                    <Wrench
-                      size={13}
-                      className="text-amber-500 shrink-0 mt-0.5"
-                    />
-                  )}
-                  <div>
-                    <span className="font-medium text-[var(--text-secondary)]">
-                      {item.data.label ||
-                        `${item.data.engine}.${item.data.action}`}
-                    </span>
-                    {isExpert && item.data.params?.question && (
-                      <p className="mt-0.5 text-[var(--text-tertiary)] text-[10px] line-clamp-1">
-                        &ldquo;{String(item.data.params.question)}&rdquo;
-                      </p>
-                    )}
-                    {!isExpert && (
-                      <span className="ml-1.5 font-mono text-[10px] text-[var(--text-tertiary)]">
-                        {item.data.engine}.{item.data.action}
-                      </span>
-                    )}
+                <div key={i} className="px-3 py-2">
+                  <div className="flex gap-2">
+                    {StatusIcon}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-[var(--text-secondary)]">
+                          {item.data.label || `${item.data.engine}.${item.data.action}`}
+                        </span>
+                        {status === "error" && (
+                          <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/10 text-red-500">
+                            调用失败
+                          </span>
+                        )}
+                      </div>
+                      {isExpert && item.data.params?.question && (
+                        <p className="mt-0.5 text-[var(--text-tertiary)] text-[10px] line-clamp-1">
+                          &ldquo;{String(item.data.params.question)}&rdquo;
+                        </p>
+                      )}
+                      {hasResult && item.result!.content && isExpert && (
+                        <ExpertReplyDetail
+                          content={item.result!.content}
+                          label={item.result!.label || item.data.label || "专家"}
+                          hasError={item.result!.hasError}
+                          defaultOpen={false}
+                        />
+                      )}
+                      {hasResult && !isExpert && (
+                        <p className={`mt-0.5 leading-relaxed line-clamp-2 ${
+                          item.result!.hasError ? "text-red-400 text-[10px]" : "text-[var(--text-tertiary)]"
+                        }`}>
+                          {item.result!.summary}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
             }
 
             if (item.type === "tool_result") {
+              // fallback: 仅当 tool_result 未被合并到 tool_call 时才渲染（历史数据兼容）
               const isExpert = item.data.engine === "expert";
               const hasError = item.data.hasError;
               return (
