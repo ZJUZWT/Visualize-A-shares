@@ -244,7 +244,7 @@ export function ThinkingPanel({
                           </span>
                         )}
                       </div>
-                      {isExpert && item.data.params?.question && (
+                      {isExpert && !!item.data.params?.question && (
                         <p className="mt-0.5 text-[var(--text-tertiary)] text-[10px] line-clamp-1">
                           &ldquo;{String(item.data.params.question)}&rdquo;
                         </p>
