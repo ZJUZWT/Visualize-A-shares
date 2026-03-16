@@ -144,10 +144,11 @@ class DuckDBStore:
 
         # ── InfoEngine schema ──
         self._conn.execute("CREATE SCHEMA IF NOT EXISTS info")
+        self._conn.execute("CREATE SEQUENCE IF NOT EXISTS info.news_articles_id_seq START 1")
 
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS info.news_articles (
-                id              INTEGER PRIMARY KEY,
+                id              INTEGER PRIMARY KEY DEFAULT nextval('info.news_articles_id_seq'),
                 code            VARCHAR NOT NULL,
                 title           VARCHAR NOT NULL,
                 content         VARCHAR,
@@ -156,7 +157,8 @@ class DuckDBStore:
                 url             VARCHAR,
                 sentiment       VARCHAR,
                 sentiment_score DOUBLE,
-                analyzed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                analyzed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(code, title)
             )
         """)
 

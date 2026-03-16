@@ -1,3 +1,14 @@
+export type ExpertType = "data" | "quant" | "info" | "industry" | "rag";
+
+export interface ExpertProfile {
+  type: ExpertType;
+  name: string;
+  icon: string;
+  color: string;
+  description: string;
+  suggestions: string[];
+}
+
 export type ExpertEventType =
   | "thinking_start"
   | "graph_recall"
@@ -19,12 +30,16 @@ export interface ToolCallData {
   engine: string;
   action: string;
   params: Record<string, unknown>;
+  /** 展示标签，如 "咨询📊 数据专家" 或 "data.get_daily_history" */
+  label?: string;
 }
 
 export interface ToolResultData {
   engine: string;
   action: string;
   summary: string;
+  /** 展示标签，如 "📊 数据专家" 或 action 名 */
+  label?: string;
 }
 
 export interface BeliefUpdatedData {
@@ -48,3 +63,47 @@ export interface ExpertMessage {
 }
 
 export type ExpertStatus = "idle" | "thinking" | "error";
+
+/** 硬编码的专家默认配置（API 不可用时的 fallback） */
+export const DEFAULT_EXPERT_PROFILES: ExpertProfile[] = [
+  {
+    type: "data",
+    name: "数据专家",
+    icon: "📊",
+    color: "#60A5FA",
+    description: "行情查询、股票搜索、聚类分析、全市场概览",
+    suggestions: ["今日全市场概览", "搜索新能源相关股票", "查询聚类 0 的成分股", "帮我看看茅台的详情"],
+  },
+  {
+    type: "quant",
+    name: "量化专家",
+    icon: "🔬",
+    color: "#A78BFA",
+    description: "技术指标、因子评分、IC 回测、条件选股",
+    suggestions: ["贵州茅台的技术指标如何？", "查看因子体系全景", "PE低于20且换手率大于3%的股票", "运行因子IC回测"],
+  },
+  {
+    type: "info",
+    name: "资讯专家",
+    icon: "📰",
+    color: "#F59E0B",
+    description: "新闻情感、公告解读、事件影响评估",
+    suggestions: ["宁德时代最近有什么新闻？", "比亚迪近期公告", "评估降息对银行股的影响", "半导体行业最近的市场情绪"],
+  },
+  {
+    type: "industry",
+    name: "产业链专家",
+    icon: "🏭",
+    color: "#10B981",
+    description: "行业认知、产业链映射、资金构成、周期分析",
+    suggestions: ["半导体产业链分析", "锂电池行业现在处于什么周期？", "查看白酒行业板块成分股", "宁德时代的资金构成如何？"],
+  },
+  {
+    type: "rag",
+    name: "投资顾问",
+    icon: "🧠",
+    color: "#EC4899",
+    description: "自由对话、知识图谱、信念系统、综合分析",
+    suggestions: ["宁德时代近期走势如何？", "A股政策面有什么变化？", "新能源板块值得关注吗？", "帮我做一份市场研判"],
+  },
+];

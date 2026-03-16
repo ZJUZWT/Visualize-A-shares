@@ -17,6 +17,7 @@ Claude Code 配置 (.mcp.json):
     }
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -169,6 +170,26 @@ def get_analysis_history(code: str, limit: int = 5) -> str:
     return tools.get_analysis_history(code, limit)
 
 
+# ─── IndustryEngine Tools ──────────────────────────────
+
+@server.tool()
+def query_industry_cognition(target: str) -> str:
+    """获取产业链认知。输入股票代码（如 '600519'）或行业名（如 '半导体'），返回产业链结构、供需格局、周期定位、认知陷阱等。"""
+    return tools.get_industry_cognition(_da, target)
+
+
+@server.tool()
+def query_industry_mapping(industry: str = "") -> str:
+    """查询行业板块列表及成分股。不传 industry 返回所有行业概览；传入行业名返回该行业全部成分股。"""
+    return tools.get_industry_mapping_tool(_da, industry)
+
+
+@server.tool()
+def query_capital_structure(code: str) -> str:
+    """获取个股资金构成分析。汇聚主力资金流向、北向持股、融资融券、换手率数据。code 示例: '600519'"""
+    return tools.get_capital_structure_tool(_da, code)
+
+
 # ─── Debate Tools ────────────────────────────────────
 
 @server.tool()
@@ -193,6 +214,106 @@ def get_debate_transcript(debate_id: str, round: int | None = None, role: str | 
 def get_judge_verdict(debate_id: str) -> str:
     """获取裁判最终总结。返回综合信号、多空核心论点、风险提示、辩论质量评估等。"""
     return tools.get_judge_verdict(_da, debate_id)
+
+
+# ─── Multi-Expert Tool ─────────────────────────────────
+
+@server.tool()
+async def ask_expert(
+    expert_type: str,
+    question: str,
+    ctx: Context = None,
+) -> str:
+    """向指定专家提问。expert_type 可选: 'data'(数据专家)、'quant'(量化专家)、'info'(资讯专家)、'industry'(产业链专家)、'rag'(投资顾问/RAG)。
+    各专家擅长领域:
+    - data: 行情查询、股票搜索、聚类分析、全市场概览
+    - quant: 技术指标、因子评分、IC回测、条件选股
+    - info: 新闻情感、公告解读、事件影响评估
+    - industry: 行业认知、产业链映射、资金构成、周期分析
+    - rag: 自由对话、知识图谱、信念系统、综合分析"""
+    import httpx
+
+    valid_types = ("data", "quant", "info", "industry", "rag")
+    if expert_type not in valid_types:
+        return json.dumps(
+            {"error": f"无效专家类型: {expert_type}，可选: {', '.join(valid_types)}"},
+            ensure_ascii=False,
+        )
+
+    if not _da.is_online():
+        return json.dumps(
+            {"error": "后端未运行，无法使用专家对话", "hint": "请先启动 engine: `cd engine && python main.py`"},
+            ensure_ascii=False,
+        )
+
+    try:
+        lines = []
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+            async with client.stream(
+                "POST",
+                f"{_da._api_base}/api/v1/expert/chat/{expert_type}",
+                json={"message": question},
+            ) as resp:
+                resp.raise_for_status()
+                event_type = None
+                data_buf = ""
+
+                async for line in resp.aiter_lines():
+                    if line.startswith("event: "):
+                        event_type = line[7:].strip()
+                    elif line.startswith("data: "):
+                        data_buf = line[6:]
+                    elif line == "" and event_type and data_buf:
+                        try:
+                            data = json.loads(data_buf)
+                        except json.JSONDecodeError:
+                            event_type = None
+                            data_buf = ""
+                            continue
+
+                        if event_type == "tool_call":
+                            engine = data.get("engine", "")
+                            action = data.get("action", "")
+                            if ctx:
+                                await ctx.log("info", f"🔧 调用工具: {engine}.{action}")
+
+                        elif event_type == "tool_result":
+                            summary = data.get("summary", "")[:100]
+                            if ctx:
+                                await ctx.log("info", f"✅ 工具结果: {summary}")
+
+                        elif event_type == "reply_complete":
+                            lines.append(data.get("full_text", ""))
+
+                        elif event_type == "error":
+                            return json.dumps(
+                                {"error": data.get("message", "专家对话失败")},
+                                ensure_ascii=False,
+                            )
+
+                        event_type = None
+                        data_buf = ""
+
+        return "\n".join(lines) if lines else "专家未返回回复"
+
+    except httpx.HTTPStatusError as e:
+        return json.dumps({"error": f"请求失败: {e}"}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"专家对话失败: {e}"}, ensure_ascii=False)
+
+
+@server.tool()
+def list_experts() -> str:
+    """列出所有可用的专家类型及其擅长领域。"""
+    from expert.engine_experts import get_expert_profiles
+    profiles = get_expert_profiles()
+    lines = ["# 可用专家列表\n"]
+    for p in profiles:
+        lines.append(f"## {p['icon']} {p['name']} (`{p['type']}`)")
+        lines.append(f"- 擅长: {p['description']}")
+        lines.append(f"- 示例问题: {', '.join(p['suggestions'][:2])}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 # ─── 入口 ─────────────────────────────────────────────
