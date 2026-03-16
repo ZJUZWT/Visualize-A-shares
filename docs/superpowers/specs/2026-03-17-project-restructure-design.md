@@ -53,16 +53,28 @@ A_Claude/
 │   │   │   ├── __init__.py
 │   │   │   ├── engine.py          ← ClusterEngine 门面
 │   │   │   ├── routes.py          ← REST API /api/v1/terrain/*
+│   │   │   ├── schemas.py
 │   │   │   ├── algorithm/         ← 算法流水线
+│   │   │   │   ├── __init__.py
 │   │   │   │   ├── pipeline.py
+│   │   │   │   ├── clustering.py
+│   │   │   │   ├── interpolation.py
+│   │   │   │   ├── projection.py
+│   │   │   │   ├── predictor.py
 │   │   │   │   ├── predictor_v2.py
 │   │   │   │   ├── factor_backtest.py
 │   │   │   │   └── features.py
 │   │   │   └── preprocess/        ← 预处理脚本
+│   │   │       ├── __init__.py
+│   │   │       ├── build_embeddings.py
+│   │   │       ├── rebuild_bge.py
+│   │   │       └── export_snapshot.py
 │   │   ├── quant/                 ← 原 quant_engine/
 │   │   │   ├── __init__.py
 │   │   │   ├── engine.py
 │   │   │   ├── predictor.py
+│   │   │   ├── indicators.py
+│   │   │   ├── factor_backtest.py
 │   │   │   └── routes.py
 │   │   ├── info/                  ← 原 info_engine/
 │   │   │   ├── __init__.py
@@ -94,8 +106,11 @@ A_Claude/
 │   │   │       └── schemas.py
 │   │   └── expert/                ← 原 expert/（专家调度器）
 │   │       ├── __init__.py
-│   │       ├── engine.py
+│   │       ├── agent.py
 │   │       ├── engine_experts.py
+│   │       ├── knowledge_graph.py
+│   │       ├── personas.py
+│   │       ├── tools.py
 │   │       ├── routes.py
 │   │       └── schemas.py
 │   ├── llm/                       ← LLM 基础设施（不变）
@@ -105,6 +120,8 @@ A_Claude/
 │   │   ├── capability.py
 │   │   └── context.py
 │   ├── api/                       ← 跨领域路由（chat/analysis/debate）
+│   │   ├── __init__.py
+│   │   ├── schemas.py
 │   │   └── routes/
 │   │       ├── chat.py
 │   │       ├── analysis.py
@@ -344,8 +361,10 @@ services:
       backend:
         condition: service_healthy
     environment:
-      - NEXT_PUBLIC_API_BASE=http://backend:8000
+      - NEXT_PUBLIC_API_BASE=http://localhost:8000
 ```
+
+> 注意：`NEXT_PUBLIC_API_BASE` 是浏览器端使用的地址，必须用 `localhost` 而非 Docker 内部域名 `backend`。浏览器无法解析容器间的 DNS。
 
 ### backend/Dockerfile
 
@@ -354,10 +373,11 @@ FROM python:3.11-slim
 
 WORKDIR /app/backend
 
+# 先复制依赖声明，利用 Docker 层缓存
 COPY pyproject.toml .
-RUN pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
-
 COPY . .
+
+RUN pip install . -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 EXPOSE 8000
 CMD ["python", "main.py"]
