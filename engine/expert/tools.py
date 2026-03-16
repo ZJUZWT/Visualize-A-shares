@@ -26,7 +26,7 @@ class ExpertTools:
         self.api_base = api_base
 
     async def execute(self, engine: str, action: str, params: dict) -> str:
-        """异步执行工具调用，返回摘要字符串（截断至200字）"""
+        """异步执行工具调用，返回摘要字符串"""
         logger.debug(f"执行工具调用: {engine}.{action} with {params}")
         try:
             if engine == "data":
@@ -35,6 +35,9 @@ class ExpertTools:
                 result = await self._call_quant_engine(action, params)
             elif engine == "cluster":
                 result = self._call_cluster_engine(action, params)
+            elif engine == "expert":
+                # 调用引擎专家（聚合者模式）
+                return await self._ask_expert(action, params)
             elif engine == "debate":
                 if action == "start":
                     return await self._run_debate(
@@ -45,11 +48,82 @@ class ExpertTools:
             else:
                 result = {"error": f"Unknown engine: {engine}"}
 
-            summary = json.dumps(result, ensure_ascii=False)
-            return summary[:200]
+            summary = json.dumps(result, ensure_ascii=False, default=str)
+            return summary[:500]
         except Exception as e:
             logger.error(f"工具调用失败 {engine}.{action}: {e}")
             return f"工具调用失败: {e}"
+
+    # ── 引擎专家聚合 ────────────────────────────────────
+
+    async def _ask_expert(self, action: str, params: dict) -> str:
+        """调用引擎专家，消费 SSE 流，返回完整回复文本
+
+        action 就是 expert_type: data / quant / info / industry
+        params: {"question": "..."}
+        """
+        expert_type = action
+        question = params.get("question", "")
+        if not question:
+            return "缺少 question 参数"
+
+        url = f"{self.api_base}/api/v1/expert/chat/{expert_type}"
+        full_text = ""
+        tool_summaries: list[str] = []
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream(
+                    "POST", url,
+                    json={"message": question},
+                    headers={"Content-Type": "application/json"},
+                ) as response:
+                    if response.status_code != 200:
+                        return f"专家 {expert_type} 请求失败: HTTP {response.status_code}"
+
+                    event_type = ""
+                    async for line in response.aiter_lines():
+                        if line.startswith("event:"):
+                            event_type = line[6:].strip()
+                        elif line.startswith("data:"):
+                            data_str = line[5:].strip()
+                            if not data_str:
+                                continue
+                            try:
+                                data = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
+
+                            if event_type == "reply_token":
+                                full_text += data.get("token", "")
+                            elif event_type == "reply_complete":
+                                full_text = data.get("full_text", full_text)
+                            elif event_type == "tool_call":
+                                tool_summaries.append(
+                                    f"调用了 {data.get('engine','')}.{data.get('action','')}"
+                                )
+                            elif event_type == "tool_result":
+                                tool_summaries.append(
+                                    f"结果: {data.get('summary', '')[:100]}"
+                                )
+                            elif event_type == "error":
+                                return f"专家 {expert_type} 错误: {data.get('message', '')}"
+
+        except asyncio.TimeoutError:
+            return f"专家 {expert_type} 响应超时(60s)，已获取部分: {full_text[:300]}"
+        except Exception as e:
+            logger.error(f"ask_expert({expert_type}) 失败: {e}")
+            return f"调用专家 {expert_type} 失败: {e}"
+
+        if not full_text:
+            return f"专家 {expert_type} 未返回有效内容"
+
+        # 组装结果：工具调用摘要 + 完整回复
+        parts = []
+        if tool_summaries:
+            parts.append(f"[{expert_type}专家工具链] " + " → ".join(tool_summaries))
+        parts.append(full_text)
+        return "\n".join(parts)
 
     # ── 同步兼容旧接口 ──────────────────────────────────
 
