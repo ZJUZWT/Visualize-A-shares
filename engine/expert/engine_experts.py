@@ -182,11 +182,24 @@ class EngineExpert:
             }}
             result = await self._execute_tool(tc)
             tool_results.append(result)
-            yield {"event": "tool_result", "data": {
+            tool_result_data = {
                 "engine": tc.get("engine", self.expert_type),
                 "action": tc.get("action", "unknown"),
                 "summary": result[:200] if result else "无结果",
-            }}
+            }
+            # K 线数据：query_history / query_hourly 返回 chartData
+            action_name = tc.get("action", "")
+            if action_name in ("query_history", "query_hourly") and result:
+                try:
+                    parsed = json.loads(result)
+                    if "records" in parsed:
+                        tool_result_data["chartData"] = {
+                            "code": parsed.get("code", ""),
+                            "records": parsed["records"],
+                        }
+                except (json.JSONDecodeError, KeyError):
+                    pass
+            yield {"event": "tool_result", "data": tool_result_data}
 
         # 3. 流式生成回复
         full_text = ""
