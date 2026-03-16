@@ -1,33 +1,165 @@
 {
   "nodes": [
     {
-      "id": "543b127f-ef75-4058-8efc-8fcc2be282d9",
       "type": "belief",
       "content": "基本面是长期定价的锚，但短期价格由情绪和资金驱动",
       "confidence": 0.7,
-      "created_at": "2026-03-15T16:30:24.854185"
+      "created_at": "2026-03-15T16:30:24.854185",
+      "id": "543b127f-ef75-4058-8efc-8fcc2be282d9"
     },
     {
-      "id": "b685cdce-d062-4121-8971-ee2bb0422cfc",
       "type": "belief",
       "content": "分散投资优于集中押注，除非有极高确定性",
       "confidence": 0.65,
-      "created_at": "2026-03-15T16:30:24.854250"
+      "created_at": "2026-03-15T16:30:24.854250",
+      "id": "b685cdce-d062-4121-8971-ee2bb0422cfc"
     },
     {
-      "id": "381142df-4138-424b-9dce-9eb2041f55a8",
       "type": "belief",
       "content": "政策是A股不可忽视的系统性变量",
       "confidence": 0.75,
-      "created_at": "2026-03-15T16:30:24.854277"
+      "created_at": "2026-03-15T16:30:24.854277",
+      "id": "381142df-4138-424b-9dce-9eb2041f55a8"
     },
     {
-      "id": "ab207cd4-153c-4c05-8cd2-fee3b16ac212",
       "type": "belief",
       "content": "散户情绪是反向指标，极度乐观时需警惕",
       "confidence": 0.6,
-      "created_at": "2026-03-15T16:30:24.854302"
+      "created_at": "2026-03-15T16:30:24.854302",
+      "id": "ab207cd4-153c-4c05-8cd2-fee3b16ac212"
+    },
+    {
+      "type": "stock",
+      "code": "600406",
+      "name": "国电南瑞",
+      "industry": "",
+      "zjh_industry": "",
+      "id": "b6d87c06-6a06-489b-a249-6ddc914fdf80"
+    },
+    {
+      "type": "stock",
+      "code": "002594",
+      "name": "比亚迪",
+      "industry": "汽车整车",
+      "zjh_industry": "制造业-汽车制造业",
+      "id": "5e76c3a3-9b4c-4517-9cad-2aa9782a8391"
+    },
+    {
+      "type": "sector",
+      "name": "汽车整车",
+      "category": "industry",
+      "id": "d32a77e7-d0d0-4cb1-9499-011463de758b"
+    },
+    {
+      "type": "material",
+      "name": "锂",
+      "category": "raw_material",
+      "id": "8480f145-b8e2-4d2f-b1b4-ed21954c34e0"
+    },
+    {
+      "type": "material",
+      "name": "电池",
+      "category": "product",
+      "id": "951d6bbe-9130-435b-878b-a61faecc5e14"
+    },
+    {
+      "type": "material",
+      "name": "储能",
+      "category": "product",
+      "id": "3179130f-c22b-48f0-832b-28b2668e288a"
+    },
+    {
+      "type": "stock",
+      "code": "300750",
+      "name": "宁德时代",
+      "industry": "电池",
+      "zjh_industry": "制造业-电气机械和器材制造业",
+      "id": "6df1ebfc-e787-4fbb-b516-78fedf50d967"
+    },
+    {
+      "type": "sector",
+      "name": "电池",
+      "category": "industry",
+      "id": "c5038974-b5a8-4a11-9351-845b173dd97b"
+    },
+    {
+      "id": "d34a6b46-3e36-461b-9f22-d7b22efa99c0",
+      "type": "stock",
+      "code": "600519",
+      "name": "贵州茅台",
+      "industry": "酿酒行业",
+      "zjh_industry": "制造业-酒、饮料和精制茶制造业"
+    },
+    {
+      "id": "339a6d46-e12d-43fa-9c05-d6491f0086f7",
+      "type": "sector",
+      "name": "酿酒行业",
+      "category": "industry"
     }
   ],
-  "edges": []
+  "edges": [
+    {
+      "relation": "belongs_to",
+      "reason": "比亚迪属于汽车整车行业",
+      "timestamp": "2026-03-16T19:25:32.819614",
+      "source_id": "5e76c3a3-9b4c-4517-9cad-2aa9782a8391",
+      "target_id": "d32a77e7-d0d0-4cb1-9499-011463de758b"
+    },
+    {
+      "relation": "consumes",
+      "reason": "比亚迪使用锂",
+      "timestamp": "2026-03-16T19:25:32.825546",
+      "source_id": "5e76c3a3-9b4c-4517-9cad-2aa9782a8391",
+      "target_id": "8480f145-b8e2-4d2f-b1b4-ed21954c34e0"
+    },
+    {
+      "relation": "supplies",
+      "reason": "比亚迪生产电池",
+      "timestamp": "2026-03-16T19:25:32.825622",
+      "source_id": "5e76c3a3-9b4c-4517-9cad-2aa9782a8391",
+      "target_id": "951d6bbe-9130-435b-878b-a61faecc5e14"
+    },
+    {
+      "relation": "supplies",
+      "reason": "比亚迪生产储能",
+      "timestamp": "2026-03-16T19:25:32.825696",
+      "source_id": "5e76c3a3-9b4c-4517-9cad-2aa9782a8391",
+      "target_id": "3179130f-c22b-48f0-832b-28b2668e288a"
+    },
+    {
+      "relation": "belongs_to",
+      "reason": "宁德时代属于电池行业",
+      "timestamp": "2026-03-16T19:25:32.825817",
+      "source_id": "6df1ebfc-e787-4fbb-b516-78fedf50d967",
+      "target_id": "c5038974-b5a8-4a11-9351-845b173dd97b"
+    },
+    {
+      "relation": "consumes",
+      "reason": "宁德时代使用锂",
+      "timestamp": "2026-03-16T19:25:32.826033",
+      "source_id": "6df1ebfc-e787-4fbb-b516-78fedf50d967",
+      "target_id": "8480f145-b8e2-4d2f-b1b4-ed21954c34e0"
+    },
+    {
+      "relation": "supplies",
+      "reason": "宁德时代生产电池",
+      "timestamp": "2026-03-16T19:25:32.826066",
+      "source_id": "6df1ebfc-e787-4fbb-b516-78fedf50d967",
+      "target_id": "951d6bbe-9130-435b-878b-a61faecc5e14"
+    },
+    {
+      "relation": "supplies",
+      "reason": "宁德时代生产储能",
+      "timestamp": "2026-03-16T19:25:32.826099",
+      "source_id": "6df1ebfc-e787-4fbb-b516-78fedf50d967",
+      "target_id": "3179130f-c22b-48f0-832b-28b2668e288a"
+    },
+    {
+      "source_id": "d34a6b46-3e36-461b-9f22-d7b22efa99c0",
+      "target_id": "339a6d46-e12d-43fa-9c05-d6491f0086f7",
+      "relation": "belongs_to",
+      "reason": "贵州茅台属于酿酒行业行业",
+      "timestamp": "2026-03-16T19:28:32.138769"
+    }
+  ]
 }

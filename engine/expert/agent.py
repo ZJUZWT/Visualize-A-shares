@@ -20,6 +20,11 @@ from expert.personas import (
 from expert.schemas import (
     BeliefNode,
     BeliefUpdateOutput,
+    GraphEdge,
+    MaterialNode,
+    RegionNode,
+    SectorNode,
+    StockNode,
     ThinkOutput,
     ToolCall,
 )
@@ -37,6 +42,39 @@ EXPERT_NAMES = {
 
 class ExpertAgent:
     """投资专家 Agent — 完整对话流程编排"""
+
+    # 类级缓存：股票名→代码映射（懒加载，所有实例共享）
+    _stock_name_map: dict[str, str] | None = None
+    _profiles_cache: dict[str, dict] | None = None  # code → {name, industry, zjh_industry, scope, ...}
+
+    @classmethod
+    def _get_stock_name_map(cls) -> dict[str, str]:
+        """获取股票名→代码映射（懒加载 + 缓存）"""
+        if cls._stock_name_map is not None:
+            return cls._stock_name_map
+        try:
+            from data_engine import get_data_engine
+            de = get_data_engine()
+            profiles = de.get_profiles()
+            cls._profiles_cache = profiles  # 同时缓存完整 profiles
+            cls._stock_name_map = {
+                info.get("name", ""): code
+                for code, info in profiles.items()
+                if info.get("name")
+            }
+            logger.info(f"股票名称映射缓存已构建: {len(cls._stock_name_map)} 条")
+        except Exception as e:
+            logger.warning(f"构建股票名称映射失败: {e}")
+            cls._stock_name_map = {}
+            cls._profiles_cache = {}
+        return cls._stock_name_map
+
+    @classmethod
+    def _get_profiles_cache(cls) -> dict[str, dict]:
+        """获取完整公司概况缓存（懒加载，依赖 _get_stock_name_map 初始化）"""
+        if cls._profiles_cache is None:
+            cls._get_stock_name_map()  # 触发初始化
+        return cls._profiles_cache or {}
 
     def __init__(
         self,
@@ -73,8 +111,14 @@ class ExpertAgent:
         self._graph.save_sync()
         logger.info(f"初始信念已写入图谱: {len(INITIAL_BELIEFS)} 条")
 
-    async def chat(self, message: str) -> AsyncGenerator[dict, None]:
-        """完整对话流程，yield 结构化事件 dict"""
+    async def chat(self, message: str, history: list[dict] | None = None) -> AsyncGenerator[dict, None]:
+        """完整对话流程，yield 结构化事件 dict
+
+        Args:
+            message: 用户消息
+            history: 对话历史 [{"role": "user"|"expert", "content": "..."}]
+        """
+        conv_history = history or []
         yield {"event": "thinking_start", "data": {}}
 
         # 1. 图谱召回
@@ -100,15 +144,17 @@ class ExpertAgent:
         # 3. think 步骤
         tool_calls: list[ToolCall] = []
         if self._llm:
-            think_output = await self._think(message, recalled_nodes, memories)
+            think_output = await self._think(message, recalled_nodes, memories, conv_history)
             tool_calls = think_output.tool_calls if think_output.needs_data else []
 
         # 4. 工具调用
         tool_results: list[dict] = []
         for tc in tool_calls:
-            # 容错：专家咨询的 question 为空时用原始消息补充
-            if tc.engine == "expert" and not tc.params.get("question"):
-                tc.params["question"] = message
+            # 容错：专家咨询的 question 为空或为垃圾值时，用原始消息补充
+            if tc.engine == "expert":
+                q = (tc.params.get("question") or "").strip()
+                if not q or len(q) < 4:
+                    tc.params["question"] = message
 
             # 前端事件：标注是否是专家咨询
             is_expert_call = tc.engine == "expert"
@@ -133,25 +179,31 @@ class ExpertAgent:
                 "label": expert_label if is_expert_call else tc.action,
             }}
 
-        # 5. 流式回复
+        # 5. 图谱自动学习 — 从对话中学习股票、行业、产业链关系
+        await self._learn_from_conversation(message, tool_results)
+
+        # 6. 流式回复
         expert_reply = ""
         if self._llm:
+            logger.debug(f"开始 _reply_stream, tool_results={len(tool_results)}条, "
+                         f"expert={len([r for r in tool_results if r.get('is_expert')])}条")
             async for token, full_text in self._reply_stream(
-                message, recalled_nodes, memories, tool_results
+                message, recalled_nodes, memories, tool_results, conv_history
             ):
                 expert_reply = full_text
                 yield {"event": "reply_token", "data": {"token": token}}
+            logger.debug(f"_reply_stream 完成, 回复长度={len(expert_reply)}")
         else:
             expert_reply = "LLM 未配置，无法生成回复。"
 
         yield {"event": "reply_complete", "data": {"full_text": expert_reply}}
 
-        # 6. 信念更新
+        # 7. 信念更新
         if self._llm and expert_reply:
             async for event in self._belief_update(message, expert_reply):
                 yield event
 
-        # 7. 记忆存储
+        # 8. 记忆存储
         if self._memory:
             try:
                 stock_codes = [n["code"] for n in recalled_nodes if n.get("type") == "stock"]
@@ -165,11 +217,42 @@ class ExpertAgent:
             except Exception as e:
                 logger.warning(f"记忆存储失败: {e}")
 
+    @staticmethod
+    def _extract_outermost_json(text: str) -> str | None:
+        """从文本中提取最外层 JSON 对象（支持嵌套花括号）"""
+        start = text.find('{')
+        if start == -1:
+            return None
+        depth = 0
+        in_str = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == '\\' and in_str:
+                escape = True
+                continue
+            if ch == '"' and not escape:
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        return None
+
     async def _think(
         self,
         message: str,
         nodes: list[dict],
         memories: list[dict],
+        history: list[dict] | None = None,
     ) -> ThinkOutput:
         """think 步骤：LLM 决策是否需要工具调用（流式收集 + 容错解析）"""
         from llm.providers import ChatMessage
@@ -178,12 +261,20 @@ class ExpertAgent:
             memory_context=format_memory_context(memories),
         )
         try:
+            # 构建消息列表（含对话历史）
+            messages = [ChatMessage("system", prompt)]
+            for h in (history or []):
+                role = "assistant" if h["role"] == "expert" else h["role"]
+                # 历史消息截断（避免上下文过长），只保留前 500 字
+                content = h.get("content", "")
+                if len(content) > 500:
+                    content = content[:500] + "..."
+                messages.append(ChatMessage(role, content))
+            messages.append(ChatMessage("user", message))
+
             # 流式收集
             chunks: list[str] = []
-            async for token in self._llm.chat_stream([
-                ChatMessage("system", prompt),
-                ChatMessage("user", message),
-            ]):
+            async for token in self._llm.chat_stream(messages):
                 chunks.append(token)
             raw_text = "".join(chunks).strip()
 
@@ -199,57 +290,68 @@ class ExpertAgent:
             if think_match:
                 think_content = think_match.group(1)
 
-            # 剥离 <think> 标签
+            # 尝试从多个来源提取 JSON（按优先级）
+            candidates = []
+
+            # 1) 剥离标签后的正文
             text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
-            # 剥离 <minimax:*> 标签（MiniMax 特有）
             text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
-            # 剥离 [TOOL_CALL]...[/TOOL_CALL] 块
             text = re.sub(r"\[TOOL_CALL\].*?\[/TOOL_CALL\]", "", text, flags=re.DOTALL).strip()
+            if text:
+                candidates.append(text)
 
-            # 提取 JSON（优先从正文中提取）
-            json_text = text
-            # 尝试找到 JSON 对象
-            json_match = re.search(r'\{[^{}]*"needs_data"[^{}]*\}', text, re.DOTALL)
-            if json_match:
-                json_text = json_match.group(0)
-            elif "```" in text:
-                json_text = text.split("```")[1]
-                if json_text.startswith("json"):
-                    json_text = json_text[4:]
-                json_text = json_text.strip()
+            # 2) markdown 代码块内容
+            md_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', raw_text, re.DOTALL)
+            if md_match:
+                candidates.append(md_match.group(1).strip())
 
-            # 尝试 JSON 解析
-            if json_text:
-                try:
-                    data = json.loads(json_text)
-                    logger.info(f"think 步骤 JSON 解析成功: needs_data={data.get('needs_data')}")
-                    return ThinkOutput(**data)
-                except json.JSONDecodeError:
-                    logger.debug(f"think JSON 解析失败，尝试容错: {json_text[:150]}")
+            # 3) <think> 标签内容（LLM 有时把 JSON 放在 think 里）
+            if think_content:
+                candidates.append(think_content)
+
+            # 4) 完整原始文本
+            candidates.append(raw_text)
+
+            # 尝试从每个候选中提取并解析 JSON
+            for candidate in candidates:
+                json_str = self._extract_outermost_json(candidate)
+                if json_str:
+                    try:
+                        data = json.loads(json_str)
+                        if isinstance(data, dict) and "needs_data" in data:
+                            logger.info(f"think JSON 解析成功: needs_data={data.get('needs_data')}, "
+                                        f"tool_calls={len(data.get('tool_calls', []))}")
+                            return ThinkOutput(**data)
+                    except (json.JSONDecodeError, Exception) as e:
+                        logger.debug(f"think JSON 候选解析失败: {e}, 片段: {json_str[:100]}")
 
             # ── 容错解析：从 think 内容或原始文本中提取意图 ──
+            logger.debug(f"think 所有 JSON 提取尝试失败，进入容错解析")
             full_context = think_content + "\n" + raw_text
-            return self._fallback_think_parse(full_context)
+            return self._fallback_think_parse(full_context, user_message=message)
 
         except Exception as e:
             logger.warning(f"think 步骤异常: {e}")
             return ThinkOutput(needs_data=False)
 
-    def _fallback_think_parse(self, text: str) -> ThinkOutput:
-        """容错解析：从 LLM 非标准输出中提取工具调用意图"""
-        tool_calls: list[dict] = []
+    def _fallback_think_parse(self, text: str, user_message: str = "") -> ThinkOutput:
+        """容错解析：从 LLM 非标准输出中提取工具调用意图
 
-        # 从文本中提取 6 位股票代码
-        code_match = re.search(r'\b(\d{6})\b', text)
-        detected_code = code_match.group(1) if code_match else ""
+        当 JSON 解析失败时，通过关键词匹配检测需要咨询的专家，
+        始终使用用户原始消息作为各专家的 question（正则提取 question 不可靠）。
+        """
+        tool_calls: list[dict] = []
 
         # 专家类型关键词匹配
         expert_patterns = {
-            "data": [r"数据专家", r"咨询.*data", r"action.*[\"']data[\"']", r"行情数据", r"历史走势"],
+            "data": [r"数据专家", r"咨询.*data", r"action.*[\"']data[\"']", r"行情数据", r"历史走势",
+                     r"行情走势", r"成交量", r"涨跌"],
             "quant": [r"量化专家", r"咨询.*quant", r"技术指标", r"技术面", r"因子", r"action.*[\"']quant[\"']",
-                      r"支撑.*阻力", r"RSI", r"MACD", r"均线"],
-            "info": [r"资讯专家", r"咨询.*info", r"新闻", r"公告", r"舆情", r"action.*[\"']info[\"']"],
-            "industry": [r"产业链专家", r"咨询.*industry", r"行业分析", r"产业链", r"action.*[\"']industry[\"']"],
+                      r"支撑.*阻力", r"RSI", r"MACD", r"均线", r"支撑位", r"阻力位", r"压力位"],
+            "info": [r"资讯专家", r"咨询.*info", r"新闻", r"公告", r"舆情", r"action.*[\"']info[\"']",
+                     r"消息面", r"利好", r"利空"],
+            "industry": [r"产业链专家", r"咨询.*industry", r"行业分析", r"产业链", r"action.*[\"']industry[\"']",
+                         r"行业前景", r"产业", r"上下游"],
         }
 
         # 检测需要咨询的专家
@@ -262,17 +364,11 @@ class ExpertAgent:
 
         if detected_experts:
             for expert_type in detected_experts:
-                # 尝试从文本中提取 question
-                question = ""
-                tc_pattern = rf'action.*?["\']?{expert_type}["\']?.*?question.*?["\']([^"\']+)["\']'
-                q_match = re.search(tc_pattern, text, re.DOTALL | re.IGNORECASE)
-                if q_match:
-                    question = q_match.group(1)
-
+                # 始终使用用户原始消息作为 question（正则提取不可靠）
                 tool_calls.append({
                     "engine": "expert",
                     "action": expert_type,
-                    "params": {"question": question},
+                    "params": {"question": user_message},
                 })
 
             logger.info(f"think 容错解析: 检测到需要咨询 {list(detected_experts)}")
@@ -283,6 +379,9 @@ class ExpertAgent:
             )
 
         # 检测直接数据查询（仅用于非常简单的请求）
+        code_match = re.search(r'\b(\d{6})\b', text)
+        detected_code = code_match.group(1) if code_match else ""
+
         data_patterns = [
             (r"get_daily_history", "data", "get_daily_history",
              {"code": detected_code, "days": 30}),
@@ -308,12 +407,264 @@ class ExpertAgent:
         logger.info("think 容错解析: 未检测到工具需求，直接回复")
         return ThinkOutput(needs_data=False)
 
+    async def _learn_from_conversation(self, message: str, tool_results: list[dict]) -> None:
+        """从对话中学习：股票、行业、产业链关系、原材料、地理
+
+        策略：
+        1. 识别股票（名称/代码匹配）
+        2. 为每只股票创建 SectorNode(行业) + belongs_to 边
+        3. 从公司经营范围(scope)中提取关键原材料/产品，创建 MaterialNode + consumes/supplies 边
+        4. 尝试建立同行业股票间的 competes_with 关系
+        """
+        # 收集候选股票 {code: name}
+        candidates: dict[str, str] = {}
+
+        # ── 从公司概况缓存中匹配用户消息中的股票名/代码 ──
+        name_map = self._get_stock_name_map()  # {name: code}
+        if name_map:
+            # 匹配名称（在消息中查找已知股票名）
+            for name, code in name_map.items():
+                if len(name) >= 2 and name in message:
+                    candidates[code] = name
+                if len(candidates) >= 10:
+                    break
+            # 匹配6位代码
+            code_matches = re.findall(r'\b(\d{6})\b', message)
+            for code in code_matches:
+                if code not in candidates:
+                    try:
+                        from data_engine import get_data_engine
+                        de = get_data_engine()
+                        profile = de.get_profile(code)
+                        if profile:
+                            candidates[code] = profile.get("name", code)
+                    except Exception:
+                        candidates[code] = code
+
+        # ── 从工具结果 JSON 中提取 code/name ──
+        for tr in tool_results:
+            result_str = tr.get("result", "")
+            try:
+                data = json.loads(result_str) if isinstance(result_str, str) else result_str
+                if isinstance(data, dict):
+                    code = str(data.get("code", ""))
+                    name = str(data.get("name", ""))
+                    if code and len(code) == 6 and code.isdigit():
+                        candidates[code] = name or code
+            except (json.JSONDecodeError, Exception):
+                pass
+
+        if not candidates:
+            return
+
+        # ── 获取现有图谱节点（用于去重） ──
+        existing_stocks: dict[str, str] = {}   # code → node_id
+        existing_sectors: dict[str, str] = {}  # sector_name → node_id
+        existing_materials: dict[str, str] = {}  # material_name → node_id
+        existing_regions: dict[str, str] = {}  # region_name → node_id
+
+        for node_id in self._graph.graph.nodes():
+            node_data = self._graph.graph.nodes[node_id]
+            ntype = node_data.get("type")
+            if ntype == "stock":
+                existing_stocks[node_data.get("code", "")] = node_id
+            elif ntype == "sector":
+                existing_sectors[node_data.get("name", "")] = node_id
+            elif ntype == "material":
+                existing_materials[node_data.get("name", "")] = node_id
+            elif ntype == "region":
+                existing_regions[node_data.get("name", "")] = node_id
+
+        profiles = self._get_profiles_cache()
+        added_stocks = []
+        added_sectors = []
+        added_edges = []
+        added_materials = []
+
+        for code, name in candidates.items():
+            profile = profiles.get(code, {})
+            industry = profile.get("industry", "")
+            zjh_industry = profile.get("zjh_industry", "")
+            scope = profile.get("scope", "")
+
+            # ── Step 1: 创建 StockNode ──
+            if code in existing_stocks:
+                stock_node_id = existing_stocks[code]
+            else:
+                stock_node = StockNode(
+                    code=code, name=name,
+                    industry=industry, zjh_industry=zjh_industry,
+                )
+                await self._graph.add_node(stock_node)
+                stock_node_id = stock_node.id
+                existing_stocks[code] = stock_node_id
+                added_stocks.append(f"{name}({code})")
+
+            # ── Step 2: 创建 SectorNode(行业) + belongs_to 边 ──
+            if industry:
+                if industry in existing_sectors:
+                    sector_node_id = existing_sectors[industry]
+                else:
+                    sector_node = SectorNode(name=industry, category="industry")
+                    await self._graph.add_node(sector_node)
+                    sector_node_id = sector_node.id
+                    existing_sectors[industry] = sector_node_id
+                    added_sectors.append(industry)
+
+                # 检查是否已有 belongs_to 边
+                if not self._graph.graph.has_edge(stock_node_id, sector_node_id):
+                    edge = GraphEdge(
+                        source_id=stock_node_id,
+                        target_id=sector_node_id,
+                        relation="belongs_to",
+                        reason=f"{name}属于{industry}行业",
+                    )
+                    await self._graph.add_edge(edge)
+                    added_edges.append(f"{name}→belongs_to→{industry}")
+
+            # ── Step 3: 从经营范围提取关键原材料/产品 ──
+            if scope:
+                materials = self._extract_materials_from_scope(scope)
+                for mat_name, mat_category in materials[:5]:  # 每家公司最多5个
+                    if mat_name in existing_materials:
+                        mat_node_id = existing_materials[mat_name]
+                    else:
+                        mat_node = MaterialNode(name=mat_name, category=mat_category)
+                        await self._graph.add_node(mat_node)
+                        mat_node_id = mat_node.id
+                        existing_materials[mat_name] = mat_node_id
+                        added_materials.append(mat_name)
+
+                    # 关系：product → supplies（公司供应产品）, raw_material → consumes（公司消耗原材料）
+                    relation = "supplies" if mat_category == "product" else "consumes"
+                    if not self._graph.graph.has_edge(stock_node_id, mat_node_id):
+                        edge = GraphEdge(
+                            source_id=stock_node_id,
+                            target_id=mat_node_id,
+                            relation=relation,
+                            reason=f"{name}{'生产' if relation == 'supplies' else '使用'}{mat_name}",
+                        )
+                        await self._graph.add_edge(edge)
+                        added_edges.append(f"{name}→{relation}→{mat_name}")
+
+        # ── Step 4: 同行业股票间的 competes_with 关系 ──
+        # 按行业分组本次涉及的股票
+        industry_groups: dict[str, list[tuple[str, str]]] = {}  # industry → [(code, node_id)]
+        for code in candidates:
+            profile = profiles.get(code, {})
+            ind = profile.get("industry", "")
+            if ind:
+                node_id = existing_stocks.get(code, "")
+                if node_id:
+                    industry_groups.setdefault(ind, []).append((code, node_id))
+
+        for ind, stocks_in_group in industry_groups.items():
+            if len(stocks_in_group) < 2:
+                continue
+            # 两两建立竞争关系
+            for i in range(len(stocks_in_group)):
+                for j in range(i + 1, len(stocks_in_group)):
+                    id_a = stocks_in_group[i][1]
+                    id_b = stocks_in_group[j][1]
+                    if not self._graph.graph.has_edge(id_a, id_b):
+                        name_a = candidates.get(stocks_in_group[i][0], stocks_in_group[i][0])
+                        name_b = candidates.get(stocks_in_group[j][0], stocks_in_group[j][0])
+                        edge = GraphEdge(
+                            source_id=id_a,
+                            target_id=id_b,
+                            relation="competes_with",
+                            reason=f"同属{ind}行业",
+                        )
+                        await self._graph.add_edge(edge)
+                        added_edges.append(f"{name_a}→competes_with→{name_b}")
+
+        # ── 持久化 ──
+        has_changes = added_stocks or added_sectors or added_edges or added_materials
+        if has_changes:
+            await self._graph.save()
+            parts = []
+            if added_stocks:
+                parts.append(f"股票 {len(added_stocks)}: {', '.join(added_stocks)}")
+            if added_sectors:
+                parts.append(f"行业 {len(added_sectors)}: {', '.join(added_sectors)}")
+            if added_materials:
+                parts.append(f"原材料/产品 {len(added_materials)}: {', '.join(added_materials)}")
+            if added_edges:
+                parts.append(f"关系 {len(added_edges)}: {', '.join(added_edges[:8])}")
+            logger.info(f"图谱自动学习: {' | '.join(parts)}")
+
+    @staticmethod
+    def _extract_materials_from_scope(scope: str) -> list[tuple[str, str]]:
+        """从经营范围文本中提取关键原材料和产品
+
+        Returns:
+            [(name, category)] — category 为 "raw_material" 或 "product"
+        """
+        results: list[tuple[str, str]] = []
+        seen: set[str] = set()
+
+        # 噪声词 — 经营范围中常见的无意义短语
+        NOISE_WORDS = {
+            "及销售", "及其", "和销售", "等产品", "活动", "技术开发", "技术服务",
+            "技术咨询", "技术转让", "技术推广", "进出口", "货物进出口",
+            "技术进出口", "代理进出口", "国内贸易", "批发零售", "咨询服务",
+            "信息咨询", "自有资金", "投资管理", "资产管理", "企业管理",
+            "市场营销", "广告设计", "物流配送", "仓储服务", "租赁服务",
+            "以及上述", "及售后服务", "和销售及售后服务", "以及上述零部件的",
+        }
+
+        def _is_valid(name: str) -> bool:
+            """检查提取的名称是否有效"""
+            if len(name) < 2 or len(name) > 8:
+                return False
+            if name in NOISE_WORDS:
+                return False
+            # 包含纯功能性词汇
+            if any(w in name for w in ["及其", "以及", "等", "的", "与", "或"]):
+                return False
+            # 纯动词短语
+            if name in {"生产", "制造", "加工", "研发", "销售", "经营", "服务"}:
+                return False
+            return True
+
+        # 通用高价值关键词（直接匹配，这些是确定性最高的）
+        high_value_keywords = {
+            # 能源原材料
+            "raw_material": [
+                "锂", "钴", "镍", "铜", "铝", "钢铁", "稀土", "硅", "石油", "天然气",
+                "煤炭", "铁矿石", "锰", "锌", "碳酸锂", "氢氧化锂", "多晶硅",
+                "正极材料", "负极材料", "电解液", "隔膜", "芯片", "晶圆",
+                "磷酸铁锂", "三元材料", "石墨", "铜箔", "铝箔",
+            ],
+            # 产品
+            "product": [
+                "电池", "动力电池", "光伏组件", "光伏电池", "逆变器", "储能",
+                "新能源汽车", "电动汽车",
+                "半导体", "集成电路", "显示面板", "LED",
+                "疫苗", "创新药", "仿制药", "医疗器械",
+                "白酒", "啤酒", "乳制品", "调味品",
+                "水泥", "玻璃", "光纤", "5G基站", "服务器",
+                "风电", "风力发电", "光伏发电", "核电",
+                "机器人", "无人机", "传感器",
+            ],
+        }
+
+        # 高价值关键词直接匹配（优先级最高）
+        for category, keywords in high_value_keywords.items():
+            for kw in keywords:
+                if kw in scope and kw not in seen:
+                    seen.add(kw)
+                    results.append((kw, category))
+
+        return results
+
     async def _reply_stream(
         self,
         message: str,
         nodes: list[dict],
         memories: list[dict],
         tool_results: list[dict],
+        history: list[dict] | None = None,
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复（含 <think> 标签过滤），yield (token, accumulated_text)"""
         from llm.providers import ChatMessage
@@ -348,6 +699,16 @@ class ExpertAgent:
             + "\n\n".join(context_parts)
         )
 
+        # 构建消息列表（含对话历史）
+        messages = [ChatMessage("system", system)]
+        for h in (history or []):
+            role = "assistant" if h["role"] == "expert" else h["role"]
+            content = h.get("content", "")
+            if len(content) > 800:
+                content = content[:800] + "..."
+            messages.append(ChatMessage(role, content))
+        messages.append(ChatMessage("user", message))
+
         accumulated = ""
         in_skip = False          # 跳过区域（<think> 或 <minimax:*>）
         skip_end_tag = ""        # 当前跳过区域的结束标签
@@ -358,13 +719,14 @@ class ExpertAgent:
             "<think>": "</think>",
             "<minimax:tool_call>": "</minimax:tool_call>",
             "<minimax:search_result>": "</minimax:search_result>",
+            "<tool_call>": "</tool_call>",
+            "<tool_code>": "</tool_code>",
         }
 
         try:
-            async for token in self._llm.chat_stream([
-                ChatMessage("system", system),
-                ChatMessage("user", message),
-            ]):
+            skip_bytes = 0  # skip 区域累积字节数
+
+            async for token in self._llm.chat_stream(messages):
                 raw_buffer += token
 
                 # 检测进入跳过区域
@@ -377,6 +739,7 @@ class ExpertAgent:
                                 yield before, accumulated
                             in_skip = True
                             skip_end_tag = end_tag
+                            skip_bytes = 0
                             raw_buffer = raw_buffer.split(start_tag, 1)[1]
                             break
                     if in_skip:
@@ -388,14 +751,25 @@ class ExpertAgent:
                     remaining = raw_buffer.split(skip_end_tag, 1)[1]
                     raw_buffer = remaining.lstrip("\n")
                     skip_end_tag = ""
+                    skip_bytes = 0
                     continue
 
+                # 在跳过块内：丢弃内容，但防止缓冲区无限增长
                 if in_skip:
-                    if len(raw_buffer) > 200:
+                    skip_bytes += len(token)
+                    # 保护：如果 skip 区域累积超过 2000 字节还未关闭，强制退出
+                    if skip_bytes > 2000:
+                        logger.warning(f"skip 区域未关闭(>{skip_bytes}B)，强制退出: {skip_end_tag}")
+                        in_skip = False
+                        raw_buffer = ""
+                        skip_end_tag = ""
+                        skip_bytes = 0
+                    elif len(raw_buffer) > 200:
                         raw_buffer = raw_buffer[-20:]
                     continue
 
-                if "<" in raw_buffer and not raw_buffer.endswith(">") and len(raw_buffer) < 20:
+                # 正常正文：检查是否可能是不完整的标签
+                if "<" in raw_buffer and not raw_buffer.endswith(">") and len(raw_buffer) < 30:
                     continue
 
                 if raw_buffer:

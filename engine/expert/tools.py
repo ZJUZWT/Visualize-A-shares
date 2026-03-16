@@ -72,7 +72,9 @@ class ExpertTools:
         tool_summaries: list[str] = []
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+            ) as client:
                 async with client.stream(
                     "POST", url,
                     json={"message": question},
@@ -144,6 +146,16 @@ class ExpertTools:
 
     def _call_data_engine(self, action: str, params: dict) -> dict[str, Any]:
         """调用数据引擎"""
+        if action == "get_current_date":
+            import datetime
+            now = datetime.datetime.now()
+            return {
+                "date": now.strftime("%Y-%m-%d"),
+                "time": now.strftime("%H:%M:%S"),
+                "weekday": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()],
+                "is_trading_day": now.weekday() < 5,
+            }
+
         if self.data_engine is None:
             return {"error": "data_engine not available"}
         try:

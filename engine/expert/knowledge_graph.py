@@ -15,6 +15,8 @@ from expert.schemas import (
     EventNode,
     GraphEdge,
     GraphNode,
+    MaterialNode,
+    RegionNode,
     SectorNode,
     StockNode,
     StanceNode,
@@ -25,7 +27,10 @@ from expert.schemas import (
 BELIEF_KEYWORDS = ["政策", "基本面", "情绪", "估值", "资金", "技术", "分散", "集中"]
 
 # 节点类型优先级（越小越优先）
-NODE_PRIORITY = {"stock": 0, "belief": 1, "stance": 2, "event": 3, "sector": 4}
+NODE_PRIORITY = {
+    "stock": 0, "sector": 1, "material": 2, "region": 3,
+    "belief": 4, "stance": 5, "event": 6,
+}
 
 
 class KnowledgeGraph:
@@ -103,25 +108,31 @@ class KnowledgeGraph:
             if data.get("type") == "stock" and data.get("code") in codes:
                 matched_ids.add(node_id)
 
-        # Step 2: 子串匹配 stock.name / sector.name / event.name
+        # Step 2: 子串匹配 stock.name / sector.name / event.name / material.name / region.name
         for node_id in self.graph.nodes():
             data = self.graph.nodes[node_id]
             node_type = data.get("type")
-            if node_type in ("stock", "sector", "event"):
+            if node_type in ("stock", "sector", "event", "material", "region"):
                 name = data.get("name", "")
-                if name and name in message:
-                    matched_ids.add(node_id)
+                if name and len(name) >= 2:
+                    # 双向匹配：名称在消息中 或 消息中的词在名称中
+                    if name in message or (len(name) >= 3 and any(
+                        name[i:i+2] in message for i in range(len(name) - 1)
+                    )):
+                        matched_ids.add(node_id)
 
-        # Step 3: 信念关键词匹配 — 召回 top 3 belief 节点（按 confidence 降序）
-        if any(kw in message for kw in BELIEF_KEYWORDS):
-            belief_nodes = [
-                (node_id, self.graph.nodes[node_id])
-                for node_id in self.graph.nodes()
-                if self.graph.nodes[node_id].get("type") == "belief"
-            ]
-            belief_nodes.sort(key=lambda x: x[1].get("confidence", 0), reverse=True)
-            for node_id, _ in belief_nodes[:3]:
-                matched_ids.add(node_id)
+        # Step 3: 信念召回 — 始终返回 top 3 belief（投资分析总需要信念锚定）
+        #   如果消息包含关键词则返回 top 3，否则返回 top 2
+        has_belief_keyword = any(kw in message for kw in BELIEF_KEYWORDS)
+        belief_limit = 3 if has_belief_keyword else 2
+        belief_nodes = [
+            (node_id, self.graph.nodes[node_id])
+            for node_id in self.graph.nodes()
+            if self.graph.nodes[node_id].get("type") == "belief"
+        ]
+        belief_nodes.sort(key=lambda x: x[1].get("confidence", 0), reverse=True)
+        for node_id, _ in belief_nodes[:belief_limit]:
+            matched_ids.add(node_id)
 
         # Step 4: 1-hop 扩展 — 加入所有匹配节点的直接邻居（successors + predecessors）
         hop_ids: set[str] = set()
