@@ -114,7 +114,12 @@ export function MessageBubble({
           {message.content ? (
             <MarkdownContent content={message.content} />
           ) : message.isStreaming ? (
-            <span className="text-[var(--text-tertiary)] text-xs">正在思考...</span>
+            <span className="inline-flex items-center gap-1.5 text-[var(--text-tertiary)] text-xs">
+              <span className="inline-flex gap-[3px]" style={{ color: expertColor }}>
+                <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
+              </span>
+              正在思考
+            </span>
           ) : null}
           {message.isStreaming && message.content && (
             <span
