@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import type { ThinkingItem } from "@/types/expert";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { createPortal } from "react-dom";
 import {
   ChevronRight,
   ChevronDown,
@@ -14,7 +15,9 @@ import {
   Sparkles,
   Users,
   Loader2,
+  TrendingUp,
 } from "lucide-react";
+import { KLinePreview } from "./KLinePreview";
 
 interface ThinkingPanelProps {
   thinking: ThinkingItem[];
@@ -137,6 +140,79 @@ function ExpertReplyDetail({
   );
 }
 
+/** 悬浮 K 线预览图标 — 鼠标悬停 300ms 后在光标旁弹出浮窗 */
+function HoverKLineIcon({
+  chartData,
+}: {
+  chartData: { code: string; records: Array<Record<string, unknown>> };
+}) {
+  const [show, setShow] = useState(false);
+  const [pos, setPos] = useState({ x: 0, y: 0 });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const iconRef = useRef<HTMLSpanElement>(null);
+
+  const handleEnter = useCallback((e: React.MouseEvent) => {
+    timerRef.current = setTimeout(() => {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      // 浮窗出现在图标右侧偏下，避免遮挡
+      const x = rect.right + 8;
+      const y = rect.top - 20;
+      // 边界修正：防止超出视口
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      setPos({
+        x: x + 420 > vw ? rect.left - 420 : x,
+        y: y + 280 > vh ? vh - 290 : y < 0 ? 10 : y,
+      });
+      setShow(true);
+    }, 300);
+  }, []);
+
+  const handleLeave = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setShow(false);
+  }, []);
+
+  if (!chartData.records || chartData.records.length === 0) return null;
+
+  return (
+    <>
+      <span
+        ref={iconRef}
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        className="inline-flex items-center cursor-default ml-1 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+        title="悬停查看 K 线"
+      >
+        <TrendingUp size={11} />
+      </span>
+      {show &&
+        createPortal(
+          <div
+            style={{
+              position: "fixed",
+              left: pos.x,
+              top: pos.y,
+              zIndex: 9999,
+              pointerEvents: "none",
+            }}
+          >
+            <KLinePreview
+              code={chartData.code}
+              records={chartData.records as any}
+              width={400}
+              height={250}
+            />
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+
 export function ThinkingPanel({
   thinking,
   color = "var(--accent)",
@@ -243,6 +319,9 @@ export function ThinkingPanel({
                             调用失败
                           </span>
                         )}
+                        {status === "done" && hasResult && item.result!.chartData && (
+                          <HoverKLineIcon chartData={item.result!.chartData} />
+                        )}
                       </div>
                       {isExpert && !!item.data.params?.question && (
                         <p className="mt-0.5 text-[var(--text-tertiary)] text-[10px] line-clamp-1">
@@ -309,6 +388,9 @@ export function ThinkingPanel({
                           <span className="text-[9px] px-1 py-0.5 rounded bg-red-500/10 text-red-500">
                             调用失败
                           </span>
+                        )}
+                        {item.data.chartData && (
+                          <HoverKLineIcon chartData={item.data.chartData} />
                         )}
                       </div>
                       {/* 非专家的摘要（或专家错误时的摘要） */}
