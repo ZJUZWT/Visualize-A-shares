@@ -497,7 +497,8 @@ class EngineExpert:
             ie = get_industry_engine()
             target = params.get("target", "")
             try:
-                result = await asyncio.to_thread(ie.get_cognition_cached, target)
+                # analyze() 是 async 方法，直接 await（不能用 asyncio.to_thread）
+                result = await ie.analyze(target=target)
                 if result:
                     return json.dumps(result, ensure_ascii=False, default=str)
                 return f"⚠️ 需要后端在线且配置 LLM 才能获取产业链认知"
