@@ -239,11 +239,16 @@ class ExpertAgent:
         """容错解析：从 LLM 非标准输出中提取工具调用意图"""
         tool_calls: list[dict] = []
 
+        # 从文本中提取 6 位股票代码
+        code_match = re.search(r'\b(\d{6})\b', text)
+        detected_code = code_match.group(1) if code_match else ""
+
         # 专家类型关键词匹配
         expert_patterns = {
-            "data": [r"数据专家", r"咨询.*data", r"action.*[\"']data[\"']"],
-            "quant": [r"量化专家", r"咨询.*quant", r"技术指标", r"技术面", r"action.*[\"']quant[\"']"],
-            "info": [r"资讯专家", r"咨询.*info", r"新闻", r"公告", r"action.*[\"']info[\"']"],
+            "data": [r"数据专家", r"咨询.*data", r"action.*[\"']data[\"']", r"行情数据", r"历史走势"],
+            "quant": [r"量化专家", r"咨询.*quant", r"技术指标", r"技术面", r"因子", r"action.*[\"']quant[\"']",
+                      r"支撑.*阻力", r"RSI", r"MACD", r"均线"],
+            "info": [r"资讯专家", r"咨询.*info", r"新闻", r"公告", r"舆情", r"action.*[\"']info[\"']"],
             "industry": [r"产业链专家", r"咨询.*industry", r"行业分析", r"产业链", r"action.*[\"']industry[\"']"],
         }
 
@@ -256,9 +261,8 @@ class ExpertAgent:
                     break
 
         if detected_experts:
-            # 从上下文中提取问题（用原始用户消息作为默认问题）
             for expert_type in detected_experts:
-                # 尝试从 [TOOL_CALL] 中提取 question
+                # 尝试从文本中提取 question
                 question = ""
                 tc_pattern = rf'action.*?["\']?{expert_type}["\']?.*?question.*?["\']([^"\']+)["\']'
                 q_match = re.search(tc_pattern, text, re.DOTALL | re.IGNORECASE)
@@ -268,7 +272,7 @@ class ExpertAgent:
                 tool_calls.append({
                     "engine": "expert",
                     "action": expert_type,
-                    "params": {"question": question},  # question 可为空，后面会补
+                    "params": {"question": question},
                 })
 
             logger.info(f"think 容错解析: 检测到需要咨询 {list(detected_experts)}")
@@ -278,17 +282,20 @@ class ExpertAgent:
                 reasoning=f"容错解析: 检测到需要咨询{','.join(detected_experts)}",
             )
 
-        # 检测是否需要直接数据查询
+        # 检测直接数据查询（仅用于非常简单的请求）
         data_patterns = [
-            (r"get_daily_history", "data", "get_daily_history"),
-            (r"get_company_profile", "data", "get_company_profile"),
-            (r"search_stock", "data", "search_stock"),
-            (r"get_factor_scores", "quant", "get_factor_scores"),
-            (r"get_technical_indicators", "quant", "get_technical_indicators"),
+            (r"get_daily_history", "data", "get_daily_history",
+             {"code": detected_code, "days": 30}),
+            (r"search_stock", "data", "search_stock",
+             {"query": detected_code}),
+            (r"get_factor_scores", "quant", "get_factor_scores",
+             {"code": detected_code}),
+            (r"get_technical_indicators", "quant", "get_technical_indicators",
+             {"code": detected_code}),
         ]
-        for pattern, engine, action in data_patterns:
+        for pattern, engine, action, default_params in data_patterns:
             if re.search(pattern, text, re.IGNORECASE):
-                tool_calls.append({"engine": engine, "action": action, "params": {}})
+                tool_calls.append({"engine": engine, "action": action, "params": default_params})
 
         if tool_calls:
             logger.info(f"think 容错解析: 检测到数据查询 {[(tc['engine'], tc['action']) for tc in tool_calls]}")
@@ -426,13 +433,28 @@ class ExpertAgent:
                 chunks.append(token)
             text = "".join(chunks).strip()
 
-            # 剥离 <think> 标签
+            # 剥离各种标签
             text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+            text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
 
             if not text:
                 return
 
-            data = json.loads(text)
+            # 提取 JSON（从 markdown 代码块或直接匹配）
+            json_text = text
+            json_match = re.search(r'\{[^{}]*"updated"[^{}]*\}', text, re.DOTALL)
+            if json_match:
+                json_text = json_match.group(0)
+            elif "```" in text:
+                json_text = text.split("```")[1]
+                if json_text.startswith("json"):
+                    json_text = json_text[4:]
+                json_text = json_text.strip()
+
+            if not json_text:
+                return
+
+            data = json.loads(json_text)
             output = BeliefUpdateOutput(**data)
             if output.updated:
                 events = []

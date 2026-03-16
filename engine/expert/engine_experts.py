@@ -7,6 +7,7 @@
 import json
 from typing import AsyncGenerator, Literal
 
+import pandas as pd
 from loguru import logger
 
 ExpertType = Literal["data", "quant", "info", "industry", "rag"]
@@ -201,7 +202,7 @@ class EngineExpert:
             return {"tool_calls": []}
 
     async def _execute_tool(self, tc: dict) -> str:
-        """执行单个工具调用"""
+        """执行单个工具调用 — 直接调用引擎单例，不走 HTTP"""
         action = tc["action"]
         params = tc.get("params", {})
 
@@ -221,71 +222,246 @@ class EngineExpert:
         return "未知引擎类型"
 
     async def _exec_data_tool(self, action: str, params: dict) -> str:
-        """DataEngine 工具"""
-        from mcpserver.data_access import DataAccess
-        from mcpserver import tools
+        """DataEngine 工具 — 直接调用引擎单例"""
+        import asyncio
+        import datetime
+        import json
+        from data_engine import get_data_engine
 
-        da = DataAccess()
+        de = get_data_engine()
+
         if action == "query_market_overview":
-            return tools.query_market_overview(da)
+            snap = de.get_snapshot()
+            if snap is None or snap.empty:
+                return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
+            total = len(snap)
+            up = int((snap.get("pct_chg", pd.Series()) > 0).sum()) if "pct_chg" in snap.columns else 0
+            down = int((snap.get("pct_chg", pd.Series()) < 0).sum()) if "pct_chg" in snap.columns else 0
+            return json.dumps({"total_stocks": total, "up": up, "down": down, "flat": total - up - down}, ensure_ascii=False)
+
         elif action == "search_stocks":
-            return tools.search_stocks(da, params.get("query", ""))
+            snap = de.get_snapshot()
+            if snap is None or snap.empty:
+                return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
+            query = params.get("query", "").lower()
+            results = []
+            for _, row in snap.iterrows():
+                code = str(row.get("code", ""))
+                name = str(row.get("name", ""))
+                if query in code.lower() or query in name.lower():
+                    results.append({"code": code, "name": name,
+                                    "price": float(row.get("price", 0)),
+                                    "pct_chg": float(row.get("pct_chg", 0))})
+                if len(results) >= 20:
+                    break
+            return json.dumps({"results": results, "count": len(results)}, ensure_ascii=False, default=str)
+
         elif action == "query_stock":
-            return tools.query_stock(da, params.get("code", ""))
-        elif action == "query_cluster":
-            return tools.query_cluster(da, params.get("cluster_id", 0))
-        elif action == "find_similar_stocks":
-            return tools.find_similar_stocks(da, params.get("code", ""), params.get("top_k", 10))
+            code = params.get("code", "")
+            snap = de.get_snapshot()
+            if snap is None or snap.empty:
+                return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
+            row = snap[snap["code"].astype(str) == code]
+            if row.empty:
+                return json.dumps({"error": f"未找到 {code}"}, ensure_ascii=False)
+            return row.iloc[0].to_json(force_ascii=False, default_handler=str)
+
         elif action == "query_history":
-            return tools.query_history(da, params.get("code", ""), params.get("days", 60))
+            code = params.get("code", "")
+            days = params.get("days", 60)
+            end = datetime.date.today().strftime("%Y-%m-%d")
+            start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            df = await asyncio.to_thread(de.get_daily_history, code, start, end)
+            if df is None or df.empty:
+                return json.dumps({"error": f"无 {code} 日线数据"}, ensure_ascii=False)
+            records = df.tail(20).to_dict("records")
+            return json.dumps({"code": code, "records": records, "total_days": len(df)},
+                              ensure_ascii=False, default=str)
+
+        elif action == "query_cluster":
+            from cluster_engine import get_cluster_engine
+            ce = get_cluster_engine()
+            cluster_id = params.get("cluster_id", 0)
+            result = ce.get_cluster_stocks(cluster_id)
+            return json.dumps(result, ensure_ascii=False, default=str) if result else f"聚类 {cluster_id} 无数据"
+
+        elif action == "find_similar_stocks":
+            from cluster_engine import get_cluster_engine
+            ce = get_cluster_engine()
+            code = params.get("code", "")
+            top_k = params.get("top_k", 10)
+            result = ce.find_similar(code, top_k)
+            return json.dumps(result, ensure_ascii=False, default=str) if result else f"未找到 {code} 的相似股票"
+
         elif action == "run_screen":
-            return tools.run_screen(da, params.get("filters", {}))
+            snap = de.get_snapshot()
+            if snap is None or snap.empty:
+                return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
+            filters = params.get("filters", {})
+            result = snap.copy()
+            for col, cond in filters.items():
+                if col in result.columns:
+                    if isinstance(cond, dict):
+                        if "gt" in cond:
+                            result = result[pd.to_numeric(result[col], errors="coerce") > cond["gt"]]
+                        if "lt" in cond:
+                            result = result[pd.to_numeric(result[col], errors="coerce") < cond["lt"]]
+            records = result.head(30).to_dict("records")
+            return json.dumps({"count": len(result), "results": records}, ensure_ascii=False, default=str)
+
         return f"未知 data 工具: {action}"
 
     async def _exec_quant_tool(self, action: str, params: dict) -> str:
-        """QuantEngine 工具"""
-        from mcpserver.data_access import DataAccess
-        from mcpserver import tools
+        """QuantEngine 工具 — 直接调用引擎单例"""
+        import asyncio
+        import datetime
+        import json
+        from quant_engine import get_quant_engine
+        from data_engine import get_data_engine
 
-        da = DataAccess()
+        qe = get_quant_engine()
+        de = get_data_engine()
+
         if action == "get_technical_indicators":
-            return tools.get_technical_indicators(da, params.get("code", ""))
+            code = params.get("code", "")
+            days = 120
+            end = datetime.date.today().strftime("%Y-%m-%d")
+            start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            daily = await asyncio.to_thread(de.get_daily_history, code, start, end)
+            if daily is None or daily.empty:
+                return json.dumps({"error": f"无 {code} 日线数据，无法计算技术指标"}, ensure_ascii=False)
+            indicators = qe.compute_indicators(daily)
+            return json.dumps({"code": code, "data_days": len(daily), "indicators": indicators},
+                              ensure_ascii=False, default=str)
+
         elif action == "get_factor_scores":
-            return tools.get_factor_scores(da, params.get("code", ""))
+            snap = de.get_snapshot()
+            if snap is None or snap.empty:
+                return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
+            code = params.get("code", "")
+            row = snap[snap["code"].astype(str) == code]
+            if row.empty:
+                return json.dumps({"error": f"快照中未找到 {code}"}, ensure_ascii=False)
+            weights, source = qe.get_factor_weights()
+            factor_defs = qe.get_factor_defs()
+            factors = {}
+            for fdef in factor_defs:
+                val = row.iloc[0].get(fdef.source_col)
+                factors[fdef.name] = {"value": float(val) if val is not None and str(val) != "nan" else None,
+                                       "weight": weights.get(fdef.name, 0), "direction": fdef.direction,
+                                       "desc": fdef.desc}
+            return json.dumps({"code": code, "factors": factors, "weight_source": source},
+                              ensure_ascii=False, default=str)
+
         elif action == "query_factor_analysis":
-            return tools.query_factor_analysis(da, params.get("factor_name"))
+            factor_name = params.get("factor_name")
+            factor_defs = qe.get_factor_defs()
+            weights, source = qe.get_factor_weights()
+            if factor_name:
+                matched = [f for f in factor_defs if f.name == factor_name]
+                if not matched:
+                    return json.dumps({"error": f"未找到因子: {factor_name}"}, ensure_ascii=False)
+                f = matched[0]
+                return json.dumps({"name": f.name, "source_col": f.source_col, "direction": f.direction,
+                                   "group": f.group, "weight": weights.get(f.name, 0), "desc": f.desc},
+                                  ensure_ascii=False)
+            # 全景
+            all_factors = [{"name": f.name, "group": f.group, "direction": f.direction,
+                            "weight": weights.get(f.name, 0), "desc": f.desc} for f in factor_defs]
+            return json.dumps({"weight_source": source, "factors": all_factors}, ensure_ascii=False)
+
         elif action == "run_backtest":
-            return tools.run_backtest(da, params.get("rolling_window", 20), params.get("auto_inject", False))
+            result = await asyncio.to_thread(qe.run_backtest, rolling_window=params.get("rolling_window", 20))
+            return json.dumps({"backtest_days": result.backtest_days, "icir_weights": result.icir_weights},
+                              ensure_ascii=False, default=str)
+
         elif action == "run_screen":
-            return tools.run_screen(da, params.get("filters", {}), params.get("sort_by", "pct_chg"))
+            return await self._exec_data_tool("run_screen", params)
+
         return f"未知 quant 工具: {action}"
 
     async def _exec_info_tool(self, action: str, params: dict) -> str:
-        """InfoEngine 工具"""
-        from mcpserver.data_access import DataAccess
-        from mcpserver import tools
+        """InfoEngine 工具 — 直接调用引擎单例"""
+        import asyncio
+        import json
+        from data_engine import get_data_engine
 
-        da = DataAccess()
+        de = get_data_engine()
+
         if action == "get_news":
-            return tools.get_news(da, params.get("code", ""), params.get("limit", 20))
+            code = params.get("code", "")
+            limit = params.get("limit", 20)
+            news_df = await asyncio.to_thread(de.get_news, code, limit)
+            if news_df is None or (hasattr(news_df, 'empty') and news_df.empty):
+                return json.dumps({"error": f"无 {code} 新闻数据"}, ensure_ascii=False)
+            # DataFrame → list[dict]
+            if hasattr(news_df, 'to_dict'):
+                records = news_df.to_dict("records")
+            else:
+                records = news_df
+            return json.dumps({"code": code, "news": records}, ensure_ascii=False, default=str)
+
         elif action == "get_announcements":
-            return tools.get_announcements(da, params.get("code", ""), params.get("limit", 10))
+            code = params.get("code", "")
+            limit = params.get("limit", 10)
+            try:
+                ann_df = await asyncio.to_thread(de.get_announcements, code, limit)
+                if ann_df is None or (hasattr(ann_df, 'empty') and ann_df.empty):
+                    return json.dumps({"error": f"无 {code} 公告数据"}, ensure_ascii=False)
+                if hasattr(ann_df, 'to_dict'):
+                    records = ann_df.to_dict("records")
+                else:
+                    records = ann_df
+                return json.dumps({"code": code, "announcements": records}, ensure_ascii=False, default=str)
+            except AttributeError:
+                return json.dumps({"error": "公告功能暂未实现"}, ensure_ascii=False)
+
         elif action == "assess_event_impact":
-            return tools.assess_event_impact(da, params.get("code", ""), params.get("event_desc", ""))
+            # 事件影响评估需要 LLM
+            code = params.get("code", "")
+            event_desc = params.get("event_desc", "")
+            return json.dumps({"code": code, "event": event_desc,
+                              "note": "事件影响评估需结合新闻和技术面综合分析"}, ensure_ascii=False)
+
         return f"未知 info 工具: {action}"
 
     async def _exec_industry_tool(self, action: str, params: dict) -> str:
-        """IndustryEngine 工具"""
-        from mcpserver.data_access import DataAccess
-        from mcpserver import tools
+        """IndustryEngine 工具 — 直接调用引擎单例"""
+        import asyncio
+        import json
 
-        da = DataAccess()
         if action == "query_industry_cognition":
-            return tools.get_industry_cognition(da, params.get("target", ""))
+            from industry_engine import get_industry_engine
+            ie = get_industry_engine()
+            target = params.get("target", "")
+            try:
+                result = await asyncio.to_thread(ie.get_cognition_cached, target)
+                if result:
+                    return json.dumps(result, ensure_ascii=False, default=str)
+                return f"⚠️ 需要后端在线且配置 LLM 才能获取产业链认知"
+            except Exception as e:
+                return f"产业链认知查询失败: {e}"
+
         elif action == "query_industry_mapping":
-            return tools.get_industry_mapping_tool(da, params.get("industry", ""))
+            from industry_engine import get_industry_engine
+            ie = get_industry_engine()
+            industry = params.get("industry", "")
+            try:
+                result = await asyncio.to_thread(ie.get_industry_mapping, industry)
+                return json.dumps(result, ensure_ascii=False, default=str) if result else "无映射数据"
+            except Exception as e:
+                return f"行业映射查询失败: {e}"
+
         elif action == "query_capital_structure":
-            return tools.get_capital_structure_tool(da, params.get("code", ""))
+            from industry_engine import get_industry_engine
+            ie = get_industry_engine()
+            code = params.get("code", "")
+            try:
+                result = await asyncio.to_thread(ie.get_capital_structure, code)
+                return json.dumps(result, ensure_ascii=False, default=str) if result else f"无 {code} 资金构成数据"
+            except Exception as e:
+                return f"资金构成查询失败: {e}"
+
         return f"未知 industry 工具: {action}"
 
     async def _reply_stream(
