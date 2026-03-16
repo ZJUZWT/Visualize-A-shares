@@ -94,6 +94,12 @@ def query_history(code: str, days: int = 60) -> str:
 
 
 @server.tool()
+def query_hourly(code: str, days: int = 5) -> str:
+    """查询个股小时线K线数据（60分钟级别）。返回日内OHLCV数据，默认最近5个交易日。code 示例: '600519'"""
+    return tools.query_hourly(_da, code, days)
+
+
+@server.tool()
 def run_screen(
     filters: dict,
     sort_by: str = "pct_chg",
