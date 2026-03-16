@@ -16,6 +16,7 @@
     "@types/three": "^0.170.0",
     "clsx": "^2.1.0",
     "framer-motion": "^11.0.0",
+    "lightweight-charts": "^5.1.0",
     "lucide-react": "latest",
     "next": "^15.1.0",
     "react": "^19.0.0",
