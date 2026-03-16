@@ -1,5 +1,5 @@
 """
-MCP Tools — 22 个 Tool 实现
+MCP Tools — 23 个 Tool 实现
 
 每个 tool 返回 AI 友好的 Markdown 文本（非原始 JSON）。
 在线模式优先走 REST API，离线自动降级到 DuckDB read-only。
@@ -702,6 +702,54 @@ def query_history(da: DataAccess, code: str, days: int = 60) -> str:
         p = fmt_pct(row.get("pct_chg"))
         t = f"{float(row.get('turnover_rate', 0)):.2f}%" if row.get("turnover_rate") else "N/A"
         lines.append(f"{d} | {o} | {h} | {lo} | {c} | {v} | {a} | {p} | {t}")
+
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════
+# Tool 7.5: query_hourly (小时线 K 线)
+# ═══════════════════════════════════════════════════════
+
+def query_hourly(da: DataAccess, code: str, days: int = 5) -> str:
+    """小时线 K 线数据（60min）"""
+    import math
+
+    history = da.get_hourly_history(code, days)
+    if history.empty:
+        return error_msg("NO_DATA", f"股票 {code} 无小时线数据", "需后端在线拉取，或本地已有缓存。")
+
+    profiles = _load_profiles()
+    name = profiles.get(code, {}).get("name", code)
+
+    lines = [
+        f"## {name} ({code}) 60min K 线（近 {len(history)} 条）",
+        "",
+        "时间 | 开盘 | 最高 | 最低 | 收盘 | 成交量 | 成交额 | 涨跌幅 | 换手率",
+        "--- | --- | --- | --- | --- | --- | --- | --- | ---",
+    ]
+
+    def _safe_float(v, fmt=".2f"):
+        if v is None:
+            return "N/A"
+        try:
+            f = float(v)
+            if math.isnan(f) or math.isinf(f):
+                return "N/A"
+            return f"{f:{fmt}}"
+        except (ValueError, TypeError):
+            return "N/A"
+
+    for _, row in history.iterrows():
+        dt = str(row.get("datetime", ""))
+        o = _safe_float(row.get("open"))
+        h = _safe_float(row.get("high"))
+        lo = _safe_float(row.get("low"))
+        c = _safe_float(row.get("close"))
+        v = fmt_number(row.get("volume"))
+        a = fmt_number(row.get("amount"))
+        p = fmt_pct(row.get("pct_chg"))
+        t = _safe_float(row.get("turnover_rate")) + "%" if row.get("turnover_rate") is not None else "N/A"
+        lines.append(f"{dt} | {o} | {h} | {lo} | {c} | {v} | {a} | {p} | {t}")
 
     return "\n".join(lines)
 
