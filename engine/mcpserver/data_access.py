@@ -211,6 +211,21 @@ class DataAccess:
             [code, days],
         )
 
+    def get_hourly_history(self, code: str, days: int = 5) -> pd.DataFrame:
+        """获取指定股票的小时线历史（60min K 线）"""
+        if self.is_online():
+            data = self.api_get(f"/api/v1/data/kline/{code}", params={"days": days}, timeout=30.0)
+            if data and data.get("records"):
+                return pd.DataFrame(data["records"])
+        # 离线降级：直接查 DuckDB
+        return self.db_query(
+            """SELECT * FROM stock_kline_60m
+               WHERE code = ?
+               ORDER BY datetime DESC
+               LIMIT ?""",
+            [code, days * 4],
+        )
+
     def get_snapshot_daily_dates(self) -> list[str]:
         """获取所有快照日期"""
         df = self.db_query("SELECT DISTINCT date FROM stock_snapshot_daily ORDER BY date DESC")
