@@ -24,6 +24,8 @@ ACTION_DISPATCH: dict[str, tuple[str, str, str, bool]] = {
     "get_news":                 ("info_engine",    "get_info_engine",    "get_news",              True),
     "get_announcements":        ("info_engine",    "get_info_engine",    "get_announcements",     True),
     "get_cluster_for_stock":    ("cluster_engine", "get_cluster_engine", "get_cluster_for_stock", False),
+    "get_industry_cognition":   ("industry_engine", "get_industry_engine", "analyze",             True),
+    "get_capital_structure":    ("industry_engine", "get_industry_engine", "get_capital_structure", True),
 }
 
 
@@ -160,12 +162,19 @@ class DataFetcher:
         return ""
 
     def get_financials(self, code: str) -> dict:
-        """获取最新一期财报关键指标"""
+        """获取最新一期财报关键指标（回测模式下只返回 as_of_date 之前的财报）"""
         try:
             import akshare as ak
             df = ak.stock_financial_analysis_indicator(symbol=code, start_year="2020")
             if df is None or df.empty:
                 return {"error": f"无财务数据: {code}"}
+            # 回测模式：过滤掉 as_of_date 之后的财报
+            if self._as_of_date and "日期" in df.columns:
+                df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                cutoff = pd.Timestamp(self._as_of_date)
+                df = df[df["日期"] <= cutoff]
+                if df.empty:
+                    return {"error": f"无 {self._as_of_date} 之前的财务数据: {code}"}
             row = df.iloc[-1]
             result: dict = {"code": code, "report_date": str(row.get("日期", ""))}
             KEY_COLS = {
@@ -189,13 +198,20 @@ class DataFetcher:
             return {"error": str(e)}
 
     def get_money_flow(self, code: str) -> dict:
-        """获取当日资金流向"""
+        """获取资金流向（回测模式下返回 as_of_date 当日或之前最近一日的数据）"""
         try:
             import akshare as ak
             market = "sh" if code.startswith("6") else "sz"
             df = ak.stock_individual_fund_flow(stock=code, market=market)
             if df is None or df.empty:
                 return {"error": f"无资金流向数据: {code}"}
+            # 回测模式：过滤到 as_of_date 之前的数据
+            if self._as_of_date and "日期" in df.columns:
+                df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                cutoff = pd.Timestamp(self._as_of_date)
+                df = df[df["日期"] <= cutoff]
+                if df.empty:
+                    return {"error": f"无 {self._as_of_date} 之前的资金流向数据: {code}"}
             row = df.iloc[-1]
             return {
                 "code": code,
@@ -267,12 +283,19 @@ class DataFetcher:
             return {"error": str(e)}
 
     def get_northbound_holding(self, code: str) -> dict:
-        """获取北向持股数据"""
+        """获取北向持股数据（回测模式下返回 as_of_date 当日或之前最近一日的数据）"""
         try:
             import akshare as ak
             df = ak.stock_hsgt_individual_em(symbol=code)
             if df is None or df.empty:
                 return {"error": f"无北向持股数据: {code}"}
+            # 回测模式：过滤到 as_of_date 之前的数据
+            if self._as_of_date and "日期" in df.columns:
+                df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                cutoff = pd.Timestamp(self._as_of_date)
+                df = df[df["日期"] <= cutoff]
+                if df.empty:
+                    return {"error": f"无 {self._as_of_date} 之前的北向持股数据: {code}"}
             row = df.iloc[-1]
             return {
                 "code": code,
@@ -323,8 +346,16 @@ class DataFetcher:
             return {"error": str(e)}
 
     def get_turnover_rate(self, code: str) -> dict:
-        """从 DataEngine snapshot 获取换手率"""
+        """获取换手率（回测模式下从日线数据获取，实时模式从 snapshot 获取）"""
         try:
+            # 回测模式：snapshot 只有最新数据，降级从日线历史获取
+            if self._as_of_date:
+                from data_engine import get_data_engine
+                de = get_data_engine()
+                df = de.get_daily_history(code, self._start_date(5), self.end_date)
+                if isinstance(df, pd.DataFrame) and not df.empty and "turnover_rate" in df.columns:
+                    return {"code": code, "turnover_rate": float(df.iloc[-1]["turnover_rate"]), "as_of_date": self.end_date}
+                return {"error": f"无 {self._as_of_date} 的换手率数据: {code}"}
             from data_engine import get_data_engine
             snapshot = get_data_engine().get_snapshot()
             row = snapshot[snapshot["code"] == code]

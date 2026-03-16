@@ -49,12 +49,15 @@ def sse(event: str, data: dict) -> dict:
 
 
 def _extract_json(text: str) -> str:
-    """从 LLM 输出提取 JSON（处理 markdown 代码块 + 中文引号 + 控制字符）"""
+    """从 LLM 输出提取 JSON（处理 <think> 标签 + markdown 代码块 + 中文引号 + 控制字符）"""
+    # 0. 剥离 <think>...</think> 思考过程（DeepSeek/QwQ 等模型常见）
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # 1. 尝试从 markdown 代码块提取
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
     result = match.group(1).strip() if match else text.strip()
-    # 替换中文引号为英文引号
+    # 2. 替换中文引号为英文引号
     result = result.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
-    # 移除 JSON 字符串值以外的控制字符（保留 \n \r \t）
+    # 3. 移除 JSON 字符串值以外的控制字符（保留 \n \r \t）
     result = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', result)
     return result
 
@@ -108,7 +111,7 @@ async def extract_structure(
     llm: BaseLLMProvider,
 ) -> dict:
     """从 argument 正文提取结构化字段，返回可解包到 DebateEntry 的 dict。"""
-    extract_prompt = f"""请从以下辩论发言中提取结构化信息，只返回 JSON，不要其他内容。
+    extract_prompt = f"""请从以下辩论发言中提取结构化信息。
 
 角色: {role}
 发言内容:
@@ -116,7 +119,7 @@ async def extract_structure(
 {argument}
 </speech>
 
-返回格式:
+直接输出 JSON，不要包含 markdown 代码块、不要包含任何额外文字或思考过程。
 {{
   "stance": "insist" | "partial_concede" | "concede",
   "confidence": 0.0-1.0,
@@ -127,16 +130,17 @@ async def extract_structure(
 }}
 
 重要约束：
-- confidence 是你的公开立场（可以嘴硬）
-- inner_confidence 是你内心的真实想法——如果对方的某个论据确实让你动摇了，这里要诚实反映
+- confidence 是公开立场（可以嘴硬）
+- inner_confidence 是内心真实想法——如果对方的某个论据确实让其动摇了，这里要诚实反映
 - retail_sentiment_score 仅 retail_investor 角色填写（-1.0 到 +1.0），其他角色必须为 null
-- 只返回 JSON，不要任何其他文字"""
+- 直接输出 JSON，不要任何其他文字"""
 
     try:
-        raw = await asyncio.wait_for(
-            llm.chat([ChatMessage(role="user", content=extract_prompt)]),
-            timeout=10.0,
-        )
+        # 流式收集：保持链路活跃，不设总超时
+        chunks: list[str] = []
+        async for token in llm.chat_stream([ChatMessage(role="user", content=extract_prompt)]):
+            chunks.append(token)
+        raw = "".join(chunks)
         parsed = _lenient_json_loads(raw)
         score = parsed.get("retail_sentiment_score")
         return {
@@ -307,6 +311,28 @@ def _build_context_for_role(blackboard: Blackboard) -> str:
                     parts.append(f"- {r}")
             parts.append("")
 
+        # 资金构成（公共知识）
+        capital = blackboard.facts.get("capital_structure")
+        if capital and isinstance(capital, dict):
+            parts.append("## 资金构成")
+            if capital.get("main_force_net_inflow"):
+                parts.append(f"- 主力净流入: {capital['main_force_net_inflow']}（占比{capital.get('main_force_ratio', '')}）")
+            if capital.get("super_large_net_inflow"):
+                parts.append(f"- 超大单净流入: {capital['super_large_net_inflow']}")
+            if capital.get("large_net_inflow"):
+                parts.append(f"- 大单净流入: {capital['large_net_inflow']}")
+            if capital.get("small_net_inflow"):
+                parts.append(f"- 小单净流入: {capital['small_net_inflow']}")
+            if capital.get("northbound_ratio"):
+                parts.append(f"- 北向持股占比: {capital['northbound_ratio']}，变化: {capital.get('northbound_change', '')}")
+            if capital.get("margin_balance"):
+                parts.append(f"- 融资余额: {capital['margin_balance']}，融资买入额: {capital.get('margin_buy', '')}")
+            if capital.get("turnover_rate"):
+                parts.append(f"- 换手率: {capital['turnover_rate']:.2f}%")
+            if capital.get("structure_summary"):
+                parts.append(f"\n综合判断: {capital['structure_summary']}")
+            parts.append("")
+
         # 公用初始数据（facts）
         if blackboard.facts:
             parts.append("## 初始数据")
@@ -421,10 +447,13 @@ async def speak_stream(
         ChatMessage(role="user", content=user_content),
     ]
 
-    # Phase 1: 流式输出
-    tokens: list[str] = []
+    # Phase 1: 流式输出（支持 <think> 标签分离）
+    tokens: list[str] = []       # 正文 token（不含 think）
+    think_tokens: list[str] = [] # think 内容
     token_buf: list[str] = []
     seq = 0
+    in_think = False             # 是否在 <think> 块内
+    raw_buffer = ""              # 用于检测 <think> 和 </think> 标签的缓冲区
 
     def _flush() -> dict | None:
         nonlocal seq
@@ -440,12 +469,61 @@ async def speak_stream(
 
     try:
         async for token in llm.chat_stream(messages):
-            tokens.append(token)
-            token_buf.append(token)
+            raw_buffer += token
+
+            # 检测 <think> 标签开始
+            if not in_think and "<think>" in raw_buffer:
+                # 将 <think> 之前的内容作为正文处理
+                before = raw_buffer.split("<think>", 1)[0]
+                if before:
+                    tokens.append(before)
+                    token_buf.append(before)
+                in_think = True
+                raw_buffer = raw_buffer.split("<think>", 1)[1]
+                continue
+
+            # 检测 </think> 标签结束
+            if in_think and "</think>" in raw_buffer:
+                think_content = raw_buffer.split("</think>", 1)[0]
+                think_tokens.append(think_content)
+                in_think = False
+                remaining = raw_buffer.split("</think>", 1)[1]
+                raw_buffer = remaining.lstrip("\n")  # 剥离 think 后的换行
+                # 推送 think 完成事件
+                yield sse("debate_think", {
+                    "role": role, "round": blackboard.round,
+                    "content": "".join(think_tokens),
+                })
+                continue
+
+            # 在 think 块内：累积但不推送正文
+            if in_think:
+                # 保留缓冲区用于检测 </think>，但避免无限增长
+                if len(raw_buffer) > 200:
+                    think_tokens.append(raw_buffer[:-20])
+                    raw_buffer = raw_buffer[-20:]
+                continue
+
+            # 正常正文：检查缓冲区是否可能是 <think> 的开始
+            if "<" in raw_buffer and not raw_buffer.endswith(">"):
+                # 可能是不完整的标签，继续缓冲
+                if len(raw_buffer) < 10:
+                    continue
+
+            # 推送正文
+            if raw_buffer:
+                tokens.append(raw_buffer)
+                token_buf.append(raw_buffer)
+                raw_buffer = ""
             if len(token_buf) >= 5 or token in ("。", "\n", ".", "！", "？", "；"):
                 ev = _flush()
                 if ev:
                     yield ev
+
+        # 处理残余缓冲区
+        if raw_buffer and not in_think:
+            tokens.append(raw_buffer)
+            token_buf.append(raw_buffer)
         ev = _flush()
         if ev:
             yield ev
@@ -457,6 +535,8 @@ async def speak_stream(
             yield ev
 
     argument = "".join(tokens)
+    # 剥离残留的 think 标签（以防流式解析遗漏）
+    argument = re.sub(r"<think>.*?</think>", "", argument, flags=re.DOTALL).strip()
 
     # Phase 2: 提取结构化字段
     structure = await extract_structure(argument, role, blackboard, llm)
@@ -497,11 +577,12 @@ async def speak(
     ]
 
     try:
-        raw = await asyncio.wait_for(llm.chat(messages), timeout=45.0)
+        # 流式收集：保持链路活跃，不设总超时
+        chunks: list[str] = []
+        async for token in llm.chat_stream(messages):
+            chunks.append(token)
+        raw = "".join(chunks)
         entry = _parse_debate_entry(role, blackboard.round, raw)
-    except asyncio.TimeoutError:
-        logger.warning(f"辩论角色 [{role}] LLM 超时，使用 fallback")
-        entry = _fallback_entry(role, blackboard.round, reason="timeout")
     except Exception as e:
         logger.warning(f"辩论角色 [{role}] LLM 失败: {e}，使用 fallback")
         entry = _fallback_entry(role, blackboard.round, reason=str(e))
@@ -597,92 +678,14 @@ ACTION_TITLE_MAP = {
 }
 
 
-# ── 行业认知 ──────────────────────────────────────────
-
-INDUSTRY_COGNITION_PROMPT = """你是产业链分析专家。请基于你对 {industry} 行业的深度理解，生成以下结构化分析。
-当前讨论标的：{target}（{stock_name}），时间基准：{as_of_date}。
-
-请以 JSON 格式返回：
-{{
-  "upstream": ["上游环节1", "上游环节2"],
-  "downstream": ["下游应用1", "下游应用2"],
-  "core_drivers": ["核心驱动变量1 — 简要说明", "..."],
-  "cost_structure": "成本结构描述（原材料占比、人工、能源等）",
-  "barriers": "行业壁垒（资源、技术、资质、规模等）",
-  "supply_demand": "当前供需格局分析（供给端变化、需求端趋势、库存状态）",
-  "common_traps": [
-    "认知陷阱1 — 表面逻辑 vs 实际逻辑",
-    "认知陷阱2 — ..."
-  ],
-  "cycle_position": "景气上行 | 景气下行 | 拐点向上 | 拐点向下 | 高位震荡 | 底部盘整",
-  "cycle_reasoning": "周期判断的具体依据",
-  "catalysts": ["潜在催化剂1", "..."],
-  "risks": ["关键风险1", "..."]
-}}
-
-要求：
-- common_traps 是最关键的部分，必须列出该行业中投资者最容易犯的认知错误
-- 每个陷阱要说明「表面逻辑」和「实际逻辑」的差异
-- cycle_position 必须给出明确判断，不能模棱两可
-- 所有分析基于 {as_of_date} 时点的行业状态"""
-
-
-def _load_cached_cognition(industry: str, as_of_date: str) -> IndustryCognition | None:
-    """从 DuckDB 读取缓存的行业认知"""
-    try:
-        from data_engine import get_data_engine
-        import json as _json
-        con = get_data_engine().store._conn
-        row = con.execute(
-            "SELECT cognition_json FROM shared.industry_cognition WHERE industry = ? AND as_of_date = ?",
-            [industry, as_of_date],
-        ).fetchone()
-        if row:
-            data = _json.loads(row[0])
-            return IndustryCognition(**data)
-    except Exception as e:
-        logger.debug(f"行业认知缓存读取失败: {e}")
-    return None
-
-
-def _save_cognition_cache(cognition: IndustryCognition):
-    """写入 DuckDB + ChromaDB 缓存"""
-    try:
-        from data_engine import get_data_engine
-        con = get_data_engine().store._conn
-        con.execute(
-            "INSERT OR REPLACE INTO shared.industry_cognition (industry, as_of_date, target, cognition_json) VALUES (?, ?, ?, ?)",
-            [cognition.industry, cognition.as_of_date, cognition.target, cognition.model_dump_json()],
-        )
-    except Exception as e:
-        logger.warning(f"行业认知 DuckDB 缓存写入失败: {e}")
-
-    try:
-        from agent.memory import AgentMemory
-        memory = AgentMemory()
-        text = (
-            f"行业: {cognition.industry}\n"
-            f"产业链: 上游={cognition.upstream}, 下游={cognition.downstream}\n"
-            f"核心驱动: {cognition.core_drivers}\n"
-            f"供需: {cognition.supply_demand}\n"
-            f"认知陷阱: {cognition.common_traps}\n"
-            f"周期: {cognition.cycle_position} — {cognition.cycle_reasoning}"
-        )
-        memory.store(
-            agent_role="industry_cognition",
-            target=cognition.industry,
-            content=text,
-            metadata={"industry": cognition.industry, "as_of_date": cognition.as_of_date, "target": cognition.target},
-        )
-    except Exception as e:
-        logger.debug(f"行业认知 ChromaDB 缓存写入失败: {e}")
+# ── 行业认知（已迁移至 IndustryEngine） ─────────────────
 
 
 async def generate_industry_cognition(
     blackboard: Blackboard,
     llm: BaseLLMProvider,
 ) -> AsyncGenerator[dict, None]:
-    """生成/检索行业产业链认知，推送 SSE 事件"""
+    """调用 IndustryEngine 获取行业产业链认知"""
     stock_info = blackboard.facts.get("get_stock_info", {})
     industry = stock_info.get("industry", "")
     stock_name = stock_info.get("name", blackboard.target)
@@ -691,62 +694,34 @@ async def generate_industry_cognition(
         logger.info("未获取到行业信息，跳过行业认知生成")
         return
 
-    # 检查缓存
-    cached = _load_cached_cognition(industry, blackboard.as_of_date)
-    if cached:
-        logger.info(f"行业认知缓存命中: {industry} @ {blackboard.as_of_date}")
-        blackboard.industry_cognition = cached
-        yield sse("industry_cognition_start", {"industry": industry, "cached": True})
-        yield sse("industry_cognition_done", {
-            "industry": industry,
-            "summary": f"产业链: {' → '.join(cached.upstream[:2])} → [{stock_name}] → {' → '.join(cached.downstream[:2])}",
-            "cycle_position": cached.cycle_position,
-            "traps_count": len(cached.common_traps),
-            "cached": True,
-        })
-        return
-
-    # LLM 生成
     yield sse("industry_cognition_start", {"industry": industry, "cached": False})
 
-    prompt = INDUSTRY_COGNITION_PROMPT.format(
-        industry=industry,
-        target=blackboard.code or blackboard.target,
-        stock_name=stock_name,
-        as_of_date=blackboard.as_of_date,
-    )
-
     try:
-        # 使用流式调用收集完整响应，避免非流式长时间等待超时
-        chunks: list[str] = []
-        async for token in llm.chat_stream([ChatMessage(role="user", content=prompt)]):
-            chunks.append(token)
-        raw = "".join(chunks)
-        logger.debug(f"行业认知 LLM 原始返回 (前200字): {raw[:200] if raw else '(空)'}")
-        parsed = _lenient_json_loads(raw)
-        if not isinstance(parsed, dict):
-            logger.warning(f"行业认知 LLM 返回非 dict: {type(parsed)}")
-            return
-
-        cognition = IndustryCognition(
-            industry=industry,
+        from industry_engine import get_industry_engine
+        ie = get_industry_engine()
+        cognition = await ie.analyze(
             target=blackboard.code or blackboard.target,
-            generated_at=datetime.now(tz=ZoneInfo("Asia/Shanghai")).isoformat(),
             as_of_date=blackboard.as_of_date,
-            **{k: v for k, v in parsed.items() if k in IndustryCognition.model_fields},
         )
-        blackboard.industry_cognition = cognition
-        _save_cognition_cache(cognition)
 
-        yield sse("industry_cognition_done", {
-            "industry": industry,
-            "summary": f"产业链: {' → '.join(cognition.upstream[:2])} → [{stock_name}] → {' → '.join(cognition.downstream[:2])}",
-            "cycle_position": cognition.cycle_position,
-            "traps_count": len(cognition.common_traps),
-            "cached": False,
-        })
-        logger.info(f"行业认知生成完成: {industry}, 周期={cognition.cycle_position}, 陷阱={len(cognition.common_traps)}条")
-
+        if cognition:
+            blackboard.industry_cognition = cognition
+            yield sse("industry_cognition_done", {
+                "industry": industry,
+                "summary": f"产业链: {' → '.join(cognition.upstream[:2])} → [{stock_name}] → {' → '.join(cognition.downstream[:2])}",
+                "cycle_position": cognition.cycle_position,
+                "traps_count": len(cognition.common_traps),
+                "cached": False,
+            })
+        else:
+            yield sse("industry_cognition_done", {
+                "industry": industry,
+                "summary": "行业认知生成失败",
+                "cycle_position": "",
+                "traps_count": 0,
+                "cached": False,
+                "error": True,
+            })
     except Exception as e:
         logger.warning(f"行业认知生成失败: {type(e).__name__}: {e!r}")
         yield sse("industry_cognition_done", {
@@ -878,15 +853,16 @@ async def request_data_for_round(
     prompt = build_data_request_prompt(role, blackboard.target, blackboard.round, context)
 
     try:
-        raw = await asyncio.wait_for(
-            llm.chat([ChatMessage(role="user", content=prompt)]),
-            timeout=15.0,
-        )
+        # 流式收集：只要后端还在产出 token，链路保持活跃
+        chunks: list[str] = []
+        async for token in llm.chat_stream([ChatMessage(role="user", content=prompt)]):
+            chunks.append(token)
+        raw = "".join(chunks)
         parsed = _lenient_json_loads(raw)
         if not isinstance(parsed, list):
             parsed = []
     except Exception as e:
-        logger.warning(f"[{role}] 数据请求 LLM 调用失败: {e}，跳过")
+        logger.warning(f"[{role}] 数据请求 LLM 调用失败: {type(e).__name__}: {e}，跳过")
         return
 
     requests = [
@@ -966,7 +942,11 @@ async def judge_summarize(
     ]
 
     try:
-        raw = await asyncio.wait_for(llm.chat(messages), timeout=60.0)
+        # 流式收集：保持链路活跃，不设总超时
+        chunks: list[str] = []
+        async for token in llm.chat_stream(messages):
+            chunks.append(token)
+        raw = "".join(chunks)
         verdict = _parse_judge_output(raw, blackboard)
     except Exception as e:
         logger.error(f"裁判总结失败: {e}，生成降级 verdict")
@@ -1029,22 +1009,65 @@ async def judge_summarize_stream(
         eval_history = "\n\n## 各轮评委评估\n" + "\n".join(eval_lines)
 
     judge_stream_prompt = (
-        f"你是一位专业的股票辩论裁判。请对以下辩论做出总结评价，"
-        f"直接用自然语言阐述你的裁决。\n\n{context}{memory_text}{eval_history}"
+        f"你是一位专业的股票辩论裁判。请对以下辩论做出裁决。\n"
+        f"**重要：直接输出 JSON，不要输出自然语言、不要使用 markdown 代码块。**\n\n"
+        f"{context}{memory_text}{eval_history}"
     )
     messages = [
         ChatMessage(role="system", content=JUDGE_SYSTEM_PROMPT),
         ChatMessage(role="user", content=judge_stream_prompt),
     ]
 
-    # Phase 1: 流式输出 summary
-    tokens: list[str] = []
+    # Phase 1: 流式输出 summary（支持 think 标签分离）
+    tokens: list[str] = []       # 正文
+    think_tokens: list[str] = [] # think 内容
     token_buf: list[str] = []
     seq = 0
+    in_think = False
+    raw_buffer = ""
+
     try:
         async for token in llm.chat_stream(messages):
-            tokens.append(token)
-            token_buf.append(token)
+            raw_buffer += token
+
+            # 检测 <think> 标签开始
+            if not in_think and "<think>" in raw_buffer:
+                before = raw_buffer.split("<think>", 1)[0]
+                if before:
+                    tokens.append(before)
+                    token_buf.append(before)
+                in_think = True
+                raw_buffer = raw_buffer.split("<think>", 1)[1]
+                continue
+
+            # 检测 </think> 标签结束
+            if in_think and "</think>" in raw_buffer:
+                think_content = raw_buffer.split("</think>", 1)[0]
+                think_tokens.append(think_content)
+                in_think = False
+                remaining = raw_buffer.split("</think>", 1)[1]
+                raw_buffer = remaining.lstrip("\n")
+                # 推送 think 事件
+                yield sse("judge_think", {
+                    "role": "judge", "round": None,
+                    "content": "".join(think_tokens),
+                })
+                continue
+
+            if in_think:
+                if len(raw_buffer) > 200:
+                    think_tokens.append(raw_buffer[:-20])
+                    raw_buffer = raw_buffer[-20:]
+                continue
+
+            # 正常正文
+            if "<" in raw_buffer and not raw_buffer.endswith(">") and len(raw_buffer) < 10:
+                continue
+
+            if raw_buffer:
+                tokens.append(raw_buffer)
+                token_buf.append(raw_buffer)
+                raw_buffer = ""
             if len(token_buf) >= 5 or token in ("。", "\n", ".", "！", "？", "；"):
                 yield sse("judge_token", {
                     "role": "judge", "round": None,
@@ -1052,6 +1075,11 @@ async def judge_summarize_stream(
                 })
                 seq += 1
                 token_buf = []
+
+        # 残余缓冲区
+        if raw_buffer and not in_think:
+            tokens.append(raw_buffer)
+            token_buf.append(raw_buffer)
         if token_buf:
             yield sse("judge_token", {
                 "role": "judge", "round": None,
@@ -1062,6 +1090,8 @@ async def judge_summarize_stream(
         tokens.append("(裁决中断)")
 
     summary_text = "".join(tokens)
+    # 剥离残留 think 标签
+    summary_text = re.sub(r"<think>.*?</think>", "", summary_text, flags=re.DOTALL).strip()
 
     # Phase 2: 提取结构化裁决
     # 裁判 system prompt 要求直接输出 JSON，先尝试直接解析 summary_text
@@ -1074,10 +1104,7 @@ async def judge_summarize_stream(
                 timeout=5.0,
             )
         else:
-            verdict = await asyncio.wait_for(
-                _extract_judge_verdict(summary_text, blackboard, llm),
-                timeout=30.0,
-            )
+            verdict = await _extract_judge_verdict(summary_text, blackboard, llm)
     except Exception as e:
         logger.error(f"裁判结构化提取失败: {e}，生成降级 verdict")
         verdict = JudgeVerdict(
@@ -1140,11 +1167,10 @@ async def _extract_judge_verdict(
     summary: str, blackboard: Blackboard, llm: BaseLLMProvider
 ) -> JudgeVerdict:
     """从 summary 文本提取结构化 JudgeVerdict"""
-    extract_prompt = f"""请从以下裁判总结中提取结构化裁决，只返回 JSON，不要其他内容。
+    extract_prompt = f"""请从以下裁判总结中提取结构化裁决。直接输出 JSON，不要包含 markdown 代码块、不要包含任何额外文字或思考过程。
 
 {summary}
 
-返回格式:
 {{
   "summary": "总结文本",
   "signal": "bullish" | "bearish" | "neutral",
@@ -1158,7 +1184,11 @@ async def _extract_judge_verdict(
   "debate_quality": "strong_disagreement" | "consensus" | "one_sided"
 }}"""
 
-    raw = await llm.chat([ChatMessage(role="user", content=extract_prompt)])
+    # 流式收集：保持链路活跃，不设总超时
+    chunks: list[str] = []
+    async for token in llm.chat_stream([ChatMessage(role="user", content=extract_prompt)]):
+        chunks.append(token)
+    raw = "".join(chunks)
     json_str = _extract_json(raw)
     data = json.loads(json_str)
     data["target"] = blackboard.target
@@ -1276,7 +1306,11 @@ async def judge_round_eval(
     )
 
     try:
-        raw = await asyncio.wait_for(llm.chat(messages), timeout=20.0)
+        # 流式收集：保持链路活跃，不设总超时
+        chunks: list[str] = []
+        async for token in llm.chat_stream(messages):
+            chunks.append(token)
+        raw = "".join(chunks)
         parsed = json.loads(_extract_json(raw))
 
         def _side(key: str, self_c: float, inner_c: float) -> RoundEvalSide:
@@ -1399,6 +1433,23 @@ async def run_debate(
     # 行业产业链认知
     async for event in generate_industry_cognition(blackboard, llm):
         yield event
+
+    # 资金构成分析（写入黑板 facts 作为公共知识）
+    if blackboard.code:
+        yield sse("phase", {"name": "capital_structure", "status": "start"})
+        try:
+            from industry_engine import get_industry_engine
+            ie = get_industry_engine()
+            capital = await ie.get_capital_structure(
+                blackboard.code, blackboard.as_of_date
+            )
+            blackboard.facts["capital_structure"] = capital.model_dump()
+            yield sse("phase", {"name": "capital_structure", "status": "done",
+                                "summary": capital.structure_summary})
+        except Exception as e:
+            logger.warning(f"资金构成分析失败: {e}")
+            yield sse("phase", {"name": "capital_structure", "status": "error",
+                                "error": str(e)})
 
     # 快速模式：LLM 预压缩
     if blackboard.mode == "fast":

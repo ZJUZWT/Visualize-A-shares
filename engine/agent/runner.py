@@ -16,7 +16,9 @@ class AgentRunError(Exception):
 
 
 def _extract_json(text: str) -> str:
-    """从 LLM 输出中提取 JSON（处理 markdown 代码块包裹）"""
+    """从 LLM 输出中提取 JSON（处理 <think> 标签 + markdown 代码块包裹）"""
+    # 剥离 <think>...</think> 思考过程
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
     if match:
         return match.group(1).strip()

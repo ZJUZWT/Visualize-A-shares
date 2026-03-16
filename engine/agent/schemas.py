@@ -105,35 +105,8 @@ class RoundEval(BaseModel):
     data_utilization: dict = Field(default_factory=dict)
 
 
-class IndustryCognition(BaseModel):
-    """行业产业链认知 — LLM 生成，缓存复用"""
-    industry: str                    # 行业名称（如"小金属"、"半导体"）
-    target: str                      # 触发股票代码
-
-    # 产业链结构
-    upstream: list[str] = Field(default_factory=list)
-    downstream: list[str] = Field(default_factory=list)
-    core_drivers: list[str] = Field(default_factory=list)
-    cost_structure: str = ""
-    barriers: str = ""
-
-    # 供需格局
-    supply_demand: str = ""
-
-    # 认知陷阱
-    common_traps: list[str] = Field(default_factory=list)
-
-    # 周期定位
-    cycle_position: str = ""         # 景气上行|下行|拐点向上|拐点向下|高位震荡|底部盘整
-    cycle_reasoning: str = ""
-
-    # 催化剂/风险
-    catalysts: list[str] = Field(default_factory=list)
-    risks: list[str] = Field(default_factory=list)
-
-    # 元数据
-    generated_at: str = ""
-    as_of_date: str = ""
+# IndustryCognition 已迁移至 industry_engine.schemas，此处 re-export 保持兼容
+from industry_engine.schemas import IndustryCognition  # noqa: F401
 
 
 class Blackboard(BaseModel):

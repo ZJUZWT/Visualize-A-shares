@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { CalendarDays } from "lucide-react";
 import { useDebateStore } from "@/stores/useDebateStore";
 import { exportDebateHtml } from "@/lib/exportDebateHtml";
 import BullBearArena from "./BullBearArena";
@@ -16,7 +17,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 export default function DebatePage() {
   const {
     status, transcript, roleState, blackboardItems,
-    judgeVerdict, isReplayMode, error, currentTarget,
+    judgeVerdict, isReplayMode, isBacktestMode, asOfDate, error, currentTarget,
     startDebate, loadReplay, reset, stopDebate,
   } = useDebateStore();
 
@@ -58,6 +59,14 @@ export default function DebatePage() {
       {error && (
         <div className="px-5 py-3 bg-red-500/10 border-b border-red-500/20 text-sm text-red-400">
           {error}
+        </div>
+      )}
+
+      {/* 回测模式横幅 */}
+      {isBacktestMode && asOfDate && status !== "idle" && (
+        <div className="flex items-center gap-2 px-5 py-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-sm text-amber-400">
+          <CalendarDays size={16} />
+          <span>回测模式 · 数据基准日：<strong>{asOfDate}</strong></span>
         </div>
       )}
 

@@ -18,6 +18,7 @@ class DebateRequest(BaseModel):
     code: str = Field(description="股票代码，如 '001896'")
     max_rounds: int = Field(default=3, ge=1, le=5)
     mode: str = Field(default="standard", description="辩论模式: standard | fast")
+    as_of_date: str = Field(default="", description="回测日期，如 '2025-06-30'，空字符串表示使用最新数据")
 
 
 @router.post("/debate")
@@ -42,6 +43,7 @@ async def start_debate(req: DebateRequest):
         debate_id=f"{req.code}_{now.strftime('%Y%m%d%H%M%S')}",
         max_rounds=req.max_rounds,
         mode=req.mode if req.mode in ("standard", "fast") else "standard",
+        as_of_date=req.as_of_date,  # 回测模式：用户指定历史日期
     )
 
     async def event_stream():
