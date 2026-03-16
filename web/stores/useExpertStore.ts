@@ -371,16 +371,34 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
                   {
                     type: "tool_call" as const,
                     data: data as unknown as ToolCallData,
+                    status: "pending" as const,
                   },
                 ];
               } else if (eventType === "tool_result") {
-                msg.thinking = [
-                  ...msg.thinking,
-                  {
-                    type: "tool_result" as const,
-                    data: data as unknown as ToolResultData,
-                  },
-                ];
+                const resultData = data as unknown as ToolResultData;
+                // 找到对应的 tool_call 条目并合并
+                const callIdx = msg.thinking.findLastIndex(
+                  (t) =>
+                    t.type === "tool_call" &&
+                    t.data.engine === resultData.engine &&
+                    t.data.action === resultData.action &&
+                    t.status === "pending"
+                );
+                if (callIdx !== -1) {
+                  const callItem = msg.thinking[callIdx] as Extract<typeof msg.thinking[number], { type: "tool_call" }>;
+                  msg.thinking = [...msg.thinking];
+                  msg.thinking[callIdx] = {
+                    ...callItem,
+                    result: resultData,
+                    status: resultData.hasError ? "error" : "done",
+                  };
+                } else {
+                  // fallback: 找不到对应 call，仍作为独立条目
+                  msg.thinking = [
+                    ...msg.thinking,
+                    { type: "tool_result" as const, data: resultData },
+                  ];
+                }
               } else if (eventType === "belief_updated") {
                 msg.thinking = [
                   ...msg.thinking,
