@@ -147,37 +147,47 @@ class ExpertAgent:
             think_output = await self._think(message, recalled_nodes, memories, conv_history)
             tool_calls = think_output.tool_calls if think_output.needs_data else []
 
-        # 4. 工具调用
+        # 4. 工具调用（并行执行所有专家）
         tool_results: list[dict] = []
+
+        # 先容错 + 发送 tool_call 事件
         for tc in tool_calls:
-            # 容错：专家咨询的 question 为空或为垃圾值时，用原始消息补充
             if tc.engine == "expert":
                 q = (tc.params.get("question") or "").strip()
                 if not q or len(q) < 4:
                     tc.params["question"] = message
-
-            # 前端事件：标注是否是专家咨询
             is_expert_call = tc.engine == "expert"
             expert_label = EXPERT_NAMES.get(tc.action, tc.action) if is_expert_call else ""
-
             yield {"event": "tool_call", "data": {
                 "engine": tc.engine, "action": tc.action, "params": tc.params,
                 "label": f"咨询{expert_label}" if is_expert_call else f"{tc.engine}.{tc.action}",
             }}
 
-            result = await self._tools.execute(tc.engine, tc.action, tc.params)
-            tool_results.append({
-                "engine": tc.engine,
-                "action": tc.action,
-                "result": result,
-                "is_expert": is_expert_call,
-            })
+        # 并行执行所有工具调用
+        if tool_calls:
+            async def _exec(tc: ToolCall) -> dict:
+                result = await self._tools.execute(tc.engine, tc.action, tc.params)
+                is_expert = tc.engine == "expert"
+                return {
+                    "engine": tc.engine,
+                    "action": tc.action,
+                    "result": result,
+                    "is_expert": is_expert,
+                }
 
-            yield {"event": "tool_result", "data": {
-                "engine": tc.engine, "action": tc.action,
-                "summary": result[:300] if not is_expert_call else f"{expert_label}已回复（{len(result)}字）",
-                "label": expert_label if is_expert_call else tc.action,
-            }}
+            results = await asyncio.gather(*[_exec(tc) for tc in tool_calls])
+            tool_results = list(results)
+
+            # 按完成顺序发送 tool_result 事件
+            for r in tool_results:
+                is_expert = r.get("is_expert")
+                expert_label = EXPERT_NAMES.get(r["action"], r["action"]) if is_expert else ""
+                yield {"event": "tool_result", "data": {
+                    "engine": r["engine"], "action": r["action"],
+                    "summary": r["result"][:300] if not is_expert else f"{expert_label}已回复（{len(r['result'])}字）",
+                    "label": expert_label if is_expert else r["action"],
+                    "content": r["result"] if is_expert else "",
+                }}
 
         # 5. 图谱自动学习 — 从对话中学习股票、行业、产业链关系
         await self._learn_from_conversation(message, tool_results)
@@ -219,7 +229,7 @@ class ExpertAgent:
 
     @staticmethod
     def _extract_outermost_json(text: str) -> str | None:
-        """从文本中提取最外层 JSON 对象（支持嵌套花括号）"""
+        """从文本中提取最外层 JSON 对象（支持嵌套花括号 + 截断补全）"""
         start = text.find('{')
         if start == -1:
             return None
@@ -245,6 +255,65 @@ class ExpertAgent:
                 depth -= 1
                 if depth == 0:
                     return text[start:i + 1]
+        # ── 截断 JSON 补全：深度未归零 = 被 token limit 截断 ──
+        if depth > 0:
+            truncated = text[start:]
+            truncated = re.sub(r',\s*$', '', truncated)          # 去尾逗号
+            truncated = re.sub(r':\s*$', ': ""', truncated)      # 补截断的值
+            truncated = re.sub(r'"[^"]*$', '""', truncated)      # 补截断的字符串
+            # 数闭合括号差值
+            open_sq = truncated.count('[') - truncated.count(']')
+            truncated += ']' * max(open_sq, 0) + '}' * depth
+            try:
+                json.loads(truncated)
+                return truncated
+            except json.JSONDecodeError:
+                pass
+        return None
+
+    @staticmethod
+    def _repair_json(text: str) -> str:
+        """修复 LLM 常见的非标准 JSON — 只改格式不改内容
+
+        处理: 未引用key、=> 分隔符、单引号、尾逗号、XML参数、--key "val"
+        """
+        s = text
+        # XML 参数 → JSON: <param name="symbol">002733</param> → "symbol": "002733"
+        s = re.sub(
+            r'<param\s+name="(\w+)">(.*?)</param>',
+            r'"\1": "\2"',
+            s,
+        )
+        # 清理 XML 参数转换后可能残留的 args: { "k": "v" } 周围的 \n
+        s = s.replace('\\n', ' ')
+        # --key "val" 格式 → "key": "val"
+        s = re.sub(r'--(\w+)\s+"([^"]*)"', r'"\1": "\2"', s)
+        s = re.sub(r'--(\w+)\s+(\S+)', r'"\1": "\2"', s)
+        # => 替换为 :
+        s = s.replace('=>', ':')
+        # 未引用的 key
+        s = re.sub(r'(?<=[{,\[])\s*(\w+)\s*:', r' "\1":', s)
+        # 单引号→双引号
+        s = re.sub(r"'([^']*)'", r'"\1"', s)
+        # 尾逗号
+        s = re.sub(r',\s*([}\]])', r'\1', s)
+        return s
+
+    def _try_parse_think_json(self, json_str: str) -> ThinkOutput | None:
+        """尝试解析 JSON 字符串为 ThinkOutput，先原样解析，失败后 repair 再试"""
+        for attempt, s in enumerate([json_str, self._repair_json(json_str)]):
+            try:
+                data = json.loads(s)
+                if isinstance(data, dict) and "needs_data" in data:
+                    tag = "修复后" if attempt == 1 else ""
+                    logger.info(f"think JSON 解析成功{tag}: needs_data={data.get('needs_data')}, "
+                                f"tool_calls={len(data.get('tool_calls', []))}")
+                    return ThinkOutput(**data)
+            except (json.JSONDecodeError, Exception) as e:
+                if attempt == 0:
+                    logger.debug(f"think JSON 原始解析失败: {e}, 片段: {json_str[:100]}")
+                else:
+                    logger.debug(f"think JSON 修复后仍失败: {e}")
         return None
 
     async def _think(
@@ -254,7 +323,7 @@ class ExpertAgent:
         memories: list[dict],
         history: list[dict] | None = None,
     ) -> ThinkOutput:
-        """think 步骤：LLM 决策是否需要工具调用（流式收集 + 容错解析）"""
+        """think 步骤：LLM 决策是否需要工具调用（流式收集 + 多层容错解析）"""
         from llm.providers import ChatMessage
         prompt = THINK_SYSTEM_PROMPT.format(
             graph_context=format_graph_context(nodes),
@@ -265,7 +334,6 @@ class ExpertAgent:
             messages = [ChatMessage("system", prompt)]
             for h in (history or []):
                 role = "assistant" if h["role"] == "expert" else h["role"]
-                # 历史消息截断（避免上下文过长），只保留前 500 字
                 content = h.get("content", "")
                 if len(content) > 500:
                     content = content[:500] + "..."
@@ -290,13 +358,12 @@ class ExpertAgent:
             if think_match:
                 think_content = think_match.group(1)
 
-            # 尝试从多个来源提取 JSON（按优先级）
+            # ── 构建候选文本列表（按优先级，不丢弃任何内容）──
             candidates = []
 
-            # 1) 剥离标签后的正文
+            # 1) 剥离所有标签壳后的正文
             text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
             text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
-            text = re.sub(r"\[TOOL_CALL\].*?\[/TOOL_CALL\]", "", text, flags=re.DOTALL).strip()
             if text:
                 candidates.append(text)
 
@@ -305,28 +372,32 @@ class ExpertAgent:
             if md_match:
                 candidates.append(md_match.group(1).strip())
 
-            # 3) <think> 标签内容（LLM 有时把 JSON 放在 think 里）
+            # 3) <tool_call> / [TOOL_CALL] 标签内的内容（LLM 把调用放里面了）
+            for tag_match in re.finditer(
+                r'(?:<tool_call>(.*?)</tool_call>|\[TOOL_CALL\](.*?)\[/TOOL_CALL\])',
+                raw_text, re.DOTALL
+            ):
+                inner = (tag_match.group(1) or tag_match.group(2) or "").strip()
+                if inner:
+                    candidates.append(inner)
+
+            # 4) <think> 标签内容（LLM 有时把 JSON 放在 think 里）
             if think_content:
                 candidates.append(think_content)
 
-            # 4) 完整原始文本
+            # 5) 完整原始文本
             candidates.append(raw_text)
 
-            # 尝试从每个候选中提取并解析 JSON
+            # ── 逐候选提取 + 解析（含 repair 重试）──
             for candidate in candidates:
                 json_str = self._extract_outermost_json(candidate)
                 if json_str:
-                    try:
-                        data = json.loads(json_str)
-                        if isinstance(data, dict) and "needs_data" in data:
-                            logger.info(f"think JSON 解析成功: needs_data={data.get('needs_data')}, "
-                                        f"tool_calls={len(data.get('tool_calls', []))}")
-                            return ThinkOutput(**data)
-                    except (json.JSONDecodeError, Exception) as e:
-                        logger.debug(f"think JSON 候选解析失败: {e}, 片段: {json_str[:100]}")
+                    result = self._try_parse_think_json(json_str)
+                    if result is not None:
+                        return result
 
-            # ── 容错解析：从 think 内容或原始文本中提取意图 ──
-            logger.debug(f"think 所有 JSON 提取尝试失败，进入容错解析")
+            # ── 最终容错：从 think 内容或原始文本用关键词匹配 ──
+            logger.debug("think 所有 JSON 提取尝试失败，进入容错解析")
             full_context = think_content + "\n" + raw_text
             return self._fallback_think_parse(full_context, user_message=message)
 
@@ -335,36 +406,59 @@ class ExpertAgent:
             return ThinkOutput(needs_data=False)
 
     def _fallback_think_parse(self, text: str, user_message: str = "") -> ThinkOutput:
-        """容错解析：从 LLM 非标准输出中提取工具调用意图
+        """容错解析：从 LLM 输出 + 用户消息中提取工具调用意图
 
-        当 JSON 解析失败时，通过关键词匹配检测需要咨询的专家，
-        始终使用用户原始消息作为各专家的 question（正则提取 question 不可靠）。
+        当 JSON 解析失败时，同时扫描 LLM 输出和用户消息的关键词，
+        决定需要咨询哪些专家。
         """
         tool_calls: list[dict] = []
+        # 拼合所有可用上下文：LLM 输出 + 用户原始消息
+        combined = text + "\n" + user_message
 
-        # 专家类型关键词匹配
+        # ── 先检测是否是"综合分析"型问题 → 直接调全部 4 个专家 ──
+        comprehensive_patterns = [
+            r"分析一下", r"怎么样", r"值不值得买", r"帮我看看",
+            r"怎么操作", r"持仓.*分析", r"全面分析",
+        ]
+        is_comprehensive = any(
+            re.search(p, user_message, re.IGNORECASE) for p in comprehensive_patterns
+        )
+        if is_comprehensive:
+            for expert_type in ["data", "quant", "info", "industry"]:
+                tool_calls.append({
+                    "engine": "expert",
+                    "action": expert_type,
+                    "params": {"question": user_message},
+                })
+            logger.info("think 容错解析: 综合分析问题，调用全部4个专家")
+            return ThinkOutput(
+                needs_data=True,
+                tool_calls=[ToolCall(**tc) for tc in tool_calls],
+                reasoning="容错解析: 综合分析问题，调用全部4个专家",
+            )
+
+        # ── 细粒度匹配：同时扫描 LLM 输出和用户消息 ──
         expert_patterns = {
             "data": [r"数据专家", r"咨询.*data", r"action.*[\"']data[\"']", r"行情数据", r"历史走势",
-                     r"行情走势", r"成交量", r"涨跌"],
+                     r"行情走势", r"成交量", r"涨跌", r"走势", r"今天.*多少"],
             "quant": [r"量化专家", r"咨询.*quant", r"技术指标", r"技术面", r"因子", r"action.*[\"']quant[\"']",
-                      r"支撑.*阻力", r"RSI", r"MACD", r"均线", r"支撑位", r"阻力位", r"压力位"],
+                      r"支撑.*阻力", r"RSI", r"MACD", r"均线", r"支撑位", r"阻力位", r"压力位",
+                      r"顶部.*底部", r"底部.*顶部", r"技术数据", r"顶.*底"],
             "info": [r"资讯专家", r"咨询.*info", r"新闻", r"公告", r"舆情", r"action.*[\"']info[\"']",
-                     r"消息面", r"利好", r"利空"],
+                     r"消息面", r"利好", r"利空", r"为什么跌", r"为什么涨", r"什么原因"],
             "industry": [r"产业链专家", r"咨询.*industry", r"行业分析", r"产业链", r"action.*[\"']industry[\"']",
                          r"行业前景", r"产业", r"上下游"],
         }
 
-        # 检测需要咨询的专家
         detected_experts: set[str] = set()
         for expert_type, patterns in expert_patterns.items():
             for pattern in patterns:
-                if re.search(pattern, text, re.IGNORECASE):
+                if re.search(pattern, combined, re.IGNORECASE):
                     detected_experts.add(expert_type)
                     break
 
         if detected_experts:
             for expert_type in detected_experts:
-                # 始终使用用户原始消息作为 question（正则提取不可靠）
                 tool_calls.append({
                     "engine": "expert",
                     "action": expert_type,
@@ -378,8 +472,8 @@ class ExpertAgent:
                 reasoning=f"容错解析: 检测到需要咨询{','.join(detected_experts)}",
             )
 
-        # 检测直接数据查询（仅用于非常简单的请求）
-        code_match = re.search(r'\b(\d{6})\b', text)
+        # ── 检测直接数据查询（仅用于非常简单的请求）──
+        code_match = re.search(r'\b(\d{6})\b', combined)
         detected_code = code_match.group(1) if code_match else ""
 
         data_patterns = [
@@ -393,7 +487,7 @@ class ExpertAgent:
              {"code": detected_code}),
         ]
         for pattern, engine, action, default_params in data_patterns:
-            if re.search(pattern, text, re.IGNORECASE):
+            if re.search(pattern, combined, re.IGNORECASE):
                 tool_calls.append({"engine": engine, "action": action, "params": default_params})
 
         if tool_calls:
@@ -710,18 +804,19 @@ class ExpertAgent:
         messages.append(ChatMessage("user", message))
 
         accumulated = ""
-        in_skip = False          # 跳过区域（<think> 或 <minimax:*>）
+        in_skip = False          # 跳过区域（内容被丢弃）
         skip_end_tag = ""        # 当前跳过区域的结束标签
         raw_buffer = ""
 
-        # 需要过滤的标签及其结束标签
+        # 内容被丢弃的标签（对用户无意义的工具调用）
         SKIP_TAGS = {
-            "<think>": "</think>",
             "<minimax:tool_call>": "</minimax:tool_call>",
             "<minimax:search_result>": "</minimax:search_result>",
             "<tool_call>": "</tool_call>",
             "<tool_code>": "</tool_code>",
         }
+        # 只剥标签壳、保留内容的标签（LLM 经常把完整回复放在 think 里）
+        STRIP_TAGS = {"<think>": "</think>"}
 
         try:
             skip_bytes = 0  # skip 区域累积字节数
@@ -729,7 +824,7 @@ class ExpertAgent:
             async for token in self._llm.chat_stream(messages):
                 raw_buffer += token
 
-                # 检测进入跳过区域
+                # 检测进入跳过区域（内容被丢弃）
                 if not in_skip:
                     for start_tag, end_tag in SKIP_TAGS.items():
                         if start_tag in raw_buffer:
@@ -744,6 +839,17 @@ class ExpertAgent:
                             break
                     if in_skip:
                         continue
+
+                # 剥离 <think> 标签壳但保留内容
+                if not in_skip:
+                    for start_tag, end_tag in STRIP_TAGS.items():
+                        if start_tag in raw_buffer:
+                            # 输出标签前的内容，然后去掉标签本身
+                            parts = raw_buffer.split(start_tag, 1)
+                            raw_buffer = parts[0] + parts[1]
+                        if end_tag in raw_buffer:
+                            parts = raw_buffer.split(end_tag, 1)
+                            raw_buffer = parts[0] + parts[1]
 
                 # 检测离开跳过区域
                 if in_skip and skip_end_tag in raw_buffer:

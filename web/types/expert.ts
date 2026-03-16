@@ -40,6 +40,8 @@ export interface ToolResultData {
   summary: string;
   /** 展示标签，如 "📊 数据专家" 或 action 名 */
   label?: string;
+  /** 专家完整回复内容（仅专家调用有值） */
+  content?: string;
 }
 
 export interface BeliefUpdatedData {

@@ -192,19 +192,48 @@ class AKShareSource(BaseDataSource):
 
     def get_announcements(self, code: str, limit: int = 20) -> pd.DataFrame:
         """获取公司公告（东方财富）
-        底层接口: ak.stock_notice_report_em(symbol=code)
-        注意: AKShare API 名称可能随版本变动
+        底层接口: ak.stock_notice_report(symbol="全部", date=today) + 按代码过滤
+        注意: AKShare >= 1.18 已将 stock_notice_report_em 重命名为 stock_notice_report，
+              且不再支持按个股查询，改为按日期查全市场公告后过滤。
         """
         try:
-            df = self._ak.stock_notice_report_em(symbol=code)
-            if df is None or df.empty:
+            from datetime import datetime, timedelta
+
+            # 逐天查最近 7 天的公告，收集够 limit 条即停
+            all_dfs = []
+            matched_count = 0
+            today = datetime.now()
+            for days_ago in range(7):
+                dt = today - timedelta(days=days_ago)
+                date_str = dt.strftime("%Y%m%d")
+                try:
+                    df = self._ak.stock_notice_report(symbol="全部", date=date_str)
+                    if df is not None and not df.empty:
+                        # 先过滤再收集，避免存大量无关数据
+                        if "代码" in df.columns:
+                            filtered = df[df["代码"] == code]
+                            if not filtered.empty:
+                                all_dfs.append(filtered)
+                                matched_count += len(filtered)
+                                if matched_count >= limit:
+                                    break
+                        else:
+                            all_dfs.append(df)
+                except Exception:
+                    continue
+
+            if not all_dfs:
                 return pd.DataFrame()
+
+            df = pd.concat(all_dfs, ignore_index=True)
 
             column_map = {
                 "公告标题": "title",
                 "公告类型": "type",
                 "公告日期": "date",
-                "公告链接": "url",
+                "网址": "url",
+                "代码": "code",
+                "名称": "name",
             }
             df = df.rename(columns=column_map)
             available = [c for c in ["title", "type", "date", "url"] if c in df.columns]

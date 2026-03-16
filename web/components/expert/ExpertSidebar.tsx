@@ -194,10 +194,13 @@ function SessionItem({
   onDelete: (e: React.MouseEvent) => void;
 }) {
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClick(); }}
       className={`
-        group w-full text-left px-2.5 py-2 rounded-lg transition-all duration-150 flex items-center gap-2
+        group w-full text-left px-2.5 py-2 rounded-lg transition-all duration-150 flex items-center gap-2 cursor-pointer
         ${
           isActive
             ? "bg-[var(--accent)]/8 border border-[var(--accent)]/20"
@@ -233,6 +236,6 @@ function SessionItem({
       >
         <Trash2 size={11} />
       </button>
-    </button>
+    </div>
   );
 }
