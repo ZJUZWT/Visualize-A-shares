@@ -18,7 +18,8 @@ export type TranscriptItem =
   | { id: string; type: "blackboard_data"; debateId: string; target: string; participants: string[] }
   | { id: string; type: "round_eval"; data: RoundEval }
   | { id: string; type: "industry_cognition"; industry: string; summary: string; cycle_position: string; traps_count: number; cached: boolean; loading: boolean; error?: boolean }
-  | { id: string; type: "facts_compression"; mode: string; loading: boolean; original_tokens_est?: number; compressed_tokens_est?: number; compression_ratio?: number; error?: boolean; fallback?: string };
+  | { id: string; type: "facts_compression"; mode: string; loading: boolean; original_tokens_est?: number; compressed_tokens_est?: number; compression_ratio?: number; error?: boolean; fallback?: string }
+  | { id: string; type: "topic_analysis"; loading: boolean; target: string; briefing?: { summary: string; focus_areas: string[]; related_stocks: string[]; key_data: string[] }; error?: boolean };
 
 export interface BlackboardItem {
   id: string;
@@ -605,6 +606,38 @@ function _handleSSEEvent(
 
     case "initial_data_complete":
       // 静默处理，无需 UI 状态变更
+      break;
+
+    case "topic_analysis_start": {
+      const target = data.target as string;
+      set({
+        transcript: [...state.transcript, {
+          id: "topic_analysis",
+          type: "topic_analysis",
+          loading: true,
+          target,
+        }],
+      });
+      break;
+    }
+
+    case "topic_analysis_complete": {
+      const briefing = data.briefing as { summary: string; focus_areas: string[]; related_stocks: string[]; key_data: string[] } | undefined;
+      const hasError = !!data.error;
+      set({
+        transcript: state.transcript.map((item) =>
+          item.type === "topic_analysis"
+            ? { ...item, loading: false, briefing, error: hasError }
+            : item
+        ),
+      });
+      break;
+    }
+
+    case "judge_graph_recall":
+    case "judge_tool_call":
+    case "judge_tool_result":
+      // 静默处理，裁判 RAG 中间事件，不需要单独 UI 展示
       break;
 
     case "error": {
