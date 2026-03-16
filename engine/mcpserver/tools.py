@@ -1427,3 +1427,87 @@ def get_judge_verdict(da: "DataAccess", debate_id: str) -> str:
         return json.dumps(verdict, ensure_ascii=False, indent=2)
     except json.JSONDecodeError:
         return json.dumps({"error": "JudgeVerdict JSON 解析失败"}, ensure_ascii=False)
+
+
+# ── IndustryEngine Tools ──────────────────────────────
+
+
+def get_industry_cognition(da: "DataAccess", target: str) -> str:
+    """获取产业链认知"""
+    if da.is_online():
+        result = da.api_get(f"/api/v1/industry/cognition/{target}")
+        if result:
+            return _format_industry_cognition(result)
+    return "⚠️ 需要后端在线且配置 LLM 才能获取产业链认知"
+
+
+def get_industry_mapping_tool(da: "DataAccess", industry: str = "") -> str:
+    """获取行业映射"""
+    if industry:
+        if da.is_online():
+            result = da.api_get(f"/api/v1/industry/mapping/{industry}")
+            if result:
+                stocks = result.get("stocks", [])
+                return f"## {industry}（{len(stocks)} 只）\n\n" + ", ".join(stocks[:50])
+        return f"⚠️ 无法获取 {industry} 的股票列表"
+    else:
+        if da.is_online():
+            result = da.api_get("/api/v1/industry/mapping")
+            if result:
+                lines = [f"## 行业板块列表（共 {result.get('total_industries', 0)} 个）\n"]
+                for ind in result.get("industries", [])[:30]:
+                    lines.append(f"- **{ind['industry']}**: {ind['stock_count']} 只")
+                return "\n".join(lines)
+        return "⚠️ 需要后端在线"
+
+
+def get_capital_structure_tool(da: "DataAccess", code: str) -> str:
+    """获取资金构成分析"""
+    if da.is_online():
+        result = da.api_get(f"/api/v1/industry/capital/{code}")
+        if result:
+            return _format_capital_structure(result)
+    return f"⚠️ 无法获取 {code} 的资金构成"
+
+
+def _format_industry_cognition(data: dict) -> str:
+    """格式化产业链认知为 Markdown"""
+    if "error" in data:
+        return f"⚠️ {data['error']}"
+    lines = [f"# {data.get('industry', '?')} 产业链认知\n"]
+    if data.get("upstream"):
+        lines.append(f"**上游**: {', '.join(data['upstream'])}")
+    if data.get("downstream"):
+        lines.append(f"**下游**: {', '.join(data['downstream'])}")
+    if data.get("core_drivers"):
+        lines.append(f"\n**核心驱动**: {'; '.join(data['core_drivers'])}")
+    if data.get("supply_demand"):
+        lines.append(f"\n**供需格局**: {data['supply_demand']}")
+    if data.get("cycle_position"):
+        lines.append(f"\n**周期定位**: {data['cycle_position']}")
+        lines.append(f"**判断依据**: {data.get('cycle_reasoning', '')}")
+    if data.get("common_traps"):
+        lines.append("\n**认知陷阱**:")
+        for trap in data["common_traps"]:
+            lines.append(f"- {trap}")
+    if data.get("catalysts"):
+        lines.append(f"\n**催化剂**: {'; '.join(data['catalysts'])}")
+    if data.get("risks"):
+        lines.append(f"\n**风险**: {'; '.join(data['risks'])}")
+    return "\n".join(lines)
+
+
+def _format_capital_structure(data: dict) -> str:
+    """格式化资金构成为 Markdown"""
+    lines = [f"# {data.get('code', '?')} 资金构成分析\n"]
+    if data.get("main_force_net_inflow"):
+        lines.append(f"**主力净流入**: {data['main_force_net_inflow']}（占比{data.get('main_force_ratio', '')}）")
+    if data.get("northbound_ratio"):
+        lines.append(f"**北向持股**: 占比{data['northbound_ratio']}，变化{data.get('northbound_change', '')}")
+    if data.get("margin_balance"):
+        lines.append(f"**融资余额**: {data['margin_balance']}")
+    if data.get("turnover_rate"):
+        lines.append(f"**换手率**: {data['turnover_rate']:.2f}%")
+    if data.get("structure_summary"):
+        lines.append(f"\n**综合**: {data['structure_summary']}")
+    return "\n".join(lines)

@@ -28,6 +28,7 @@ from api.routes.analysis import router as analysis_router
 from api.routes.debate import router as debate_router
 from info_engine.routes import router as info_router
 from expert.routes import router as expert_router, _init_db as expert_init_db
+from industry_engine.routes import router as industry_router
 
 # ─── 配置日志 ──────────────────────────────────────────
 logger.remove()
@@ -70,6 +71,7 @@ app.include_router(analysis_router)
 app.include_router(debate_router)
 app.include_router(info_router)
 app.include_router(expert_router)
+app.include_router(industry_router)
 
 
 # ─── 启动/关闭事件 ────────────────────────────────────
@@ -83,6 +85,7 @@ async def startup():
     logger.info(f"   预测: v2.0 (MAD去极值 + 正交化 + ICIR自适应权重)")
     logger.info(f"   量化引擎: 已加载 (13因子 + 技术指标)")
     logger.info(f"   信息引擎: 已加载 (新闻+公告+情感分析)")
+    logger.info(f"   产业链引擎: 已加载 (行业认知+映射+资金构成)")
     logger.info(f"   LLM: {'已配置 (' + llm_settings.provider + '/' + llm_settings.model + ')' if llm_settings.api_key else '未配置 (可在设置中启用)'}")
     logger.info(f"   端口: {settings.server.port}")
     logger.info(f"   API 文档: http://localhost:{settings.server.port}/docs")
@@ -115,6 +118,18 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    # 关闭 DuckDB 连接，刷 WAL 到主库
+    try:
+        from data_engine import get_data_engine
+        store = get_data_engine().store
+        try:
+            store._conn.execute("CHECKPOINT")
+        except Exception:
+            pass
+        store.close()
+    except Exception as e:
+        logger.warning(f"DuckDB 关闭异常: {e}")
+
     logger.info("🏔️  StockTerrain Engine 关闭")
 
 
@@ -151,6 +166,11 @@ async def root():
             "info_news": "GET /api/v1/info/news/{code}",
             "info_announcements": "GET /api/v1/info/announcements/{code}",
             "info_assess": "POST /api/v1/info/assess",
+            "industry_health": "GET /api/v1/industry/health",
+            "industry_analyze": "POST /api/v1/industry/analyze (SSE 流式)",
+            "industry_cognition": "GET /api/v1/industry/cognition/{target}",
+            "industry_mapping": "GET /api/v1/industry/mapping",
+            "industry_capital": "GET /api/v1/industry/capital/{code}",
         },
     }
 

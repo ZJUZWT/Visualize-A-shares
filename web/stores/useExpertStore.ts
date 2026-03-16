@@ -2,40 +2,112 @@ import { create } from "zustand";
 import type {
   ExpertMessage,
   ExpertStatus,
+  ExpertType,
+  ExpertProfile,
   ThinkingItem,
   GraphNode,
   ToolCallData,
   ToolResultData,
   BeliefUpdatedData,
 } from "@/types/expert";
+import { DEFAULT_EXPERT_PROFILES } from "@/types/expert";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 let _abort: AbortController | null = null;
 
+/** 每个专家独立的对话历史 */
+type ChatHistory = Record<ExpertType, ExpertMessage[]>;
+
 interface ExpertStore {
-  messages: ExpertMessage[];
+  /** 当前选中的专家类型 */
+  activeExpert: ExpertType;
+  /** 所有专家的配置信息 */
+  profiles: ExpertProfile[];
+  /** 每个专家的独立对话历史 */
+  chatHistories: ChatHistory;
+  /** 当前状态 */
   status: ExpertStatus;
   error: string | null;
+
+  /** 切换专家 */
+  setActiveExpert: (type: ExpertType) => void;
+  /** 发送消息 */
   sendMessage: (text: string) => Promise<void>;
+  /** 清除当前专家的对话 */
+  clearChat: () => void;
+  /** 清除所有对话 */
   reset: () => void;
+  /** 加载专家配置 */
+  fetchProfiles: () => Promise<void>;
 }
 
 function newId() {
   return Math.random().toString(36).slice(2);
 }
 
+const EMPTY_HISTORY: ChatHistory = {
+  data: [],
+  quant: [],
+  info: [],
+  industry: [],
+  rag: [],
+};
+
 export const useExpertStore = create<ExpertStore>((set, get) => ({
-  messages: [],
+  activeExpert: "data",
+  profiles: DEFAULT_EXPERT_PROFILES,
+  chatHistories: { ...EMPTY_HISTORY },
   status: "idle",
   error: null,
+
+  setActiveExpert: (type: ExpertType) => {
+    // 如果当前正在 thinking，先 abort
+    if (get().status === "thinking") {
+      _abort?.abort();
+      _abort = null;
+    }
+    set({ activeExpert: type, status: "idle", error: null });
+  },
+
+  clearChat: () => {
+    const { activeExpert } = get();
+    set((s) => ({
+      chatHistories: { ...s.chatHistories, [activeExpert]: [] },
+      status: "idle",
+      error: null,
+    }));
+  },
 
   reset: () => {
     _abort?.abort();
     _abort = null;
-    set({ messages: [], status: "idle", error: null });
+    set({ chatHistories: { ...EMPTY_HISTORY }, status: "idle", error: null });
+  },
+
+  fetchProfiles: async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/expert/profiles`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          set({ profiles: data });
+        }
+      }
+    } catch {
+      // 使用默认值
+    }
   },
 
   sendMessage: async (text: string) => {
+    // 如果上一次请求还在进行，先中止
+    if (_abort) {
+      _abort.abort();
+      _abort = null;
+    }
+    // 强制重置 status（防止上次卡在 thinking）
+    set({ status: "thinking", error: null });
+
+    const { activeExpert } = get();
     const userMsg: ExpertMessage = {
       id: newId(),
       role: "user",
@@ -52,7 +124,10 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     };
 
     set((s) => ({
-      messages: [...s.messages, userMsg, expertMsg],
+      chatHistories: {
+        ...s.chatHistories,
+        [activeExpert]: [...(s.chatHistories[activeExpert] ?? []), userMsg, expertMsg],
+      },
       status: "thinking",
       error: null,
     }));
@@ -60,7 +135,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     _abort = new AbortController();
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/expert/chat`, {
+      const res = await fetch(`${API_BASE}/api/v1/expert/chat/${activeExpert}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text }),
@@ -95,12 +170,12 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
             }
 
             set((s) => {
-              const msgs = [...s.messages];
-              const idx = msgs.findIndex((m) => m.id === expertMsg.id);
+              const history = [...(s.chatHistories[activeExpert] ?? [])];
+              const idx = history.findIndex((m) => m.id === expertMsg.id);
               if (idx === -1) return s;
               const msg: ExpertMessage = {
-                ...msgs[idx],
-                thinking: [...msgs[idx].thinking],
+                ...history[idx],
+                thinking: [...history[idx].thinking],
               };
 
               if (eventType === "reply_token") {
@@ -133,8 +208,10 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
                 msg.isStreaming = false;
               }
 
-              msgs[idx] = msg;
-              return { messages: msgs };
+              history[idx] = msg;
+              return {
+                chatHistories: { ...s.chatHistories, [activeExpert]: history },
+              };
             });
           }
         }
@@ -143,19 +220,23 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       if ((e as Error).name === "AbortError") return;
       const errMsg = (e as Error).message;
       set((s) => {
-        const msgs = [...s.messages];
-        const idx = msgs.findIndex((m) => m.id === expertMsg.id);
+        const history = [...(s.chatHistories[activeExpert] ?? [])];
+        const idx = history.findIndex((m) => m.id === expertMsg.id);
         if (idx !== -1) {
-          msgs[idx] = {
-            ...msgs[idx],
+          history[idx] = {
+            ...history[idx],
             content: `请求失败: ${errMsg}`,
             isStreaming: false,
           };
         }
-        return { messages: msgs, status: "error", error: errMsg };
+        return {
+          chatHistories: { ...s.chatHistories, [activeExpert]: history },
+          status: "error",
+          error: errMsg,
+        };
       });
     } finally {
-      set(s => s.status !== "error" ? { status: "idle" } : s);
+      set((s) => (s.status !== "error" ? { status: "idle" } : s));
     }
   },
 }));
