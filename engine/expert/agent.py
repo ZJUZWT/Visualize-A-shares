@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -23,6 +24,15 @@ from expert.schemas import (
     ToolCall,
 )
 from expert.tools import ExpertTools
+
+
+# 专家类型到中文名的映射
+EXPERT_NAMES = {
+    "data": "📊 数据专家",
+    "quant": "🔬 量化专家",
+    "info": "📰 资讯专家",
+    "industry": "🏭 产业链专家",
+}
 
 
 class ExpertAgent:
@@ -96,13 +106,31 @@ class ExpertAgent:
         # 4. 工具调用
         tool_results: list[dict] = []
         for tc in tool_calls:
+            # 容错：专家咨询的 question 为空时用原始消息补充
+            if tc.engine == "expert" and not tc.params.get("question"):
+                tc.params["question"] = message
+
+            # 前端事件：标注是否是专家咨询
+            is_expert_call = tc.engine == "expert"
+            expert_label = EXPERT_NAMES.get(tc.action, tc.action) if is_expert_call else ""
+
             yield {"event": "tool_call", "data": {
-                "engine": tc.engine, "action": tc.action, "params": tc.params
+                "engine": tc.engine, "action": tc.action, "params": tc.params,
+                "label": f"咨询{expert_label}" if is_expert_call else f"{tc.engine}.{tc.action}",
             }}
-            summary = await self._tools.execute(tc.engine, tc.action, tc.params)
-            tool_results.append({"engine": tc.engine, "action": tc.action, "summary": summary})
+
+            result = await self._tools.execute(tc.engine, tc.action, tc.params)
+            tool_results.append({
+                "engine": tc.engine,
+                "action": tc.action,
+                "result": result,
+                "is_expert": is_expert_call,
+            })
+
             yield {"event": "tool_result", "data": {
-                "engine": tc.engine, "action": tc.action, "summary": summary
+                "engine": tc.engine, "action": tc.action,
+                "summary": result[:300] if not is_expert_call else f"{expert_label}已回复（{len(result)}字）",
+                "label": expert_label if is_expert_call else tc.action,
             }}
 
         # 5. 流式回复
@@ -143,22 +171,135 @@ class ExpertAgent:
         nodes: list[dict],
         memories: list[dict],
     ) -> ThinkOutput:
-        """think 步骤：LLM 决策是否需要工具调用"""
+        """think 步骤：LLM 决策是否需要工具调用（流式收集 + 容错解析）"""
         from llm.providers import ChatMessage
         prompt = THINK_SYSTEM_PROMPT.format(
             graph_context=format_graph_context(nodes),
             memory_context=format_memory_context(memories),
         )
         try:
-            response = await self._llm.chat([
+            # 流式收集
+            chunks: list[str] = []
+            async for token in self._llm.chat_stream([
                 ChatMessage("system", prompt),
                 ChatMessage("user", message),
-            ])
-            data = json.loads(response)
-            return ThinkOutput(**data)
+            ]):
+                chunks.append(token)
+            raw_text = "".join(chunks).strip()
+
+            if not raw_text:
+                logger.warning("think 步骤 LLM 返回空内容")
+                return ThinkOutput(needs_data=False)
+
+            logger.debug(f"think 原始文本(前300): {raw_text[:300]}")
+
+            # 保留 <think> 内容用于容错解析
+            think_content = ""
+            think_match = re.search(r"<think>(.*?)</think>", raw_text, re.DOTALL)
+            if think_match:
+                think_content = think_match.group(1)
+
+            # 剥离 <think> 标签
+            text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
+            # 剥离 <minimax:*> 标签（MiniMax 特有）
+            text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
+            # 剥离 [TOOL_CALL]...[/TOOL_CALL] 块
+            text = re.sub(r"\[TOOL_CALL\].*?\[/TOOL_CALL\]", "", text, flags=re.DOTALL).strip()
+
+            # 提取 JSON（优先从正文中提取）
+            json_text = text
+            # 尝试找到 JSON 对象
+            json_match = re.search(r'\{[^{}]*"needs_data"[^{}]*\}', text, re.DOTALL)
+            if json_match:
+                json_text = json_match.group(0)
+            elif "```" in text:
+                json_text = text.split("```")[1]
+                if json_text.startswith("json"):
+                    json_text = json_text[4:]
+                json_text = json_text.strip()
+
+            # 尝试 JSON 解析
+            if json_text:
+                try:
+                    data = json.loads(json_text)
+                    logger.info(f"think 步骤 JSON 解析成功: needs_data={data.get('needs_data')}")
+                    return ThinkOutput(**data)
+                except json.JSONDecodeError:
+                    logger.debug(f"think JSON 解析失败，尝试容错: {json_text[:150]}")
+
+            # ── 容错解析：从 think 内容或原始文本中提取意图 ──
+            full_context = think_content + "\n" + raw_text
+            return self._fallback_think_parse(full_context)
+
         except Exception as e:
-            logger.warning(f"think 步骤解析失败: {e}")
+            logger.warning(f"think 步骤异常: {e}")
             return ThinkOutput(needs_data=False)
+
+    def _fallback_think_parse(self, text: str) -> ThinkOutput:
+        """容错解析：从 LLM 非标准输出中提取工具调用意图"""
+        tool_calls: list[dict] = []
+
+        # 专家类型关键词匹配
+        expert_patterns = {
+            "data": [r"数据专家", r"咨询.*data", r"action.*[\"']data[\"']"],
+            "quant": [r"量化专家", r"咨询.*quant", r"技术指标", r"技术面", r"action.*[\"']quant[\"']"],
+            "info": [r"资讯专家", r"咨询.*info", r"新闻", r"公告", r"action.*[\"']info[\"']"],
+            "industry": [r"产业链专家", r"咨询.*industry", r"行业分析", r"产业链", r"action.*[\"']industry[\"']"],
+        }
+
+        # 检测需要咨询的专家
+        detected_experts: set[str] = set()
+        for expert_type, patterns in expert_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, text, re.IGNORECASE):
+                    detected_experts.add(expert_type)
+                    break
+
+        if detected_experts:
+            # 从上下文中提取问题（用原始用户消息作为默认问题）
+            for expert_type in detected_experts:
+                # 尝试从 [TOOL_CALL] 中提取 question
+                question = ""
+                tc_pattern = rf'action.*?["\']?{expert_type}["\']?.*?question.*?["\']([^"\']+)["\']'
+                q_match = re.search(tc_pattern, text, re.DOTALL | re.IGNORECASE)
+                if q_match:
+                    question = q_match.group(1)
+
+                tool_calls.append({
+                    "engine": "expert",
+                    "action": expert_type,
+                    "params": {"question": question},  # question 可为空，后面会补
+                })
+
+            logger.info(f"think 容错解析: 检测到需要咨询 {list(detected_experts)}")
+            return ThinkOutput(
+                needs_data=True,
+                tool_calls=[ToolCall(**tc) for tc in tool_calls],
+                reasoning=f"容错解析: 检测到需要咨询{','.join(detected_experts)}",
+            )
+
+        # 检测是否需要直接数据查询
+        data_patterns = [
+            (r"get_daily_history", "data", "get_daily_history"),
+            (r"get_company_profile", "data", "get_company_profile"),
+            (r"search_stock", "data", "search_stock"),
+            (r"get_factor_scores", "quant", "get_factor_scores"),
+            (r"get_technical_indicators", "quant", "get_technical_indicators"),
+        ]
+        for pattern, engine, action in data_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                tool_calls.append({"engine": engine, "action": action, "params": {}})
+
+        if tool_calls:
+            logger.info(f"think 容错解析: 检测到数据查询 {[(tc['engine'], tc['action']) for tc in tool_calls]}")
+            return ThinkOutput(
+                needs_data=True,
+                tool_calls=[ToolCall(**tc) for tc in tool_calls],
+                reasoning="容错解析: 检测到数据查询需求",
+            )
+
+        logger.info("think 容错解析: 未检测到工具需求，直接回复")
+        return ThinkOutput(needs_data=False)
 
     async def _reply_stream(
         self,
@@ -167,22 +308,98 @@ class ExpertAgent:
         memories: list[dict],
         tool_results: list[dict],
     ) -> AsyncGenerator[tuple[str, str], None]:
-        """流式生成回复，yield (token, accumulated_text)"""
+        """流式生成回复（含 <think> 标签过滤），yield (token, accumulated_text)"""
         from llm.providers import ChatMessage
+
+        # 构建上下文
         context_parts = [format_graph_context(nodes)]
-        if tool_results:
-            context_parts.append("数据查询结果：\n" + "\n".join(
-                f"- {r['engine']}.{r['action']}: {r['summary']}" for r in tool_results
+
+        # 专家分析结果（完整展示，不截断）
+        expert_analyses = [r for r in tool_results if r.get("is_expert")]
+        data_results = [r for r in tool_results if not r.get("is_expert")]
+
+        if expert_analyses:
+            expert_section = "## 专家团队分析报告\n\n"
+            for r in expert_analyses:
+                label = EXPERT_NAMES.get(r["action"], r["action"])
+                expert_section += f"### {label}\n{r['result']}\n\n"
+            context_parts.append(expert_section)
+
+        if data_results:
+            context_parts.append("## 数据查询结果\n" + "\n".join(
+                f"- {r['engine']}.{r['action']}: {r['result']}" for r in data_results
             ))
-        system = "你是一位理性的A股投资专家，请基于以下上下文回答用户问题。\n\n" + "\n\n".join(context_parts)
+
+        system = (
+            "你是A股投资专家总顾问。你的专家团队（数据、量化、资讯、产业链专家）已为你完成了分析。\n"
+            "请基于他们的分析报告和你自己的知识图谱，给出**综合性、有深度**的投资分析。\n"
+            "要求：\n"
+            "1. 综合多位专家的观点，而非简单罗列\n"
+            "2. 指出各专家分析中的一致之处和分歧\n"
+            "3. 给出你自己的独立判断\n"
+            "4. 使用 Markdown 格式，善用表格展示数据\n\n"
+            + "\n\n".join(context_parts)
+        )
+
         accumulated = ""
+        in_skip = False          # 跳过区域（<think> 或 <minimax:*>）
+        skip_end_tag = ""        # 当前跳过区域的结束标签
+        raw_buffer = ""
+
+        # 需要过滤的标签及其结束标签
+        SKIP_TAGS = {
+            "<think>": "</think>",
+            "<minimax:tool_call>": "</minimax:tool_call>",
+            "<minimax:search_result>": "</minimax:search_result>",
+        }
+
         try:
             async for token in self._llm.chat_stream([
                 ChatMessage("system", system),
                 ChatMessage("user", message),
             ]):
-                accumulated += token
-                yield token, accumulated
+                raw_buffer += token
+
+                # 检测进入跳过区域
+                if not in_skip:
+                    for start_tag, end_tag in SKIP_TAGS.items():
+                        if start_tag in raw_buffer:
+                            before = raw_buffer.split(start_tag, 1)[0]
+                            if before:
+                                accumulated += before
+                                yield before, accumulated
+                            in_skip = True
+                            skip_end_tag = end_tag
+                            raw_buffer = raw_buffer.split(start_tag, 1)[1]
+                            break
+                    if in_skip:
+                        continue
+
+                # 检测离开跳过区域
+                if in_skip and skip_end_tag in raw_buffer:
+                    in_skip = False
+                    remaining = raw_buffer.split(skip_end_tag, 1)[1]
+                    raw_buffer = remaining.lstrip("\n")
+                    skip_end_tag = ""
+                    continue
+
+                if in_skip:
+                    if len(raw_buffer) > 200:
+                        raw_buffer = raw_buffer[-20:]
+                    continue
+
+                if "<" in raw_buffer and not raw_buffer.endswith(">") and len(raw_buffer) < 20:
+                    continue
+
+                if raw_buffer:
+                    accumulated += raw_buffer
+                    yield raw_buffer, accumulated
+                    raw_buffer = ""
+
+            if raw_buffer and not in_skip:
+                accumulated += raw_buffer
+                yield raw_buffer, accumulated
+
         except Exception as e:
             logger.error(f"reply_stream 失败: {e}")
             yield f"回复生成失败: {e}", f"回复生成失败: {e}"
@@ -201,8 +418,21 @@ class ExpertAgent:
             expert_reply=expert_reply,
         )
         try:
-            response = await self._llm.chat([ChatMessage("user", prompt)])
-            data = json.loads(response)
+            # 流式收集
+            chunks: list[str] = []
+            async for token in self._llm.chat_stream([
+                ChatMessage("user", prompt),
+            ]):
+                chunks.append(token)
+            text = "".join(chunks).strip()
+
+            # 剥离 <think> 标签
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+            if not text:
+                return
+
+            data = json.loads(text)
             output = BeliefUpdateOutput(**data)
             if output.updated:
                 events = []
