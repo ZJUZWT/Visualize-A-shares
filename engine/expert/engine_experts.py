@@ -371,6 +371,17 @@ class EngineExpert:
             records = result.head(30).to_dict("records")
             return json.dumps({"count": len(result), "results": records}, ensure_ascii=False, default=str)
 
+        elif action == "query_hourly":
+            code = self._resolve_code(params.get("code", ""))
+            days = int(params.get("days", 5))
+            df = await asyncio.to_thread(de.get_kline, code, "60m", days)
+            if df is None or df.empty:
+                return json.dumps({"error": f"无 {code} 小时线数据"}, ensure_ascii=False)
+            records = df.tail(20).to_dict("records")
+            return json.dumps({"code": code, "frequency": "60m", "records": records,
+                                "total_bars": len(df)},
+                              ensure_ascii=False, default=str)
+
         return f"未知 data 工具: {action}"
 
     async def _exec_quant_tool(self, action: str, params: dict) -> str:
@@ -439,6 +450,17 @@ class EngineExpert:
 
         elif action == "run_screen":
             return await self._exec_data_tool("run_screen", params)
+
+        elif action == "query_hourly":
+            code = self._resolve_code(params.get("code", ""))
+            days = int(params.get("days", 5))
+            df = await asyncio.to_thread(de.get_kline, code, "60m", days)
+            if df is None or df.empty:
+                return json.dumps({"error": f"无 {code} 小时线数据"}, ensure_ascii=False)
+            records = df.tail(20).to_dict("records")
+            return json.dumps({"code": code, "frequency": "60m", "records": records,
+                                "total_bars": len(df)},
+                              ensure_ascii=False, default=str)
 
         return f"未知 quant 工具: {action}"
 
@@ -641,12 +663,14 @@ class EngineExpert:
 - query_cluster(cluster_id: int): 查询指定聚类信息
 - find_similar_stocks(code: str, top_k: int): 跨簇相似股票搜索
 - query_history(code: str, days: int): 历史行情数据
+- query_hourly(code: str, days: int): 查询个股小时线K线（60分钟级别），默认5个交易日
 - run_screen(filters: dict): 条件选股""",
             "quant": """- get_technical_indicators(code: str): 获取技术指标（RSI/MACD/布林带）
 - get_factor_scores(code: str): 获取多因子评分
 - query_factor_analysis(factor_name: str): 查看因子体系，不传名称返回全景
 - run_backtest(rolling_window: int, auto_inject: bool): 因子 IC 回测
-- run_screen(filters: dict, sort_by: str): 条件选股""",
+- run_screen(filters: dict, sort_by: str): 条件选股
+- query_hourly(code: str, days: int): 查询个股小时线K线（60分钟级别），默认5个交易日""",
             "info": """- get_news(code: str, limit: int): 获取个股新闻+情感分析
 - get_announcements(code: str, limit: int): 获取公司公告
 - assess_event_impact(code: str, event_desc: str): 评估事件影响""",
