@@ -226,12 +226,25 @@ class ExpertAgent:
             result_text = r.get("result", "")
             error_keywords = ["失败", "error", "无快照数据", "超时", "未返回有效内容", "⚠️"]
             has_error = any(kw in result_text[:200] for kw in error_keywords)
+            # K 线数据提取
+            chart_data = {}
+            if r["action"] in ("query_history", "query_hourly") and result_text:
+                try:
+                    parsed = json.loads(result_text)
+                    if "records" in parsed:
+                        chart_data["chartData"] = {
+                            "code": parsed.get("code", ""),
+                            "records": parsed["records"],
+                        }
+                except (json.JSONDecodeError, KeyError):
+                    pass
             yield {"event": "tool_result", "data": {
                 "engine": r["engine"], "action": r["action"],
                 "summary": result_text[:300] if not is_expert else f"{expert_label}已回复（{len(result_text)}字）",
                 "label": expert_label if is_expert else r["action"],
                 "content": result_text if is_expert else "",
                 "hasError": has_error,
+                **chart_data,
             }}
 
         # 5. 图谱自动学习
