@@ -12,6 +12,7 @@ build/
 node_modules/
 .next/
 out/
+*.tsbuildinfo
 
 # 数据文件（运行时生成）
 data/*.duckdb
