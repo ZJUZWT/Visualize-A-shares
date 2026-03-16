@@ -165,6 +165,26 @@ class DataCollector:
                 logger.warning(f"⚠️ {source.name} {code} 公告获取失败: {e}")
         return pd.DataFrame()
 
+    def get_intraday_history(
+        self, code: str, frequency: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """获取分钟级 K 线 — 逐级降级"""
+        for source in self._sources:
+            try:
+                df = source.get_intraday_history(code, frequency, start_date, end_date)
+                if df is not None and len(df) > 0:
+                    logger.debug(
+                        f"✅ {code} {frequency}min: {source.name} ({len(df)} 条)"
+                    )
+                    return df
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                logger.warning(f"⚠️ {source.name} {code} {frequency}min 失败: {e}")
+
+        logger.error(f"❌ {code} {frequency}min 所有数据源均失败")
+        return pd.DataFrame()
+
     @property
     def available_sources(self) -> list[str]:
         return [s.name for s in self._sources]

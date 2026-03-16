@@ -68,6 +68,26 @@ class BaseDataSource(ABC):
         """获取公司公告 — 子类可选实现"""
         raise NotImplementedError
 
+    # ─── 分钟级 K 线（可选实现）────────────────────────
+    def get_intraday_history(
+        self,
+        code: str,
+        frequency: str,
+        start_date: str,
+        end_date: str,
+    ) -> pd.DataFrame:
+        """获取分钟级 K 线 — 子类可选实现
+
+        Args:
+            code: 股票代码（6位纯数字）
+            frequency: "60"/"30"/"15"/"5"
+            start_date: "2026-03-10"
+            end_date: "2026-03-16"
+        Returns:
+            DataFrame: datetime, open, high, low, close, volume, amount[, pct_chg, turnover_rate]
+        """
+        raise NotImplementedError
+
     # ─── 统一字段映射 ──────────────────────────────────
     UNIFIED_QUOTE_COLUMNS = [
         "code",

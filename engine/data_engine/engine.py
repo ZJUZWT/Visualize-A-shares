@@ -111,6 +111,52 @@ class DataEngine:
             codes, days, on_progress, on_batch_done
         )
 
+    # ── 分钟级 K 线 ──
+
+    def get_kline(
+        self, code: str, frequency: str = "60m", days: int = 5
+    ) -> pd.DataFrame:
+        """
+        通用 K 线查询 — 本地优先，缺失时远程拉取并缓存
+
+        Args:
+            code: 股票代码
+            frequency: "60m"（当前仅支持）
+            days: 回溯天数，默认 5
+        """
+        freq_key = frequency.replace("m", "")  # "60m" → "60"
+
+        end = datetime.date.today()
+        start = end - datetime.timedelta(days=days + 5)  # 多拉几天补偿非交易日
+
+        # 1. 先查本地
+        local = self._store.get_kline(
+            code, frequency,
+            start_datetime=start.isoformat(),
+            end_datetime=end.isoformat() + " 23:59:59",
+        )
+        # 60min 约 4 条/交易日，但 days 包含周末/节假日
+        # 用 days * 2 作为保守阈值，避免非交易日导致反复远程拉取
+        if len(local) >= days * 2:
+            return local
+
+        # 2. 本地不足，远程拉取
+        df = self._collector.get_intraday_history(
+            code, freq_key, start.isoformat(), end.isoformat()
+        )
+        if df.empty:
+            return local if not local.empty else pd.DataFrame()
+
+        # 3. 缓存到 DuckDB
+        df["code"] = code
+        self._store.save_kline(df, frequency)
+
+        return self._store.get_kline(
+            code, frequency,
+            start_datetime=start.isoformat(),
+            end_datetime=end.isoformat() + " 23:59:59",
+        )
+
     # ── 财务数据 ──
 
     def get_financial_data(self, code: str, year: int, quarter: int) -> pd.DataFrame:

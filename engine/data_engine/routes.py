@@ -10,6 +10,7 @@ from fastapi import APIRouter, Query, HTTPException
 from loguru import logger
 
 from . import get_data_engine
+from .schemas import KlineFrequency
 
 router = APIRouter(prefix="/api/v1/data", tags=["data"])
 
@@ -92,6 +93,31 @@ async def get_daily(
         "code": code,
         "records": df.to_dict(orient="records"),
         "count": len(df),
+    }
+
+
+@router.get("/kline/{code}")
+async def get_kline(
+    code: str,
+    frequency: KlineFrequency = KlineFrequency.MIN_60,
+    days: int = Query(5, description="回溯天数"),
+):
+    """获取分钟级 K 线数据"""
+    if frequency == KlineFrequency.DAILY:
+        raise HTTPException(
+            status_code=400,
+            detail="日线请使用 /daily/{code} 端点",
+        )
+    de = get_data_engine()
+    df = await asyncio.to_thread(de.get_kline, code, frequency.value, days)
+    if df.empty:
+        return {"code": code, "frequency": frequency.value, "records": [], "count": 0}
+    records = df.to_dict(orient="records")
+    return {
+        "code": code,
+        "frequency": frequency.value,
+        "records": records,
+        "count": len(records),
     }
 
 
