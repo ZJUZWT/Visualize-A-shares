@@ -99,6 +99,9 @@ export default function TranscriptFeed({ transcript, verdict }: TranscriptFeedPr
         if (item.type === "facts_compression") {
           return <FactsCompressionCard key={item.id} item={item} />;
         }
+        if (item.type === "topic_analysis") {
+          return <TopicAnalysisCard key={item.id} item={item} />;
+        }
         return null;
       })}
 
@@ -125,6 +128,82 @@ function BlackboardCard({ item }: { item: Extract<TranscriptItem, { type: "black
           <div className="px-4 pb-3 space-y-1 border-t border-[var(--border)]">
             <p className="text-[var(--text-tertiary)] pt-2">辩论 ID: <span className="text-[var(--text-secondary)]">{item.debateId}</span></p>
             <p className="text-[var(--text-tertiary)]">参与者: <span className="text-[var(--text-secondary)]">{item.participants.join(", ")}</span></p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── 题目预分析卡片 ────────────────────────────────────
+function TopicAnalysisCard({ item }: { item: Extract<TranscriptItem, { type: "topic_analysis" }> }) {
+  const [open, setOpen] = useState(false);
+
+  if (item.loading) {
+    return (
+      <div className="flex justify-center">
+        <div className="w-full max-w-[90%] rounded-xl border border-purple-500/20 bg-purple-500/5 text-xs overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 text-[var(--text-tertiary)]">
+            <Loader2 size={12} className="animate-spin text-purple-400" />
+            <Brain size={12} className="text-purple-400" />
+            <span className="text-purple-400 font-medium">裁判预分析</span>
+            <span>正在分析辩论题目 · {item.target}...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (item.error || !item.briefing) {
+    return (
+      <div className="flex justify-center">
+        <div className="w-full max-w-[90%] rounded-xl border border-yellow-500/20 bg-yellow-500/5 text-xs overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-2.5 text-[var(--text-tertiary)]">
+            <span className="text-yellow-400">⚠</span>
+            <span className="text-yellow-400 font-medium">裁判预分析</span>
+            <span>预分析跳过，辩论正常继续</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const { briefing } = item;
+  return (
+    <div className="flex justify-center">
+      <div className="w-full max-w-[90%] rounded-xl border border-purple-500/20 bg-purple-500/5 text-xs overflow-hidden">
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="w-full flex items-center gap-2 px-4 py-2.5 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+        >
+          {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          <Brain size={12} className="text-purple-400" />
+          <span className="text-purple-400 font-medium">裁判预分析</span>
+          <span className="flex-1 text-left truncate">{briefing.summary?.slice(0, 60) ?? "分析完成"}</span>
+        </button>
+        {open && (
+          <div className="px-4 pb-3 space-y-2 border-t border-purple-500/10">
+            {briefing.summary && (
+              <p className="pt-2 text-[var(--text-secondary)] leading-relaxed">{briefing.summary}</p>
+            )}
+            {briefing.focus_areas?.length > 0 && (
+              <div>
+                <span className="text-purple-400 font-medium">关注焦点：</span>
+                <span className="text-[var(--text-tertiary)]">{briefing.focus_areas.join("、")}</span>
+              </div>
+            )}
+            {briefing.related_stocks?.length > 0 && (
+              <div>
+                <span className="text-purple-400 font-medium">相关标的：</span>
+                <span className="text-[var(--text-tertiary)]">{briefing.related_stocks.join("、")}</span>
+              </div>
+            )}
+            {briefing.key_data?.length > 0 && (
+              <div>
+                <span className="text-purple-400 font-medium">关键数据：</span>
+                <span className="text-[var(--text-tertiary)]">{briefing.key_data.join("、")}</span>
+              </div>
+            )}
           </div>
         )}
       </div>

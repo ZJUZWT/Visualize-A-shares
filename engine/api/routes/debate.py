@@ -50,13 +50,17 @@ async def start_debate(req: DebateRequest):
         try:
             from agent import get_orchestrator
             from agent.debate import run_debate
+            from expert.routes import _expert_agent
+            from agent.judge import JudgeRAG
 
             orch = get_orchestrator()
+            judge = JudgeRAG(expert=_expert_agent) if _expert_agent is not None else None
             async for event in run_debate(
                 blackboard=blackboard,
                 llm=orch._llm._provider,
                 memory=orch._memory,
                 data_fetcher=orch._data,
+                judge=judge,
             ):
                 yield f"event: {event['event']}\ndata: {json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
         except Exception as e:

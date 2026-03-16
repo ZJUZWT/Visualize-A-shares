@@ -1398,8 +1398,12 @@ async def run_debate(
     llm: BaseLLMProvider,
     memory: AgentMemory,
     data_fetcher: DataFetcher,
+    judge=None,  # JudgeRAG | None
 ) -> AsyncGenerator[dict, None]:
-    """专家辩论主循环 — async generator，推送 SSE 事件"""
+    """专家辩论主循环 — async generator，推送 SSE 事件
+
+    judge: JudgeRAG 实例（可选）。不为 None 时走 RAG 路径（预分析 + RAG 小评 + RAG 裁决）。
+    """
 
     # 解析股票代码（target 可能是自由文本）
     if not blackboard.code:
@@ -1425,6 +1429,18 @@ async def run_debate(
         "mode": blackboard.mode,
         "participants": ["bull_expert", "bear_expert", "retail_investor", "smart_money", "judge"],
     })
+
+    # 题目预分析（RAG 路径）
+    if judge is not None:
+        try:
+            async for event in judge.analyze_topic(blackboard.target):
+                yield event
+                if event["event"] == "topic_analysis_complete":
+                    briefing = event["data"].get("briefing", {})
+                    if briefing:
+                        blackboard.facts["topic_briefing"] = briefing
+        except Exception as e:
+            logger.warning(f"题目预分析失败，跳过: {e}")
 
     # 公用初始数据
     async for event in fetch_initial_data(blackboard, data_fetcher):
@@ -1544,7 +1560,10 @@ async def run_debate(
 
         # 6. 评委每轮小评
         try:
-            round_eval = await judge_round_eval(blackboard.round, blackboard, llm)
+            if judge is not None:
+                round_eval = await judge.round_eval(blackboard.round, blackboard)
+            else:
+                round_eval = await judge_round_eval(blackboard.round, blackboard, llm)
             yield sse("judge_round_eval", {
                 "round": round_eval.round,
                 "bull": round_eval.bull.model_dump(),
@@ -1578,7 +1597,12 @@ async def run_debate(
     })
 
     judge_verdict = None
-    async for event in judge_summarize_stream(blackboard, llm, memory):
+    if judge is not None:
+        verdict_stream = judge.final_verdict_stream(blackboard)
+    else:
+        verdict_stream = judge_summarize_stream(blackboard, llm, memory)
+
+    async for event in verdict_stream:
         yield event
         if event["event"] == "judge_verdict":
             from agent.schemas import JudgeVerdict as _JV

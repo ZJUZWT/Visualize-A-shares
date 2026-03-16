@@ -111,6 +111,74 @@ class ExpertAgent:
         self._graph.save_sync()
         logger.info(f"初始信念已写入图谱: {len(INITIAL_BELIEFS)} 条")
 
+    async def recall_and_think(
+        self,
+        query: str,
+        history: list[dict] | None = None,
+    ) -> tuple[list[dict], list[dict], "ThinkOutput"]:
+        """图谱召回 + 记忆召回 + think，不执行工具
+
+        Returns: (recalled_nodes, memories, think_output)
+        """
+        recalled_nodes = self._graph.recall(query)
+        memories: list[dict] = []
+        if self._memory:
+            try:
+                memories = self._memory.recall(agent_role="expert", query=query, top_k=5)
+            except Exception as e:
+                logger.warning(f"记忆召回失败: {e}")
+
+        think_output = ThinkOutput(needs_data=False)
+        if self._llm:
+            think_output = await self._think(query, recalled_nodes, memories, history or [])
+
+        return recalled_nodes, memories, think_output
+
+    async def execute_tools(self, tool_calls: list[ToolCall]) -> list[dict]:
+        """并行执行工具调用，返回 tool_results"""
+        if not tool_calls:
+            return []
+
+        async def _exec(tc: ToolCall) -> dict:
+            result = await self._tools.execute(tc.engine, tc.action, tc.params)
+            return {
+                "engine": tc.engine,
+                "action": tc.action,
+                "result": result,
+                "is_expert": tc.engine == "expert",
+            }
+
+        results = await asyncio.gather(*[_exec(tc) for tc in tool_calls])
+        return list(results)
+
+    async def learn_from_context(self, message: str, tool_results: list[dict]) -> None:
+        """图谱自动学习 — 从对话和工具结果中提取股票/板块/产业链节点"""
+        await self._learn_from_conversation(message, tool_results)
+
+    async def generate_reply_stream(
+        self,
+        message: str,
+        nodes: list[dict],
+        memories: list[dict],
+        tool_results: list[dict],
+        history: list[dict] | None = None,
+    ) -> AsyncGenerator[tuple[str, str], None]:
+        """流式生成回复，yield (token, full_text)"""
+        async for token, full_text in self._reply_stream(
+            message, nodes, memories, tool_results, history or []
+        ):
+            yield token, full_text
+
+    async def belief_update(self, message: str, reply: str) -> list[dict]:
+        """信念更新 — 根据对话结论更新 BeliefNode confidence
+
+        返回更新事件列表 [{event: "belief_updated", data: {...}}]
+        """
+        events = []
+        async for event in self._belief_update(message, reply):
+            events.append(event)
+        return events
+
     async def chat(self, message: str, history: list[dict] | None = None) -> AsyncGenerator[dict, None]:
         """完整对话流程，yield 结构化事件 dict
 
@@ -121,8 +189,8 @@ class ExpertAgent:
         conv_history = history or []
         yield {"event": "thinking_start", "data": {}}
 
-        # 1. 图谱召回
-        recalled_nodes = self._graph.recall(message)
+        # 1-3. 图谱召回 + 记忆召回 + think
+        recalled_nodes, memories, think_output = await self.recall_and_think(message, conv_history)
         yield {"event": "graph_recall", "data": {"nodes": [
             {
                 "id": n["id"],
@@ -133,23 +201,9 @@ class ExpertAgent:
             for n in recalled_nodes
         ]}}
 
-        # 2. 记忆召回
-        memories: list[dict] = []
-        if self._memory:
-            try:
-                memories = self._memory.recall(agent_role="expert", query=message, top_k=5)
-            except Exception as e:
-                logger.warning(f"记忆召回失败: {e}")
-
-        # 3. think 步骤
-        tool_calls: list[ToolCall] = []
-        if self._llm:
-            think_output = await self._think(message, recalled_nodes, memories, conv_history)
-            tool_calls = think_output.tool_calls if think_output.needs_data else []
+        tool_calls: list[ToolCall] = think_output.tool_calls if think_output.needs_data else []
 
         # 4. 工具调用（并行执行所有专家）
-        tool_results: list[dict] = []
-
         # 先容错 + 发送 tool_call 事件
         for tc in tool_calls:
             if tc.engine == "expert":
@@ -163,46 +217,32 @@ class ExpertAgent:
                 "label": f"咨询{expert_label}" if is_expert_call else f"{tc.engine}.{tc.action}",
             }}
 
-        # 并行执行所有工具调用
-        if tool_calls:
-            async def _exec(tc: ToolCall) -> dict:
-                result = await self._tools.execute(tc.engine, tc.action, tc.params)
-                is_expert = tc.engine == "expert"
-                return {
-                    "engine": tc.engine,
-                    "action": tc.action,
-                    "result": result,
-                    "is_expert": is_expert,
-                }
+        tool_results = await self.execute_tools(tool_calls)
 
-            results = await asyncio.gather(*[_exec(tc) for tc in tool_calls])
-            tool_results = list(results)
+        # 按完成顺序发送 tool_result 事件
+        for r in tool_results:
+            is_expert = r.get("is_expert")
+            expert_label = EXPERT_NAMES.get(r["action"], r["action"]) if is_expert else ""
+            result_text = r.get("result", "")
+            error_keywords = ["失败", "error", "无快照数据", "超时", "未返回有效内容", "⚠️"]
+            has_error = any(kw in result_text[:200] for kw in error_keywords)
+            yield {"event": "tool_result", "data": {
+                "engine": r["engine"], "action": r["action"],
+                "summary": result_text[:300] if not is_expert else f"{expert_label}已回复（{len(result_text)}字）",
+                "label": expert_label if is_expert else r["action"],
+                "content": result_text if is_expert else "",
+                "hasError": has_error,
+            }}
 
-            # 按完成顺序发送 tool_result 事件
-            for r in tool_results:
-                is_expert = r.get("is_expert")
-                expert_label = EXPERT_NAMES.get(r["action"], r["action"]) if is_expert else ""
-                result_text = r.get("result", "")
-                # 检测工具调用是否失败
-                error_keywords = ["失败", "error", "无快照数据", "超时", "未返回有效内容", "⚠️"]
-                has_error = any(kw in result_text[:200] for kw in error_keywords)
-                yield {"event": "tool_result", "data": {
-                    "engine": r["engine"], "action": r["action"],
-                    "summary": result_text[:300] if not is_expert else f"{expert_label}已回复（{len(result_text)}字）",
-                    "label": expert_label if is_expert else r["action"],
-                    "content": result_text if is_expert else "",
-                    "hasError": has_error,
-                }}
-
-        # 5. 图谱自动学习 — 从对话中学习股票、行业、产业链关系
-        await self._learn_from_conversation(message, tool_results)
+        # 5. 图谱自动学习
+        await self.learn_from_context(message, tool_results)
 
         # 6. 流式回复
         expert_reply = ""
         if self._llm:
             logger.debug(f"开始 _reply_stream, tool_results={len(tool_results)}条, "
                          f"expert={len([r for r in tool_results if r.get('is_expert')])}条")
-            async for token, full_text in self._reply_stream(
+            async for token, full_text in self.generate_reply_stream(
                 message, recalled_nodes, memories, tool_results, conv_history
             ):
                 expert_reply = full_text
@@ -215,7 +255,7 @@ class ExpertAgent:
 
         # 7. 信念更新
         if self._llm and expert_reply:
-            async for event in self._belief_update(message, expert_reply):
+            for event in await self.belief_update(message, expert_reply):
                 yield event
 
         # 8. 记忆存储
