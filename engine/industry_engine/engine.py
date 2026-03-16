@@ -183,22 +183,34 @@ class IndustryEngine:
     def _resolve_industry(self, target: str) -> tuple[str, str]:
         """解析目标为 (行业名, 股票代码)"""
         import re
+        target = target.strip()
+
         # 如果是 6 位数字，当作股票代码
-        if re.fullmatch(r"\d{6}", target.strip()):
-            profile = self._data.get_profile(target.strip())
+        if re.fullmatch(r"\d{6}", target):
+            profile = self._data.get_profile(target)
             if profile:
-                return profile.get("industry", ""), target.strip()
-            return "", target.strip()
+                return profile.get("industry", ""), target
+            return "", target
 
         # 否则当作行业名，检查是否存在
         mapping = self.get_industry_mapping()
         if target in mapping:
             return target, ""
 
-        # 模糊匹配
+        # 模糊匹配行业名
         for ind in mapping:
             if target in ind or ind in target:
                 return ind, ""
+
+        # 尝试当作公司名查找股票代码，再通过代码查行业
+        profiles = self._data.get_profiles()
+        for code, info in profiles.items():
+            name = info.get("name", "")
+            if name and (target in name or name in target):
+                industry = info.get("industry", "")
+                if industry:
+                    logger.debug(f"公司名解析行业: '{target}' → {code}({name}) → {industry}")
+                    return industry, code
 
         return "", ""
 

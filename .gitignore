@@ -54,3 +54,4 @@ logs/
 .worktrees/
 .worktrees/
 *.wal.bak
+web/tsconfig.tsbuildinfo

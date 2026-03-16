@@ -73,7 +73,7 @@ class ExpertTools:
 
         try:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+                timeout=httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
             ) as client:
                 async with client.stream(
                     "POST", url,
@@ -112,10 +112,20 @@ class ExpertTools:
                                 return f"专家 {expert_type} 错误: {data.get('message', '')}"
 
         except asyncio.TimeoutError:
-            return f"专家 {expert_type} 响应超时(120s)，已获取部分: {full_text[:300]}"
+            return f"专家 {expert_type} 连接超时，已获取部分: {full_text[:300]}"
+        except httpx.RemoteProtocolError as e:
+            logger.error(f"ask_expert({expert_type}) 远端协议错误: {e!r}")
+            if full_text:
+                return full_text
+            return f"调用专家 {expert_type} 连接中断: {e!r}"
+        except httpx.ReadError as e:
+            logger.error(f"ask_expert({expert_type}) 读取错误: {e!r}")
+            if full_text:
+                return full_text
+            return f"调用专家 {expert_type} 读取失败: {e!r}"
         except Exception as e:
-            logger.error(f"ask_expert({expert_type}) 失败: {e}")
-            return f"调用专家 {expert_type} 失败: {e}"
+            logger.error(f"ask_expert({expert_type}) 失败: {e!r}")
+            return f"调用专家 {expert_type} 失败: {e!r}"
 
         if not full_text:
             return f"专家 {expert_type} 未返回有效内容"
