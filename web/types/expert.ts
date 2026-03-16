@@ -54,7 +54,7 @@ export interface BeliefUpdatedData {
 
 export type ThinkingItem =
   | { type: "graph_recall"; nodes: GraphNode[] }
-  | { type: "tool_call"; data: ToolCallData }
+  | { type: "tool_call"; data: ToolCallData; result?: ToolResultData; status: "pending" | "done" | "error" }
   | { type: "tool_result"; data: ToolResultData }
   | { type: "belief_updated"; data: BeliefUpdatedData };
 
