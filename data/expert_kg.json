@@ -97,151 +97,151 @@
       "id": "339a6d46-e12d-43fa-9c05-d6491f0086f7"
     },
     {
-      "id": "d8a45109-ceea-4cb9-8aad-77a826b835a7",
       "type": "stock",
       "code": "001896",
       "name": "豫能控股",
       "industry": "电力行业",
-      "zjh_industry": "电力、热力、燃气及水生产和供应业-电力、热力生产和供应业"
+      "zjh_industry": "电力、热力、燃气及水生产和供应业-电力、热力生产和供应业",
+      "id": "d8a45109-ceea-4cb9-8aad-77a826b835a7"
     },
     {
-      "id": "f165a0be-62c8-4697-87af-94dfb0502ae1",
       "type": "sector",
       "name": "电力行业",
-      "category": "industry"
+      "category": "industry",
+      "id": "f165a0be-62c8-4697-87af-94dfb0502ae1"
     },
     {
-      "id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
       "type": "stock",
       "code": "002092",
       "name": "中泰化学",
       "industry": "化学原料",
-      "zjh_industry": "制造业-化学原料和化学制品制造业"
+      "zjh_industry": "制造业-化学原料和化学制品制造业",
+      "id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc"
     },
     {
-      "id": "15150ef1-7265-484b-bc7f-acf750726155",
       "type": "sector",
       "name": "化学原料",
-      "category": "industry"
+      "category": "industry",
+      "id": "15150ef1-7265-484b-bc7f-acf750726155"
     },
     {
-      "id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
       "type": "material",
       "name": "石油",
-      "category": "raw_material"
+      "category": "raw_material",
+      "id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
-      "id": "845b4dfd-f9b3-4422-a476-686f9809322b",
       "type": "material",
       "name": "煤炭",
-      "category": "raw_material"
+      "category": "raw_material",
+      "id": "845b4dfd-f9b3-4422-a476-686f9809322b"
     },
     {
-      "id": "1e3226d9-2be7-40e9-b945-ba62201b81ec",
       "type": "material",
       "name": "锰",
-      "category": "raw_material"
+      "category": "raw_material",
+      "id": "1e3226d9-2be7-40e9-b945-ba62201b81ec"
     },
     {
-      "id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
       "type": "stock",
       "code": "002733",
       "name": "雄韬股份",
       "industry": "电池",
-      "zjh_industry": "制造业-电气机械和器材制造业"
+      "zjh_industry": "制造业-电气机械和器材制造业",
+      "id": "87c47001-28f8-4d79-b802-8e086cc3ab50"
     },
     {
-      "id": "b3824adb-71ab-4101-a360-4d1a5aeef0b7",
       "type": "material",
       "name": "锌",
-      "category": "raw_material"
+      "category": "raw_material",
+      "id": "b3824adb-71ab-4101-a360-4d1a5aeef0b7"
     },
     {
-      "id": "d99d9619-6385-41af-8a11-927efade46ca",
       "type": "material",
       "name": "动力电池",
-      "category": "product"
+      "category": "product",
+      "id": "d99d9619-6385-41af-8a11-927efade46ca"
     },
     {
-      "id": "a820950c-d51e-4ccf-aa00-784f0751233c",
       "type": "sector",
       "name": "输配电气",
-      "category": "industry"
+      "category": "industry",
+      "id": "a820950c-d51e-4ccf-aa00-784f0751233c"
     },
     {
-      "id": "b9586e31-c867-46f9-8d64-be8ccda7afa9",
       "type": "material",
       "name": "电动汽车",
-      "category": "product"
+      "category": "product",
+      "id": "b9586e31-c867-46f9-8d64-be8ccda7afa9"
     },
     {
-      "id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5",
       "type": "material",
       "name": "机器人",
-      "category": "product"
+      "category": "product",
+      "id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5"
     },
     {
-      "id": "2615eb8e-e008-444f-bc9f-da0cc73c8c5b",
       "type": "material",
       "name": "无人机",
-      "category": "product"
+      "category": "product",
+      "id": "2615eb8e-e008-444f-bc9f-da0cc73c8c5b"
     },
     {
-      "id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7",
       "type": "stock",
       "code": "600549",
       "name": "厦门钨业",
       "industry": "小金属",
-      "zjh_industry": "制造业-有色金属冶炼和压延加工业"
+      "zjh_industry": "制造业-有色金属冶炼和压延加工业",
+      "id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7"
     },
     {
-      "id": "012015b4-5053-48ba-9122-9c150328395f",
       "type": "sector",
       "name": "小金属",
-      "category": "industry"
+      "category": "industry",
+      "id": "012015b4-5053-48ba-9122-9c150328395f"
     },
     {
-      "id": "0df250c0-5398-4dc5-9046-0b13559d09de",
       "type": "material",
       "name": "稀土",
-      "category": "raw_material"
+      "category": "raw_material",
+      "id": "0df250c0-5398-4dc5-9046-0b13559d09de"
     }
   ],
   "edges": [
     {
-      "source_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
-      "target_id": "a820950c-d51e-4ccf-aa00-784f0751233c",
       "relation": "belongs_to",
       "reason": "国电南瑞属于输配电气行业",
-      "timestamp": "2026-03-16T19:35:12.905603"
+      "timestamp": "2026-03-16T19:35:12.905603",
+      "source_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
+      "target_id": "a820950c-d51e-4ccf-aa00-784f0751233c"
     },
     {
-      "source_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
-      "target_id": "3179130f-c22b-48f0-832b-28b2668e288a",
       "relation": "supplies",
       "reason": "国电南瑞生产储能",
-      "timestamp": "2026-03-16T19:35:12.905686"
+      "timestamp": "2026-03-16T19:35:12.905686",
+      "source_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
+      "target_id": "3179130f-c22b-48f0-832b-28b2668e288a"
     },
     {
-      "source_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
-      "target_id": "b9586e31-c867-46f9-8d64-be8ccda7afa9",
       "relation": "supplies",
       "reason": "国电南瑞生产电动汽车",
-      "timestamp": "2026-03-16T19:35:12.905758"
+      "timestamp": "2026-03-16T19:35:12.905758",
+      "source_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
+      "target_id": "b9586e31-c867-46f9-8d64-be8ccda7afa9"
     },
     {
-      "source_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
-      "target_id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5",
       "relation": "supplies",
       "reason": "国电南瑞生产机器人",
-      "timestamp": "2026-03-16T19:35:12.905825"
+      "timestamp": "2026-03-16T19:35:12.905825",
+      "source_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
+      "target_id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5"
     },
     {
-      "source_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
-      "target_id": "2615eb8e-e008-444f-bc9f-da0cc73c8c5b",
       "relation": "supplies",
       "reason": "国电南瑞生产无人机",
-      "timestamp": "2026-03-16T19:35:12.905890"
+      "timestamp": "2026-03-16T19:35:12.905890",
+      "source_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
+      "target_id": "2615eb8e-e008-444f-bc9f-da0cc73c8c5b"
     },
     {
       "relation": "belongs_to",
@@ -300,6 +300,13 @@
       "target_id": "3179130f-c22b-48f0-832b-28b2668e288a"
     },
     {
+      "source_id": "6df1ebfc-e787-4fbb-b516-78fedf50d967",
+      "target_id": "d99d9619-6385-41af-8a11-927efade46ca",
+      "relation": "supplies",
+      "reason": "宁德时代生产动力电池",
+      "timestamp": "2026-03-16T20:33:58.098663"
+    },
+    {
       "relation": "belongs_to",
       "reason": "贵州茅台属于酿酒行业行业",
       "timestamp": "2026-03-16T19:28:32.138769",
@@ -307,109 +314,109 @@
       "target_id": "339a6d46-e12d-43fa-9c05-d6491f0086f7"
     },
     {
-      "source_id": "d8a45109-ceea-4cb9-8aad-77a826b835a7",
-      "target_id": "f165a0be-62c8-4697-87af-94dfb0502ae1",
       "relation": "belongs_to",
       "reason": "豫能控股属于电力行业行业",
-      "timestamp": "2026-03-16T19:35:12.904616"
+      "timestamp": "2026-03-16T19:35:12.904616",
+      "source_id": "d8a45109-ceea-4cb9-8aad-77a826b835a7",
+      "target_id": "f165a0be-62c8-4697-87af-94dfb0502ae1"
     },
     {
-      "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
-      "target_id": "15150ef1-7265-484b-bc7f-acf750726155",
       "relation": "belongs_to",
       "reason": "中泰化学属于化学原料行业",
-      "timestamp": "2026-03-16T19:35:12.904822"
+      "timestamp": "2026-03-16T19:35:12.904822",
+      "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
+      "target_id": "15150ef1-7265-484b-bc7f-acf750726155"
     },
     {
-      "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
-      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
       "relation": "consumes",
       "reason": "中泰化学使用石油",
-      "timestamp": "2026-03-16T19:35:12.904987"
+      "timestamp": "2026-03-16T19:35:12.904987",
+      "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
-      "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
-      "target_id": "845b4dfd-f9b3-4422-a476-686f9809322b",
       "relation": "consumes",
       "reason": "中泰化学使用煤炭",
-      "timestamp": "2026-03-16T19:35:12.905068"
+      "timestamp": "2026-03-16T19:35:12.905068",
+      "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
+      "target_id": "845b4dfd-f9b3-4422-a476-686f9809322b"
     },
     {
-      "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
-      "target_id": "1e3226d9-2be7-40e9-b945-ba62201b81ec",
       "relation": "consumes",
       "reason": "中泰化学使用锰",
-      "timestamp": "2026-03-16T19:35:12.905140"
+      "timestamp": "2026-03-16T19:35:12.905140",
+      "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
+      "target_id": "1e3226d9-2be7-40e9-b945-ba62201b81ec"
     },
     {
-      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
-      "target_id": "c5038974-b5a8-4a11-9351-845b173dd97b",
       "relation": "belongs_to",
       "reason": "雄韬股份属于电池行业",
-      "timestamp": "2026-03-16T19:35:12.905221"
+      "timestamp": "2026-03-16T19:35:12.905221",
+      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
+      "target_id": "c5038974-b5a8-4a11-9351-845b173dd97b"
     },
     {
-      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
-      "target_id": "8480f145-b8e2-4d2f-b1b4-ed21954c34e0",
       "relation": "consumes",
       "reason": "雄韬股份使用锂",
-      "timestamp": "2026-03-16T19:35:12.905324"
+      "timestamp": "2026-03-16T19:35:12.905324",
+      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
+      "target_id": "8480f145-b8e2-4d2f-b1b4-ed21954c34e0"
     },
     {
-      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
-      "target_id": "b3824adb-71ab-4101-a360-4d1a5aeef0b7",
       "relation": "consumes",
       "reason": "雄韬股份使用锌",
-      "timestamp": "2026-03-16T19:35:12.905396"
+      "timestamp": "2026-03-16T19:35:12.905396",
+      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
+      "target_id": "b3824adb-71ab-4101-a360-4d1a5aeef0b7"
     },
     {
-      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
-      "target_id": "951d6bbe-9130-435b-878b-a61faecc5e14",
       "relation": "supplies",
       "reason": "雄韬股份生产电池",
-      "timestamp": "2026-03-16T19:35:12.905428"
+      "timestamp": "2026-03-16T19:35:12.905428",
+      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
+      "target_id": "951d6bbe-9130-435b-878b-a61faecc5e14"
     },
     {
-      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
-      "target_id": "d99d9619-6385-41af-8a11-927efade46ca",
       "relation": "supplies",
       "reason": "雄韬股份生产动力电池",
-      "timestamp": "2026-03-16T19:35:12.905494"
+      "timestamp": "2026-03-16T19:35:12.905494",
+      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
+      "target_id": "d99d9619-6385-41af-8a11-927efade46ca"
     },
     {
-      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
-      "target_id": "3179130f-c22b-48f0-832b-28b2668e288a",
       "relation": "supplies",
       "reason": "雄韬股份生产储能",
-      "timestamp": "2026-03-16T19:35:12.905526"
+      "timestamp": "2026-03-16T19:35:12.905526",
+      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
+      "target_id": "3179130f-c22b-48f0-832b-28b2668e288a"
     },
     {
-      "source_id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7",
-      "target_id": "012015b4-5053-48ba-9122-9c150328395f",
       "relation": "belongs_to",
       "reason": "厦门钨业属于小金属行业",
-      "timestamp": "2026-03-16T19:35:12.905998"
+      "timestamp": "2026-03-16T19:35:12.905998",
+      "source_id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7",
+      "target_id": "012015b4-5053-48ba-9122-9c150328395f"
     },
     {
-      "source_id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7",
-      "target_id": "0df250c0-5398-4dc5-9046-0b13559d09de",
       "relation": "consumes",
       "reason": "厦门钨业使用稀土",
-      "timestamp": "2026-03-16T19:35:12.906145"
+      "timestamp": "2026-03-16T19:35:12.906145",
+      "source_id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7",
+      "target_id": "0df250c0-5398-4dc5-9046-0b13559d09de"
     },
     {
-      "source_id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7",
-      "target_id": "3179130f-c22b-48f0-832b-28b2668e288a",
       "relation": "supplies",
       "reason": "厦门钨业生产储能",
-      "timestamp": "2026-03-16T19:35:12.906177"
+      "timestamp": "2026-03-16T19:35:12.906177",
+      "source_id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7",
+      "target_id": "3179130f-c22b-48f0-832b-28b2668e288a"
     },
     {
-      "source_id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7",
-      "target_id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5",
       "relation": "supplies",
       "reason": "厦门钨业生产机器人",
-      "timestamp": "2026-03-16T19:35:12.906219"
+      "timestamp": "2026-03-16T19:35:12.906219",
+      "source_id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7",
+      "target_id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5"
     }
   ]
 }

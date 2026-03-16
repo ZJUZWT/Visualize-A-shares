@@ -2,11 +2,38 @@
 
 import { useState } from "react";
 import type { ThinkingItem } from "@/types/expert";
-import { ChevronRight, Network, Wrench, CheckCircle2, Sparkles, Users } from "lucide-react";
+import { ChevronRight, ChevronDown, Network, Wrench, CheckCircle2, Sparkles, Users } from "lucide-react";
 
 interface ThinkingPanelProps {
   thinking: ThinkingItem[];
   color?: string;
+}
+
+/** 可折叠的专家回复详情 */
+function ExpertReplyDetail({ content, label }: { content: string; label: string }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!content) return null;
+
+  return (
+    <div className="mt-1.5">
+      <button
+        onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+        className="flex items-center gap-1 text-[10px] text-[var(--accent)] hover:text-[var(--text-secondary)] transition-colors"
+      >
+        {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+        <span>{expanded ? "收起" : "查看"}{label}完整回复</span>
+      </button>
+      {expanded && (
+        <div
+          className="mt-1 p-2 rounded-lg bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)]
+                      leading-relaxed max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words
+                      border border-[var(--border)]"
+        >
+          {content}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ThinkingPanel({ thinking, color = "var(--accent)" }: ThinkingPanelProps) {
@@ -42,7 +69,7 @@ export function ThinkingPanel({ thinking, color = "var(--accent)" }: ThinkingPan
                   <Network size={13} className="shrink-0 mt-0.5" style={{ color }} />
                   <div>
                     <span className="font-medium text-[var(--text-secondary)]">图谱召回</span>
-                    {item.nodes.length === 0 ? (
+                    {!item.nodes || item.nodes.length === 0 ? (
                       <span className="text-[var(--text-tertiary)] ml-1">无相关节点</span>
                     ) : (
                       <div className="flex flex-wrap gap-1 mt-1">
@@ -95,15 +122,24 @@ export function ThinkingPanel({ thinking, color = "var(--accent)" }: ThinkingPan
             if (item.type === "tool_result") {
               const isExpert = item.data.engine === "expert";
               return (
-                <div key={i} className="px-3 py-2 flex gap-2">
-                  <CheckCircle2 size={13} className={isExpert ? "text-pink-500 shrink-0 mt-0.5" : "text-emerald-500 shrink-0 mt-0.5"} />
-                  <div>
-                    <span className="font-medium text-[var(--text-secondary)]">
-                      {isExpert ? (item.data.label || "专家已回复") : "返回结果"}
-                    </span>
-                    <p className="mt-0.5 text-[var(--text-tertiary)] leading-relaxed line-clamp-2">
-                      {item.data.summary}
-                    </p>
+                <div key={i} className="px-3 py-2">
+                  <div className="flex gap-2">
+                    <CheckCircle2 size={13} className={isExpert ? "text-pink-500 shrink-0 mt-0.5" : "text-emerald-500 shrink-0 mt-0.5"} />
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium text-[var(--text-secondary)]">
+                        {isExpert ? (item.data.label || "专家已回复") : "返回结果"}
+                      </span>
+                      <p className="mt-0.5 text-[var(--text-tertiary)] leading-relaxed line-clamp-2">
+                        {item.data.summary}
+                      </p>
+                      {/* 专家回复可折叠详情 */}
+                      {isExpert && item.data.content && (
+                        <ExpertReplyDetail
+                          content={item.data.content}
+                          label={item.data.label || "专家"}
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
               );
