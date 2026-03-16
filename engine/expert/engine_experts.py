@@ -110,7 +110,7 @@ class EngineExpert:
         self.profile = EXPERT_PROFILES[expert_type]
         self._llm = llm_provider
 
-    async def chat(self, message: str) -> AsyncGenerator[dict, None]:
+    async def chat(self, message: str, history: list[dict] | None = None) -> AsyncGenerator[dict, None]:
         """流式对话，yield SSE 事件"""
         if not self._llm:
             yield {"event": "error", "data": {"message": "LLM 未配置"}}
@@ -125,22 +125,25 @@ class EngineExpert:
         # 2. 执行工具调用
         tool_results = []
         for tc in tool_calls:
+            if not isinstance(tc, dict):
+                logger.warning(f"跳过非dict工具调用: {type(tc)}")
+                continue
             yield {"event": "tool_call", "data": {
                 "engine": tc.get("engine", self.expert_type),
-                "action": tc["action"],
+                "action": tc.get("action", "unknown"),
                 "params": tc.get("params", {}),
             }}
             result = await self._execute_tool(tc)
             tool_results.append(result)
             yield {"event": "tool_result", "data": {
                 "engine": tc.get("engine", self.expert_type),
-                "action": tc["action"],
+                "action": tc.get("action", "unknown"),
                 "summary": result[:200] if result else "无结果",
             }}
 
         # 3. 流式生成回复
         full_text = ""
-        async for token, accumulated in self._reply_stream(message, tool_results):
+        async for token, accumulated in self._reply_stream(message, tool_results, history=history):
             full_text = accumulated
             yield {"event": "reply_token", "data": {"token": token}}
 
@@ -183,8 +186,11 @@ class EngineExpert:
                 logger.warning("工具规划 LLM 返回空内容，跳过工具调用")
                 return {"tool_calls": []}
 
-            # 剥离 <think>...</think> 标签
+            # 剥离各种可能的标签
             text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+            text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
+            text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL).strip()
+            text = re.sub(r"<tool_code>.*?</tool_code>", "", text, flags=re.DOTALL).strip()
 
             # 提取 JSON（处理 markdown 代码块）
             if "```" in text:
@@ -230,7 +236,16 @@ class EngineExpert:
 
         de = get_data_engine()
 
-        if action == "query_market_overview":
+        if action == "get_current_date":
+            now = datetime.datetime.now()
+            return json.dumps({
+                "date": now.strftime("%Y-%m-%d"),
+                "time": now.strftime("%H:%M:%S"),
+                "weekday": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()],
+                "is_trading_day": now.weekday() < 5,  # 简化判断：工作日
+            }, ensure_ascii=False)
+
+        elif action == "query_market_overview":
             snap = de.get_snapshot()
             if snap is None or snap.empty:
                 return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
@@ -268,7 +283,7 @@ class EngineExpert:
 
         elif action == "query_history":
             code = params.get("code", "")
-            days = params.get("days", 60)
+            days = int(params.get("days", 60))
             end = datetime.date.today().strftime("%Y-%m-%d")
             start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
             df = await asyncio.to_thread(de.get_daily_history, code, start, end)
@@ -465,9 +480,10 @@ class EngineExpert:
         return f"未知 industry 工具: {action}"
 
     async def _reply_stream(
-        self, message: str, tool_results: list[str]
+        self, message: str, tool_results: list[str],
+        history: list[dict] | None = None,
     ) -> AsyncGenerator[tuple[str, str], None]:
-        """流式生成回复（自动过滤 <think> 标签内容）"""
+        """流式生成回复（自动过滤 <think> / <minimax:*> 标签内容）"""
         from llm.providers import ChatMessage
 
         context_parts = []
@@ -478,43 +494,78 @@ class EngineExpert:
         if context_parts:
             system += "\n\n" + "\n\n".join(context_parts)
 
+        # 构建消息列表（含对话历史）
+        messages = [ChatMessage("system", system)]
+        for h in (history or []):
+            role = "assistant" if h["role"] == "expert" else h["role"]
+            content = h.get("content", "")
+            if len(content) > 500:
+                content = content[:500] + "..."
+            messages.append(ChatMessage(role, content))
+        messages.append(ChatMessage("user", message))
+
         accumulated = ""
-        in_think = False
+        in_skip = False          # 跳过区域
+        skip_end_tag = ""        # 当前跳过区域的结束标签
         raw_buffer = ""
 
+        # 需要过滤的标签及其结束标签
+        SKIP_TAGS = {
+            "<think>": "</think>",
+            "<minimax:tool_call>": "</minimax:tool_call>",
+            "<minimax:search_result>": "</minimax:search_result>",
+            "<tool_call>": "</tool_call>",
+            "<tool_code>": "</tool_code>",
+        }
+
         try:
-            async for token in self._llm.chat_stream([
-                ChatMessage("system", system),
-                ChatMessage("user", message),
-            ]):
+            skip_bytes = 0  # skip 区域累积字节数
+
+            async for token in self._llm.chat_stream(messages):
                 raw_buffer += token
 
-                # 检测 <think> 标签开始
-                if not in_think and "<think>" in raw_buffer:
-                    before = raw_buffer.split("<think>", 1)[0]
-                    if before:
-                        accumulated += before
-                        yield before, accumulated
-                    in_think = True
-                    raw_buffer = raw_buffer.split("<think>", 1)[1]
-                    continue
+                # 检测进入跳过区域
+                if not in_skip:
+                    for start_tag, end_tag in SKIP_TAGS.items():
+                        if start_tag in raw_buffer:
+                            before = raw_buffer.split(start_tag, 1)[0]
+                            if before:
+                                accumulated += before
+                                yield before, accumulated
+                            in_skip = True
+                            skip_end_tag = end_tag
+                            skip_bytes = 0
+                            raw_buffer = raw_buffer.split(start_tag, 1)[1]
+                            break
+                    if in_skip:
+                        continue
 
-                # 检测 </think> 标签结束
-                if in_think and "</think>" in raw_buffer:
-                    in_think = False
-                    remaining = raw_buffer.split("</think>", 1)[1]
+                # 检测离开跳过区域
+                if in_skip and skip_end_tag in raw_buffer:
+                    in_skip = False
+                    remaining = raw_buffer.split(skip_end_tag, 1)[1]
                     raw_buffer = remaining.lstrip("\n")
+                    skip_end_tag = ""
+                    skip_bytes = 0
                     continue
 
-                # 在 <think> 块内：丢弃内容，但防止缓冲区无限增长
-                if in_think:
-                    if len(raw_buffer) > 200:
+                # 在跳过块内：丢弃内容，但防止缓冲区无限增长
+                if in_skip:
+                    skip_bytes += len(token)
+                    # 保护：如果 skip 区域累积超过 2000 字节还未关闭，强制退出
+                    if skip_bytes > 2000:
+                        logger.warning(f"skip 区域未关闭(>{skip_bytes}B)，强制退出: {skip_end_tag}")
+                        in_skip = False
+                        raw_buffer = ""
+                        skip_end_tag = ""
+                        skip_bytes = 0
+                    elif len(raw_buffer) > 200:
                         raw_buffer = raw_buffer[-20:]
                     continue
 
-                # 正常正文：检查是否可能是不完整的 <think> 标签
+                # 正常正文：检查是否可能是不完整的标签
                 if "<" in raw_buffer and not raw_buffer.endswith(">"):
-                    if len(raw_buffer) < 10:
+                    if len(raw_buffer) < 30:
                         continue
 
                 # 推送正文 token
@@ -524,7 +575,7 @@ class EngineExpert:
                     raw_buffer = ""
 
             # 处理残余缓冲区
-            if raw_buffer and not in_think:
+            if raw_buffer and not in_skip:
                 accumulated += raw_buffer
                 yield raw_buffer, accumulated
 
@@ -535,7 +586,8 @@ class EngineExpert:
     def _get_available_tools_desc(self) -> str:
         """获取当前引擎可用工具的描述"""
         TOOLS_DESC = {
-            "data": """- query_market_overview(): 全市场概览快照
+            "data": """- get_current_date(): 获取当前日期、时间、星期几、是否交易日
+- query_market_overview(): 全市场概览快照
 - search_stocks(query: str): 股票搜索（模糊匹配代码或名称）
 - query_stock(code: str): 单股全维度分析，code 示例: '000001'
 - query_cluster(cluster_id: int): 查询指定聚类信息

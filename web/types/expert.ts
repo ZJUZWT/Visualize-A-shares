@@ -64,6 +64,16 @@ export interface ExpertMessage {
 
 export type ExpertStatus = "idle" | "thinking" | "error";
 
+/** 对话 Session */
+export interface Session {
+  id: string;
+  expert_type: ExpertType;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
 /** 硬编码的专家默认配置（API 不可用时的 fallback） */
 export const DEFAULT_EXPERT_PROFILES: ExpertProfile[] = [
   {

@@ -1,4 +1,4 @@
-"""投资专家 Agent 路由 — 多专家统一入口"""
+"""投资专家 Agent 路由 — 多专家统一入口 + Session 管理"""
 
 import json
 import uuid
@@ -6,14 +6,14 @@ from datetime import datetime
 from pathlib import Path
 
 import duckdb
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from config import settings, DB_PATH, DATA_DIR
 from expert.agent import ExpertAgent
 from expert.engine_experts import EngineExpert, ExpertType, get_expert_profiles
-from expert.schemas import ExpertChatRequest
+from expert.schemas import ExpertChatRequest, SessionCreateRequest
 from expert.tools import ExpertTools
 from llm.config import llm_settings
 from llm.providers import LLMProviderFactory
@@ -27,6 +27,9 @@ _engine_experts: dict[str, EngineExpert] = {}
 # 专家对话历史使用独立数据库，避免与 stockterrain.duckdb 的 WAL 冲突
 EXPERT_DB_PATH = DATA_DIR / "expert_chat.duckdb"
 
+# 最近 N 轮对话注入 LLM 上下文
+MAX_CONTEXT_TURNS = 10
+
 
 def _get_db():
     return duckdb.connect(str(EXPERT_DB_PATH))
@@ -38,10 +41,36 @@ async def _init_db():
     try:
         con = _get_db()
         con.execute("CREATE SCHEMA IF NOT EXISTS expert")
+
+        # Session 表
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS expert.sessions (
+                id VARCHAR PRIMARY KEY,
+                expert_type VARCHAR NOT NULL DEFAULT 'rag',
+                title VARCHAR NOT NULL DEFAULT '新对话',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # 对话消息表（每条消息一行，替代旧的 conversation_log）
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS expert.messages (
+                id VARCHAR PRIMARY KEY,
+                session_id VARCHAR NOT NULL,
+                role VARCHAR NOT NULL,
+                content VARCHAR NOT NULL DEFAULT '',
+                thinking JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # 保留旧表兼容
         con.execute("""
             CREATE TABLE IF NOT EXISTS expert.conversation_log (
                 id VARCHAR PRIMARY KEY,
                 expert_type VARCHAR DEFAULT 'rag',
+                session_id VARCHAR,
                 user_message VARCHAR,
                 expert_reply VARCHAR,
                 belief_changes JSON,
@@ -49,7 +78,7 @@ async def _init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        logger.info("expert.conversation_log 表初始化完成")
+        logger.info("expert.sessions + expert.messages 表初始化完成")
     except Exception as e:
         logger.error(f"expert DB 初始化失败: {e}")
     finally:
@@ -103,7 +132,200 @@ def get_expert_agent() -> ExpertAgent:
     return _expert_agent
 
 
-# ── 多专家统一入口 ──────────────────────────────────────
+# ══════════════════════════════════════════════════════════
+# Session CRUD
+# ══════════════════════════════════════════════════════════
+
+
+@router.get("/sessions")
+async def list_sessions(expert_type: str = Query(default=None)):
+    """列出所有 session（可按 expert_type 过滤）"""
+    con = None
+    try:
+        con = _get_db()
+        if expert_type:
+            rows = con.execute(
+                "SELECT s.id, s.expert_type, s.title, s.created_at, s.updated_at, "
+                "(SELECT COUNT(*) FROM expert.messages m WHERE m.session_id = s.id) as msg_count "
+                "FROM expert.sessions s WHERE s.expert_type = ? ORDER BY s.updated_at DESC",
+                [expert_type],
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT s.id, s.expert_type, s.title, s.created_at, s.updated_at, "
+                "(SELECT COUNT(*) FROM expert.messages m WHERE m.session_id = s.id) as msg_count "
+                "FROM expert.sessions s ORDER BY s.updated_at DESC",
+            ).fetchall()
+        return [
+            {"id": r[0], "expert_type": r[1], "title": r[2],
+             "created_at": str(r[3]), "updated_at": str(r[4]), "message_count": r[5]}
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error(f"获取 session 列表失败: {e}")
+        return []
+    finally:
+        if con:
+            con.close()
+
+
+@router.post("/sessions")
+async def create_session(req: SessionCreateRequest):
+    """创建新 session（接收 JSON body: {expert_type, title}）"""
+    con = None
+    sid = str(uuid.uuid4())
+    expert_type = req.expert_type
+    title = req.title
+    try:
+        con = _get_db()
+        now = datetime.now()
+        con.execute(
+            "INSERT INTO expert.sessions (id, expert_type, title, created_at, updated_at) VALUES (?,?,?,?,?)",
+            [sid, expert_type, title, now, now],
+        )
+        return {"id": sid, "expert_type": expert_type, "title": title,
+                "created_at": now.isoformat(), "updated_at": now.isoformat(), "message_count": 0}
+    except Exception as e:
+        logger.error(f"创建 session 失败: {e}")
+        return {"error": str(e)}
+    finally:
+        if con:
+            con.close()
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """删除 session 及其所有消息"""
+    con = None
+    try:
+        con = _get_db()
+        con.execute("DELETE FROM expert.messages WHERE session_id = ?", [session_id])
+        con.execute("DELETE FROM expert.sessions WHERE id = ?", [session_id])
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"删除 session 失败: {e}")
+        return {"error": str(e)}
+    finally:
+        if con:
+            con.close()
+
+
+@router.patch("/sessions/{session_id}")
+async def update_session_title(session_id: str, title: str = ""):
+    """更新 session 标题"""
+    con = None
+    try:
+        con = _get_db()
+        con.execute(
+            "UPDATE expert.sessions SET title = ?, updated_at = ? WHERE id = ?",
+            [title, datetime.now(), session_id],
+        )
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"更新 session 失败: {e}")
+        return {"error": str(e)}
+    finally:
+        if con:
+            con.close()
+
+
+@router.get("/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    """获取指定 session 的所有消息（按时间正序）"""
+    con = None
+    try:
+        con = _get_db()
+        rows = con.execute(
+            "SELECT id, role, content, thinking, created_at "
+            "FROM expert.messages WHERE session_id = ? ORDER BY created_at ASC",
+            [session_id],
+        ).fetchall()
+        return [
+            {"id": r[0], "role": r[1], "content": r[2],
+             "thinking": json.loads(r[3]) if r[3] else [],
+             "created_at": str(r[4])}
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error(f"获取 session 消息失败: {e}")
+        return []
+    finally:
+        if con:
+            con.close()
+
+
+def _get_session_history(session_id: str, limit: int = MAX_CONTEXT_TURNS) -> list[dict]:
+    """获取指定 session 的最近 N 轮对话（用于注入 LLM 上下文）"""
+    if not session_id:
+        return []
+    con = None
+    try:
+        con = _get_db()
+        rows = con.execute(
+            "SELECT role, content FROM expert.messages "
+            "WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+            [session_id, limit * 2],  # user+expert 各一条 = 1轮
+        ).fetchall()
+        # 逆序回来（最旧在前）
+        return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+    except Exception as e:
+        logger.debug(f"获取 session 历史失败: {e}")
+        return []
+    finally:
+        if con:
+            con.close()
+
+
+def _save_message(session_id: str, role: str, content: str, thinking: list | None = None):
+    """将消息写入 messages 表"""
+    if not session_id:
+        return
+    con = None
+    try:
+        con = _get_db()
+        con.execute(
+            "INSERT INTO expert.messages (id, session_id, role, content, thinking, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            [str(uuid.uuid4()), session_id, role, content,
+             json.dumps(thinking or [], ensure_ascii=False), datetime.now()],
+        )
+        con.execute(
+            "UPDATE expert.sessions SET updated_at = ? WHERE id = ?",
+            [datetime.now(), session_id],
+        )
+    except Exception as e:
+        logger.warning(f"消息写入失败: {e}")
+    finally:
+        if con:
+            con.close()
+
+
+def _auto_title(session_id: str, user_message: str):
+    """首条消息时自动设置 session 标题（取前 30 字）"""
+    con = None
+    try:
+        con = _get_db()
+        count = con.execute(
+            "SELECT COUNT(*) FROM expert.messages WHERE session_id = ?", [session_id]
+        ).fetchone()[0]
+        if count <= 2:  # 刚存入 user + expert 两条
+            title = user_message[:30].replace("\n", " ").strip()
+            if len(user_message) > 30:
+                title += "..."
+            con.execute(
+                "UPDATE expert.sessions SET title = ? WHERE id = ?",
+                [title, session_id],
+            )
+    except Exception:
+        pass
+    finally:
+        if con:
+            con.close()
+
+
+# ══════════════════════════════════════════════════════════
+# 多专家统一入口
+# ══════════════════════════════════════════════════════════
 
 
 @router.get("/profiles")
@@ -117,7 +339,7 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
     """与指定类型的专家对话（SSE 流式）"""
     if expert_type == "rag":
         return await _rag_chat(req)
-    
+
     expert = _engine_experts.get(expert_type)
     if not expert:
         return StreamingResponse(
@@ -125,11 +347,15 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
             media_type="text/event-stream",
         )
 
+    # 确保有 session
+    session_id = req.session_id or ""
+    history = _get_session_history(session_id) if session_id else []
+
     async def event_stream():
         full_reply = ""
         tools_used = []
         try:
-            async for event in expert.chat(req.message):
+            async for event in expert.chat(req.message, history=history):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":
                     full_reply = event["data"].get("full_text", "")
@@ -141,8 +367,11 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
-        # 写入 DuckDB 对话历史
-        _save_conversation(expert_type, req.message, full_reply, [], tools_used)
+        # 存入 session 消息
+        if session_id:
+            _save_message(session_id, "user", req.message)
+            _save_message(session_id, "expert", full_reply)
+            _auto_title(session_id, req.message)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -156,68 +385,46 @@ async def expert_chat(req: ExpertChatRequest):
 async def _rag_chat(req: ExpertChatRequest):
     """RAG 专家对话"""
     agent = get_expert_agent()
+    session_id = req.session_id or ""
+    history = _get_session_history(session_id) if session_id else []
 
     async def event_stream():
         full_reply = ""
         belief_changes = []
         tools_used = []
+        thinking_items = []
         try:
-            async for event in agent.chat(req.message):
+            async for event in agent.chat(req.message, history=history):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":
                     full_reply = event["data"].get("full_text", "")
                 elif evt_type == "tool_call":
                     tools_used.append(event["data"].get("action", ""))
+                    thinking_items.append({"type": "tool_call", "data": event["data"]})
+                elif evt_type == "tool_result":
+                    thinking_items.append({"type": "tool_result", "data": event["data"]})
                 elif evt_type == "belief_updated":
                     belief_changes.append(event["data"])
+                    thinking_items.append({"type": "belief_updated", "data": event["data"]})
+                elif evt_type == "graph_recall":
+                    thinking_items.append({"type": "graph_recall", "data": event["data"]})
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"expert chat 错误: {e}")
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
-        _save_conversation("rag", req.message, full_reply, belief_changes, tools_used)
+        # 存入 session 消息
+        if session_id:
+            _save_message(session_id, "user", req.message)
+            _save_message(session_id, "expert", full_reply, thinking_items)
+            _auto_title(session_id, req.message)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 async def _error_stream(message: str):
     yield f"event: error\ndata: {json.dumps({'message': message}, ensure_ascii=False)}\n\n"
-
-
-def _save_conversation(
-    expert_type: str, user_message: str, expert_reply: str,
-    belief_changes: list, tools_used: list,
-):
-    """写入 DuckDB 对话历史"""
-    con = None
-    try:
-        con = _get_db()
-        # 兼容旧表：如果 expert_type 列不存在则添加
-        try:
-            con.execute("ALTER TABLE expert.conversation_log ADD COLUMN expert_type VARCHAR DEFAULT 'rag'")
-            logger.info("迁移: expert.conversation_log 添加 expert_type 列")
-        except Exception:
-            pass  # 列已存在
-        con.execute(
-            """INSERT INTO expert.conversation_log
-               (id, expert_type, user_message, expert_reply, belief_changes, tools_used, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            [
-                str(uuid.uuid4()),
-                expert_type,
-                user_message,
-                expert_reply,
-                json.dumps(belief_changes, ensure_ascii=False),
-                json.dumps(tools_used, ensure_ascii=False),
-                datetime.now(),
-            ],
-        )
-    except Exception as e:
-        logger.warning(f"对话历史写入失败: {e}")
-    finally:
-        if con:
-            con.close()
 
 
 @router.get("/graph")
@@ -243,7 +450,7 @@ async def get_stances():
 
 @router.get("/history")
 async def get_history(limit: int = 20):
-    """返回对话历史（从 DuckDB 按时间倒序）"""
+    """返回对话历史（兼容旧接口）"""
     con = None
     try:
         con = _get_db()
@@ -253,14 +460,8 @@ async def get_history(limit: int = 20):
             [limit],
         ).fetchall()
         return [
-            {
-                "id": r[0],
-                "user_message": r[1],
-                "expert_reply": r[2],
-                "belief_changes": r[3],
-                "tools_used": r[4],
-                "created_at": str(r[5]),
-            }
+            {"id": r[0], "user_message": r[1], "expert_reply": r[2],
+             "belief_changes": r[3], "tools_used": r[4], "created_at": str(r[5])}
             for r in rows
         ]
     except Exception as e:
