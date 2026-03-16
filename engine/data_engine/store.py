@@ -162,29 +162,33 @@ class DuckDBStore:
             )
         """)
 
+        self._conn.execute("CREATE SEQUENCE IF NOT EXISTS info.announcements_id_seq START 1")
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS info.announcements (
-                id              INTEGER PRIMARY KEY,
+                id              INTEGER PRIMARY KEY DEFAULT nextval('info.announcements_id_seq'),
                 code            VARCHAR NOT NULL,
                 title           VARCHAR NOT NULL,
                 type            VARCHAR,
                 date            VARCHAR,
                 url             VARCHAR,
                 sentiment       VARCHAR,
-                analyzed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                analyzed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(code, title)
             )
         """)
 
+        self._conn.execute("CREATE SEQUENCE IF NOT EXISTS info.event_impacts_id_seq START 1")
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS info.event_impacts (
-                id              INTEGER PRIMARY KEY,
+                id              INTEGER PRIMARY KEY DEFAULT nextval('info.event_impacts_id_seq'),
                 code            VARCHAR NOT NULL,
                 event_desc      VARCHAR NOT NULL,
                 impact          VARCHAR,
                 magnitude       VARCHAR,
                 reasoning       VARCHAR,
                 affected_factors VARCHAR,
-                assessed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                assessed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(code, event_desc)
             )
         """)
 
@@ -237,6 +241,9 @@ class DuckDBStore:
         # ─── 迁移：为已有表添加新列 ────────────────────
         self._migrate_add_column("stock_snapshot", "wb_ratio", "DOUBLE DEFAULT 0")
 
+        # ─── 迁移：info 表添加 UNIQUE 约束（DuckDB 不支持 ALTER ADD CONSTRAINT，需重建）
+        self._migrate_info_tables_unique()
+
     def _migrate_add_column(self, table: str, column: str, col_type: str):
         """安全地给已有表添加新列（如果不存在的话）"""
         try:
@@ -249,6 +256,27 @@ class DuckDBStore:
                 logger.info(f"迁移: {table} 新增列 {column}")
         except Exception as e:
             logger.warning(f"迁移 {table}.{column} 失败(非致命): {e}")
+
+    def _migrate_info_tables_unique(self):
+        """迁移 info 缓存表：添加 UNIQUE 约束和自增 ID（DuckDB 不支持 ALTER ADD CONSTRAINT，需重建）"""
+        for table, unique_cols in [
+            ("announcements", "code, title"),
+            ("event_impacts", "code, event_desc"),
+        ]:
+            try:
+                # 检查是否已有 UNIQUE 约束
+                constraints = self._conn.execute(
+                    f"SELECT constraint_type FROM duckdb_constraints() "
+                    f"WHERE table_name='{table}' AND constraint_type='UNIQUE'"
+                ).fetchall()
+                if constraints:
+                    continue  # 已有 UNIQUE 约束，跳过
+
+                # 缓存表数据可丢弃，直接重建
+                self._conn.execute(f"DROP TABLE IF EXISTS info.{table}")
+                logger.info(f"迁移: 重建 info.{table}（添加 UNIQUE({unique_cols})）")
+            except Exception as e:
+                logger.warning(f"迁移 info.{table} UNIQUE 约束失败(非致命): {e}")
 
     def save_snapshot(self, df: pd.DataFrame):
         """保存实时行情快照（UPSERT）并同时存入每日历史"""

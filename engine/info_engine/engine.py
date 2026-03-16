@@ -176,9 +176,10 @@ class InfoEngine:
         for a in articles:
             try:
                 self._store._conn.execute(
-                    "INSERT OR IGNORE INTO info.news_articles "
+                    "INSERT INTO info.news_articles "
                     "(code, title, content, source, publish_time, url, sentiment, sentiment_score) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(code, title) DO NOTHING",
                     [code, a.title, a.content, a.source, a.publish_time,
                      a.url, a.sentiment, a.sentiment_score],
                 )
@@ -209,9 +210,10 @@ class InfoEngine:
         for a in announcements:
             try:
                 self._store._conn.execute(
-                    "INSERT OR IGNORE INTO info.announcements "
+                    "INSERT INTO info.announcements "
                     "(code, title, type, date, url, sentiment) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(code, title) DO NOTHING",
                     [code, a.title, a.type, a.date, a.url, a.sentiment],
                 )
             except Exception as e:
@@ -239,9 +241,10 @@ class InfoEngine:
     def _cache_event_impact(self, code: str, impact: EventImpact):
         try:
             self._store._conn.execute(
-                "INSERT OR IGNORE INTO info.event_impacts "
+                "INSERT INTO info.event_impacts "
                 "(code, event_desc, impact, magnitude, reasoning, affected_factors) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(code, event_desc) DO NOTHING",
                 [code, impact.event_desc, impact.impact, impact.magnitude,
                  impact.reasoning, json.dumps(impact.affected_factors, ensure_ascii=False)],
             )
