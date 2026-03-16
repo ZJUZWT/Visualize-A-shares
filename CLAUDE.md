@@ -46,6 +46,36 @@ python3 -m venv .venv
 - MCP Server 通过 REST API 与后端通信，后端未启动时会降级为 DuckDB 离线快照（数据非实时）
 - `.mcp.json` 使用相对路径，clone 后可直接使用
 
+## 流式优先 & 超时策略（核心架构原则）
+
+本项目是一个**全链路流式系统**。LLM Provider 层已完整支持 `chat()` (非流式) 和 `chat_stream()` (流式) 两种接口。
+
+### 原则
+1. **所有 LLM 调用优先使用 `chat_stream()`**，即使不需要逐 token 推送到前端，也应使用流式收集模式（`async for token in llm.chat_stream(...)`），这样只要后端还在产出 token，链路就保持活跃。
+2. **timeout 只用于检测"链路已死"**——即连续 N 秒没有收到任何新 token，说明上游已经卡死或断开。**绝不用 timeout 限制正常工作时间**。数据量大、prompt 长导致响应慢是正常的，不应因此被超时截断。
+3. **心跳超时（token-level timeout）代替总超时（wall-clock timeout）**：
+   - ✅ 正确做法：每收到一个 token 重置计时器，连续 30s 无 token → 判定死连接
+   - ❌ 错误做法：`asyncio.wait_for(llm.chat(...), timeout=30)` — 这会在 30s 后无论是否还在工作都强制中断
+4. **数据越大辩论越好**——不应因为数据量大就放弃请求，大数据量恰恰能让辩论质量更高。
+
+### 标准模式
+```python
+# 流式收集（不推送 token 到前端，但保持链路活跃）
+chunks: list[str] = []
+async for token in llm.chat_stream([ChatMessage(role="user", content=prompt)]):
+    chunks.append(token)
+raw = "".join(chunks)
+
+# 流式推送（逐 token 推送 SSE 事件到前端）
+async for token in llm.chat_stream(messages):
+    buffer += token
+    yield sse("debate_token", {"role": role, "token": token})
+```
+
+### 仅在以下场景使用 `llm.chat()` + 固定超时
+- 辅助性的极短 LLM 调用（如提取 JSON 字段），且失败有 fallback 兜底
+- 即便如此，也应记录清晰的日志区分超时 vs 其他错误
+
 ## 自验证闭环
 Claude 具备通过 MCP 工具完成开发→验证闭环的能力，修改代码后应主动验证：
 1. 启动后端: `cd engine && python3 main.py` (后台运行)
