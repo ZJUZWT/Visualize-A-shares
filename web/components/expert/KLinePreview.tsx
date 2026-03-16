@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { createChart, ColorType, type IChartApi } from "lightweight-charts";
+import {
+  createChart,
+  ColorType,
+  CandlestickSeries,
+  HistogramSeries,
+  type IChartApi,
+} from "lightweight-charts";
 
 interface KLineRecord {
   date?: string;
@@ -48,7 +54,7 @@ export function KLinePreview({ code, records, width = 400, height = 250 }: KLine
     });
 
     // 蜡烛图
-    const candleSeries = chart.addCandlestickSeries({
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: "#ef4444",
       downColor: "#10b981",
       borderUpColor: "#ef4444",
@@ -58,7 +64,7 @@ export function KLinePreview({ code, records, width = 400, height = 250 }: KLine
     });
 
     // 成交量
-    const volumeSeries = chart.addHistogramSeries({
+    const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
       priceScaleId: "volume",
     });
