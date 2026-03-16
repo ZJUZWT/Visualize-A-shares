@@ -44,6 +44,20 @@ export interface ToolResultData {
   content?: string;
   /** 工具调用是否失败 */
   hasError?: boolean;
+  /** K 线图表数据（query_history/query_hourly 时有值） */
+  chartData?: {
+    code: string;
+    records: Array<{
+      date?: string;
+      datetime?: string;
+      open: number;
+      high: number;
+      low: number;
+      close: number;
+      volume: number;
+      [key: string]: unknown;
+    }>;
+  };
 }
 
 export interface BeliefUpdatedData {
