@@ -42,6 +42,8 @@ export interface ToolResultData {
   label?: string;
   /** 专家完整回复内容（仅专家调用有值） */
   content?: string;
+  /** 工具调用是否失败 */
+  hasError?: boolean;
 }
 
 export interface BeliefUpdatedData {

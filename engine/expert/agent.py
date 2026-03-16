@@ -182,11 +182,16 @@ class ExpertAgent:
             for r in tool_results:
                 is_expert = r.get("is_expert")
                 expert_label = EXPERT_NAMES.get(r["action"], r["action"]) if is_expert else ""
+                result_text = r.get("result", "")
+                # 检测工具调用是否失败
+                error_keywords = ["失败", "error", "无快照数据", "超时", "未返回有效内容", "⚠️"]
+                has_error = any(kw in result_text[:200] for kw in error_keywords)
                 yield {"event": "tool_result", "data": {
                     "engine": r["engine"], "action": r["action"],
-                    "summary": r["result"][:300] if not is_expert else f"{expert_label}已回复（{len(r['result'])}字）",
+                    "summary": result_text[:300] if not is_expert else f"{expert_label}已回复（{len(result_text)}字）",
                     "label": expert_label if is_expert else r["action"],
-                    "content": r["result"] if is_expert else "",
+                    "content": result_text if is_expert else "",
+                    "hasError": has_error,
                 }}
 
         # 5. 图谱自动学习 — 从对话中学习股票、行业、产业链关系

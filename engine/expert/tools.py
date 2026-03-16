@@ -112,7 +112,7 @@ class ExpertTools:
                                 return f"专家 {expert_type} 错误: {data.get('message', '')}"
 
         except asyncio.TimeoutError:
-            return f"专家 {expert_type} 响应超时(60s)，已获取部分: {full_text[:300]}"
+            return f"专家 {expert_type} 响应超时(120s)，已获取部分: {full_text[:300]}"
         except Exception as e:
             logger.error(f"ask_expert({expert_type}) 失败: {e}")
             return f"调用专家 {expert_type} 失败: {e}"
