@@ -105,6 +105,53 @@ EXPERT_PROFILES: dict[str, dict] = {
 class EngineExpert:
     """引擎专家 — 基于引擎数据 + LLM 的流式对话"""
 
+    # 类级缓存：名称→代码映射（懒加载）
+    _name_to_code: dict[str, str] | None = None
+
+    @classmethod
+    def _resolve_code(cls, raw: str) -> str:
+        """将 LLM 传入的 code 参数解析为标准 6 位股票代码
+
+        LLM 经常传股票名称（如"雄韬股份"）而非代码（"002733"），
+        此方法自动解析名称→代码，保证下游数据引擎能正确查询。
+        """
+        raw = raw.strip()
+        # 已经是 6 位纯数字代码，直接返回
+        if len(raw) == 6 and raw.isdigit():
+            return raw
+
+        # 懒加载名称→代码映射
+        if cls._name_to_code is None:
+            try:
+                from data_engine import get_data_engine
+                de = get_data_engine()
+                profiles = de.get_profiles()
+                cls._name_to_code = {}
+                for code, info in profiles.items():
+                    name = info.get("name", "")
+                    if name:
+                        cls._name_to_code[name] = code
+                logger.info(f"EngineExpert 名称映射缓存已构建: {len(cls._name_to_code)} 条")
+            except Exception as e:
+                logger.warning(f"构建名称映射失败: {e}")
+                cls._name_to_code = {}
+
+        # 精确匹配
+        if raw in cls._name_to_code:
+            resolved = cls._name_to_code[raw]
+            logger.debug(f"代码解析: '{raw}' → '{resolved}'")
+            return resolved
+
+        # 模糊匹配（名称包含输入）
+        for name, code in cls._name_to_code.items():
+            if raw in name or name in raw:
+                logger.debug(f"代码模糊解析: '{raw}' → '{code}' ({name})")
+                return code
+
+        # 无法解析，原样返回（下游会报错但不会崩溃）
+        logger.warning(f"无法解析股票代码: '{raw}'")
+        return raw
+
     def __init__(self, expert_type: ExpertType, llm_provider=None):
         self.expert_type = expert_type
         self.profile = EXPERT_PROFILES[expert_type]
@@ -272,7 +319,7 @@ class EngineExpert:
             return json.dumps({"results": results, "count": len(results)}, ensure_ascii=False, default=str)
 
         elif action == "query_stock":
-            code = params.get("code", "")
+            code = self._resolve_code(params.get("code", ""))
             snap = de.get_snapshot()
             if snap is None or snap.empty:
                 return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
@@ -282,7 +329,7 @@ class EngineExpert:
             return row.iloc[0].to_json(force_ascii=False, default_handler=str)
 
         elif action == "query_history":
-            code = params.get("code", "")
+            code = self._resolve_code(params.get("code", ""))
             days = int(params.get("days", 60))
             end = datetime.date.today().strftime("%Y-%m-%d")
             start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
@@ -303,7 +350,7 @@ class EngineExpert:
         elif action == "find_similar_stocks":
             from cluster_engine import get_cluster_engine
             ce = get_cluster_engine()
-            code = params.get("code", "")
+            code = self._resolve_code(params.get("code", ""))
             top_k = params.get("top_k", 10)
             result = ce.find_similar(code, top_k)
             return json.dumps(result, ensure_ascii=False, default=str) if result else f"未找到 {code} 的相似股票"
@@ -338,7 +385,7 @@ class EngineExpert:
         de = get_data_engine()
 
         if action == "get_technical_indicators":
-            code = params.get("code", "")
+            code = self._resolve_code(params.get("code", ""))
             days = 120
             end = datetime.date.today().strftime("%Y-%m-%d")
             start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
@@ -353,7 +400,7 @@ class EngineExpert:
             snap = de.get_snapshot()
             if snap is None or snap.empty:
                 return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
-            code = params.get("code", "")
+            code = self._resolve_code(params.get("code", ""))
             row = snap[snap["code"].astype(str) == code]
             if row.empty:
                 return json.dumps({"error": f"快照中未找到 {code}"}, ensure_ascii=False)
@@ -404,7 +451,7 @@ class EngineExpert:
         de = get_data_engine()
 
         if action == "get_news":
-            code = params.get("code", "")
+            code = self._resolve_code(params.get("code", ""))
             limit = params.get("limit", 20)
             news_df = await asyncio.to_thread(de.get_news, code, limit)
             if news_df is None or (hasattr(news_df, 'empty') and news_df.empty):
@@ -417,7 +464,7 @@ class EngineExpert:
             return json.dumps({"code": code, "news": records}, ensure_ascii=False, default=str)
 
         elif action == "get_announcements":
-            code = params.get("code", "")
+            code = self._resolve_code(params.get("code", ""))
             limit = params.get("limit", 10)
             try:
                 ann_df = await asyncio.to_thread(de.get_announcements, code, limit)
@@ -433,7 +480,7 @@ class EngineExpert:
 
         elif action == "assess_event_impact":
             # 事件影响评估需要 LLM
-            code = params.get("code", "")
+            code = self._resolve_code(params.get("code", ""))
             event_desc = params.get("event_desc", "")
             return json.dumps({"code": code, "event": event_desc,
                               "note": "事件影响评估需结合新闻和技术面综合分析"}, ensure_ascii=False)
@@ -470,7 +517,7 @@ class EngineExpert:
         elif action == "query_capital_structure":
             from industry_engine import get_industry_engine
             ie = get_industry_engine()
-            code = params.get("code", "")
+            code = self._resolve_code(params.get("code", ""))
             try:
                 result = await asyncio.to_thread(ie.get_capital_structure, code)
                 return json.dumps(result, ensure_ascii=False, default=str) if result else f"无 {code} 资金构成数据"
