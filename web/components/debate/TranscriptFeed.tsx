@@ -320,8 +320,10 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
           </div>
         ) : (
           <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]">
-            <Loader2 size={14} className="animate-spin" />
-            <span>{hasThink ? "思考完毕，正在生成裁决..." : "裁判正在综合各方观点，生成裁决..."}</span>
+            <span className="inline-flex gap-[3px]" style={{ color }}>
+              <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
+            </span>
+            <span>{hasThink ? "正在生成裁决..." : "裁判正在综合各方观点..."}</span>
           </div>
         )}
       </div>
@@ -342,7 +344,9 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
               </>
             ) : hasThink ? (
               <div className="flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
-                <Loader2 size={12} className="animate-spin" />
+                <span className="inline-flex gap-[3px]" style={{ color }}>
+                  <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
+                </span>
                 <span>思考中...</span>
               </div>
             ) : null}
@@ -370,8 +374,10 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
             </>
           ) : hasThink ? (
             <div className="flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
-              <Loader2 size={12} className="animate-spin" />
-              <span>思考完毕，正在组织发言...</span>
+              <span className="inline-flex gap-[3px]" style={{ color }}>
+                <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
+              </span>
+              <span>正在组织发言...</span>
             </div>
           ) : null}
         </div>
