@@ -159,6 +159,53 @@ class BaoStockSource(BaseDataSource):
 
         return pd.DataFrame()
 
+    def get_intraday_history(
+        self, code: str, frequency: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """
+        获取分钟级 K 线数据
+        底层接口: bs.query_history_k_data_plus(frequency="60"/"30"/"15"/"5")
+        注意: BaoStock 分钟线不含 pct_chg/turnover_rate
+        """
+        self._ensure_login()
+        bs_code = self._to_bs_code(code)
+        logger.debug(f"[BaoStock] 拉取 {bs_code} {frequency}min {start_date} ~ {end_date}")
+
+        fields = "date,time,code,open,high,low,close,volume,amount"
+        rs = self._bs.query_history_k_data_plus(
+            bs_code,
+            fields,
+            start_date=start_date,
+            end_date=end_date,
+            frequency=frequency,
+            adjustflag="2",  # 前复权
+        )
+
+        rows = []
+        while (rs.error_code == "0") and rs.next():
+            rows.append(rs.get_row_data())
+
+        if not rows:
+            logger.warning(f"[BaoStock] {bs_code} {frequency}min 无数据")
+            return pd.DataFrame()
+
+        df = pd.DataFrame(rows, columns=rs.fields)
+
+        # BaoStock time 格式: "20260316103000000" (YYYYMMDDHHMMSSmmm)
+        # 直接从 time 字段前14位解析
+        df["datetime"] = pd.to_datetime(
+            df["time"].str[:14],
+            format="%Y%m%d%H%M%S",
+        )
+
+        numeric_cols = ["open", "high", "low", "close", "volume", "amount"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        logger.info(f"[BaoStock] {bs_code} {frequency}min 获取成功: {len(df)} 条")
+        return df[["datetime", "open", "high", "low", "close", "volume", "amount"]].copy()
+
     def __del__(self):
         try:
             self._logout()
