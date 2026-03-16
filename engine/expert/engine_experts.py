@@ -508,9 +508,8 @@ class EngineExpert:
         elif action == "query_industry_mapping":
             from industry_engine import get_industry_engine
             ie = get_industry_engine()
-            industry = params.get("industry", "")
             try:
-                result = await asyncio.to_thread(ie.get_industry_mapping, industry)
+                result = await asyncio.to_thread(ie.get_industry_mapping)
                 return json.dumps(result, ensure_ascii=False, default=str) if result else "无映射数据"
             except Exception as e:
                 return f"行业映射查询失败: {e}"
@@ -520,7 +519,8 @@ class EngineExpert:
             ie = get_industry_engine()
             code = self._resolve_code(params.get("code", ""))
             try:
-                result = await asyncio.to_thread(ie.get_capital_structure, code)
+                # get_capital_structure 是 async 方法，直接 await
+                result = await ie.get_capital_structure(code)
                 return json.dumps(result, ensure_ascii=False, default=str) if result else f"无 {code} 资金构成数据"
             except Exception as e:
                 return f"资金构成查询失败: {e}"
