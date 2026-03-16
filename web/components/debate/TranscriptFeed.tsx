@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, ChevronDown, ChevronUp, Brain } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { TranscriptItem } from "@/stores/useDebateStore";
 import type { JudgeVerdict, DebateSignal, RoundEval } from "@/types/debate";
@@ -282,20 +282,48 @@ function DataRequestCard({ item }: { item: Extract<TranscriptItem, { type: "data
 
 // ── 流式气泡（与最终格式一致）────────────────────────────
 function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "streaming" }> }) {
+  const [thinkOpen, setThinkOpen] = useState(false);
   const isBull = item.role === "bull_expert";
   const isObserver = item.role === "retail_investor" || item.role === "smart_money";
   const isJudge = item.role === "judge";
   const color = ROLE_COLOR[item.role] ?? "#9CA3AF";
   const label = ROLE_LABEL[item.role] ?? item.role;
+  const hasThink = !!item.thinkContent?.trim();
+
+  const ThinkBlock = hasThink ? (
+    <div className="mb-2 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-primary)]/50">
+      <button
+        onClick={() => setThinkOpen(!thinkOpen)}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+      >
+        <Brain size={12} className="opacity-60" />
+        <span>思考中...</span>
+        {thinkOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+      </button>
+      {thinkOpen && (
+        <div className="px-3 pb-3 text-xs text-[var(--text-tertiary)] leading-6 max-h-[200px] overflow-y-auto">
+          <MarkdownContent content={item.thinkContent!} />
+        </div>
+      )}
+    </div>
+  ) : null;
 
   if (isJudge) {
     return (
       <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] px-5 py-4">
         <span className="text-xs font-semibold mb-2 block" style={{ color }}>裁判</span>
-        <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]">
-          <Loader2 size={14} className="animate-spin" />
-          <span>裁判正在综合各方观点，生成裁决...</span>
-        </div>
+        {ThinkBlock}
+        {item.tokens.trim() ? (
+          <div className="text-[13px] text-[var(--text-primary)] leading-6">
+            <MarkdownContent content={item.tokens} />
+            <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]">
+            <Loader2 size={14} className="animate-spin" />
+            <span>{hasThink ? "思考完毕，正在生成裁决..." : "裁判正在综合各方观点，生成裁决..."}</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -305,9 +333,19 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
       <div className="flex justify-center">
         <div className="max-w-[85%] rounded-2xl border border-[var(--border)] bg-[var(--bg-primary)] px-6 py-4">
           <span className="text-xs font-semibold mb-2 block" style={{ color }}>{label}</span>
-          <div className="text-[13px] text-[var(--text-primary)] leading-7">
-            <MarkdownContent content={item.tokens} />
-            <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+          {ThinkBlock}
+          <div className="text-[13px] text-[var(--text-primary)] leading-6">
+            {item.tokens.trim() ? (
+              <>
+                <MarkdownContent content={item.tokens} />
+                <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+              </>
+            ) : hasThink ? (
+              <div className="flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
+                <Loader2 size={12} className="animate-spin" />
+                <span>思考中...</span>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -323,9 +361,19 @@ function StreamingBubble({ item }: { item: Extract<TranscriptItem, { type: "stre
           {item.round !== null && <span className="text-xs text-[var(--text-tertiary)]">Round {item.round}</span>}
           <span className="text-[13px] font-semibold" style={{ color }}>{label}</span>
         </div>
-        <div className="text-[13px] text-[var(--text-primary)] leading-7">
-          <MarkdownContent content={item.tokens} />
-          <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+        {ThinkBlock}
+        <div className="text-[13px] text-[var(--text-primary)] leading-6">
+          {item.tokens.trim() ? (
+            <>
+              <MarkdownContent content={item.tokens} />
+              <span className="inline-block w-0.5 h-4 bg-[var(--text-primary)] animate-pulse ml-0.5 align-middle" />
+            </>
+          ) : hasThink ? (
+            <div className="flex items-center gap-2 text-xs text-[var(--text-tertiary)]">
+              <Loader2 size={12} className="animate-spin" />
+              <span>思考完毕，正在组织发言...</span>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -336,10 +384,10 @@ function MarkdownContent({ content }: { content: string }) {
   return (
     <ReactMarkdown
       components={{
-        p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
-        ul: ({ children }) => <ul className="list-disc pl-5 mb-3 space-y-1.5">{children}</ul>,
-        ol: ({ children }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5">{children}</ol>,
-        li: ({ children }) => <li className="leading-7">{children}</li>,
+        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+        ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
+        li: ({ children }) => <li className="leading-6">{children}</li>,
         strong: ({ children }) => <strong className="font-semibold text-[var(--text-primary)]">{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
         code: ({ children }) => <code className="px-1.5 py-0.5 rounded text-xs bg-[var(--bg-primary)] font-mono">{children}</code>,
@@ -430,20 +478,20 @@ function VerdictCard({ verdict }: { verdict: JudgeVerdict }) {
           </span>
         </div>
 
-        <div className="text-[13px] text-[var(--text-primary)] leading-7">
+        <div className="text-[13px] text-[var(--text-primary)] leading-6">
           <MarkdownContent content={verdict.summary} />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div className="p-4 rounded-xl text-[13px] bg-[var(--bg-primary)] border-l-2 border-red-500">
             <div className="font-medium text-[var(--text-secondary)] mb-2">多头核心论点</div>
-            <div className="text-[var(--text-primary)] leading-7">
+            <div className="text-[var(--text-primary)] leading-6">
               <MarkdownContent content={verdict.bull_core_thesis} />
             </div>
           </div>
           <div className="p-4 rounded-xl text-[13px] bg-[var(--bg-primary)] border-l-2 border-emerald-500">
             <div className="font-medium text-[var(--text-secondary)] mb-2">空头核心论点</div>
-            <div className="text-[var(--text-primary)] leading-7">
+            <div className="text-[var(--text-primary)] leading-6">
               <MarkdownContent content={verdict.bear_core_thesis} />
             </div>
           </div>

@@ -18,6 +18,7 @@ export interface DebateEntry {
   confidence: number;
   inner_confidence: number | null;
   retail_sentiment_score: number | null;
+  think_content?: string;
 }
 
 export interface RoundEvalSide {

@@ -13,7 +13,7 @@ export type TranscriptItem =
   | { id: string; type: "entry"; data: DebateEntry }
   | { id: string; type: "round_divider"; round: number; is_final: boolean }
   | { id: string; type: "system"; text: string }
-  | { id: string; type: "streaming"; role: string; round: number | null; tokens: string }
+  | { id: string; type: "streaming"; role: string; round: number | null; tokens: string; thinkContent?: string }
   | { id: string; type: "data_request"; requested_by: string; action: string; status: "pending" | "done" | "failed"; result_summary?: string; duration_ms?: number }
   | { id: string; type: "blackboard_data"; debateId: string; target: string; participants: string[] }
   | { id: string; type: "round_eval"; data: RoundEval }
@@ -39,12 +39,14 @@ interface DebateStore {
   currentRound: number;
   judgeVerdict: JudgeVerdict | null;
   isReplayMode: boolean;
+  isBacktestMode: boolean;
+  asOfDate: string | null;
   error: string | null;
   _observerSpokenThisRound: Record<string, boolean>;
   currentTarget: string | null;
   blackboardItems: BlackboardItem[];
 
-  startDebate: (code: string, maxRounds: number, mode?: string) => Promise<void>;
+  startDebate: (code: string, maxRounds: number, mode?: string, asOfDate?: string) => Promise<void>;
   loadReplay: (debateId: string) => Promise<void>;
   reset: () => void;
   stopDebate: () => void;
@@ -67,6 +69,8 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
   currentRound: 0,
   judgeVerdict: null,
   isReplayMode: false,
+  isBacktestMode: false,
+  asOfDate: null,
   error: null,
   _observerSpokenThisRound: {},
   currentTarget: null,
@@ -80,6 +84,8 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
     currentRound: 0,
     judgeVerdict: null,
     isReplayMode: false,
+    isBacktestMode: false,
+    asOfDate: null,
     error: null,
     _observerSpokenThisRound: {},
     currentTarget: null,
@@ -92,16 +98,20 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
     set({ status: "stopped" });
   },
 
-  startDebate: async (code, maxRounds, mode = "standard") => {
+  startDebate: async (code, maxRounds, mode = "standard", asOfDate) => {
     get().reset();
     _abortController = new AbortController();
-    set({ status: "debating", currentTarget: code });
+    const isBacktest = !!asOfDate;
+    set({ status: "debating", currentTarget: code, isBacktestMode: isBacktest, asOfDate: asOfDate ?? null });
 
     try {
+      const body: Record<string, unknown> = { code, max_rounds: maxRounds, mode };
+      if (asOfDate) body.as_of_date = asOfDate;
+
       const res = await fetch(`${API_BASE}/api/v1/debate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, max_rounds: maxRounds, mode }),
+        body: JSON.stringify(body),
         signal: _abortController.signal,
       });
 
@@ -287,7 +297,9 @@ function _handleSSEEvent(
         target: data.target as string,
         participants: data.participants as string[],
       };
-      set({ roleState, observerState, transcript: [bbItem] });
+      // 同步后端实际使用的 as_of_date（回测模式和普通模式都适用）
+      const serverAsOfDate = data.as_of_date as string | undefined;
+      set({ roleState, observerState, transcript: [bbItem], asOfDate: serverAsOfDate ?? null });
       break;
     }
 
@@ -324,11 +336,44 @@ function _handleSSEEvent(
       );
       if (existing >= 0) {
         const updated = [...state.transcript];
-        const item = updated[existing] as { id: string; type: "streaming"; role: string; round: number | null; tokens: string };
+        const item = updated[existing] as { id: string; type: "streaming"; role: string; round: number | null; tokens: string; thinkContent?: string };
         updated[existing] = { ...item, tokens: item.tokens + tokens };
         set({ transcript: updated });
       } else {
         set({ transcript: [...state.transcript, { id: streamId, type: "streaming", role, round, tokens }] });
+      }
+      break;
+    }
+
+    case "debate_think": {
+      const { role, round, content } = data as { role: string; round: number | null; content: string };
+      const streamId = `streaming_${role}_${round ?? "null"}`;
+      const existing = state.transcript.findIndex(
+        (item) => item.type === "streaming" && item.role === role && item.round === round
+      );
+      if (existing >= 0) {
+        const updated = [...state.transcript];
+        const item = updated[existing] as { id: string; type: "streaming"; role: string; round: number | null; tokens: string; thinkContent?: string };
+        updated[existing] = { ...item, thinkContent: content };
+        set({ transcript: updated });
+      } else {
+        set({ transcript: [...state.transcript, { id: streamId, type: "streaming", role, round, tokens: "", thinkContent: content }] });
+      }
+      break;
+    }
+
+    case "judge_think": {
+      const { content } = data as { content: string };
+      const existing = state.transcript.findIndex(
+        (item) => item.type === "streaming" && item.role === "judge"
+      );
+      if (existing >= 0) {
+        const updated = [...state.transcript];
+        const item = updated[existing] as { id: string; type: "streaming"; role: string; round: number | null; tokens: string; thinkContent?: string };
+        updated[existing] = { ...item, thinkContent: content };
+        set({ transcript: updated });
+      } else {
+        set({ transcript: [...state.transcript, { id: "streaming_judge", type: "streaming", role: "judge", round: null, tokens: "", thinkContent: content }] });
       }
       break;
     }
@@ -343,11 +388,15 @@ function _handleSSEEvent(
         return -1;
       })();
       // 如果 streaming 气泡已有内容，强制 speak=true，防止内容被 speak=false 清掉
-      const streamingHasContent = idx >= 0 &&
-        (state.transcript[idx] as Extract<TranscriptItem, { type: "streaming" }>).tokens.trim().length > 0;
+      const streamingItem = idx >= 0 ? state.transcript[idx] as Extract<TranscriptItem, { type: "streaming" }> : null;
+      const streamingHasContent = streamingItem && streamingItem.tokens.trim().length > 0;
       const finalEntry = streamingHasContent && !entry.speak
         ? { ...entry, speak: true }
         : entry;
+      // 传递 think 内容
+      if (streamingItem?.thinkContent) {
+        finalEntry.think_content = streamingItem.thinkContent;
+      }
       const entryId = idx >= 0 ? state.transcript[idx].id : `entry_${entry.role}_${entry.round}`;
       const newTranscript = idx >= 0
         ? [...state.transcript.slice(0, idx), { id: entryId, type: "entry" as const, data: finalEntry }, ...state.transcript.slice(idx + 1)]

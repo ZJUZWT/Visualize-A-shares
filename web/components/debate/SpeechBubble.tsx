@@ -1,28 +1,72 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Brain } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { DebateEntry } from "@/types/debate";
 
 function MarkdownContent({ content }: { content: string }) {
   return (
     <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
       components={{
         p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
         ul: ({ children }) => <ul className="list-disc pl-5 mb-3 space-y-1.5">{children}</ul>,
         ol: ({ children }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5">{children}</ol>,
-        li: ({ children }) => <li className="leading-7">{children}</li>,
+        li: ({ children }) => <li className="leading-6">{children}</li>,
         strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
         em: ({ children }) => <em className="italic">{children}</em>,
         code: ({ children }) => <code className="px-1.5 py-0.5 rounded text-xs bg-[var(--bg-primary)] font-mono">{children}</code>,
         h1: ({ children }) => <h1 className="text-base font-bold mb-2">{children}</h1>,
         h2: ({ children }) => <h2 className="text-sm font-bold mb-2">{children}</h2>,
         h3: ({ children }) => <h3 className="text-sm font-semibold mb-1.5">{children}</h3>,
+        table: ({ children }) => (
+          <div className="overflow-x-auto my-2">
+            <table className="text-xs border-collapse w-full">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => (
+          <thead className="border-b border-[var(--border)]">{children}</thead>
+        ),
+        th: ({ children }) => (
+          <th className="px-2 py-1 text-left text-[var(--text-secondary)] font-medium">
+            {children}
+          </th>
+        ),
+        td: ({ children }) => (
+          <td className="px-2 py-1 text-[var(--text-primary)]">{children}</td>
+        ),
+        tr: ({ children }) => (
+          <tr className="border-b border-[var(--border)] last:border-b-0">{children}</tr>
+        ),
       }}
     >
       {content}
     </ReactMarkdown>
+  );
+}
+
+/** 可折叠的思考过程面板 */
+function ThinkingBlock({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+  if (!content.trim()) return null;
+  return (
+    <div className="mb-3 rounded-lg border border-dashed border-[var(--border)] bg-[var(--bg-primary)]/50">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+      >
+        <Brain size={12} className="opacity-60" />
+        <span>思考过程</span>
+        {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+      </button>
+      {open && (
+        <div className="px-3 pb-3 text-xs text-[var(--text-tertiary)] leading-6 max-h-[300px] overflow-y-auto">
+          <MarkdownContent content={content} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -69,7 +113,8 @@ export default function SpeechBubble({ entry }: SpeechBubbleProps) {
             <span className="text-xs text-[var(--text-tertiary)]">Round {entry.round}</span>
             <span className="text-xs font-semibold" style={{ color }}>{label}</span>
           </div>
-          <div className="text-[13px] text-[var(--text-primary)] leading-7">
+          {entry.think_content && <ThinkingBlock content={entry.think_content} />}
+          <div className="text-[13px] text-[var(--text-primary)] leading-6">
             <MarkdownContent content={entry.argument} />
           </div>
         </div>
@@ -96,7 +141,8 @@ export default function SpeechBubble({ entry }: SpeechBubbleProps) {
             置信度 {Math.round(entry.confidence * 100)}%
           </span>
         </div>
-        <div className="text-[13px] text-[var(--text-primary)] leading-7">
+        {entry.think_content && <ThinkingBlock content={entry.think_content} />}
+        <div className="text-[13px] text-[var(--text-primary)] leading-6">
           <MarkdownContent content={entry.argument} />
         </div>
 
