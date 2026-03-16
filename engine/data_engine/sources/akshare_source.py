@@ -190,6 +190,54 @@ class AKShareSource(BaseDataSource):
             logger.warning(f"[AKShare] 个股新闻获取失败 {code}: {e}")
             return pd.DataFrame()
 
+    def get_intraday_history(
+        self, code: str, frequency: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        """
+        获取分钟级 K 线数据
+        底层接口: ak.stock_zh_a_hist_min_em()
+        """
+        logger.debug(f"[AKShare] 拉取 {code} {frequency}min {start_date} ~ {end_date}")
+
+        df = self._fetch_with_retry(
+            self._ak.stock_zh_a_hist_min_em,
+            "stock_zh_a_hist_min_em",
+            symbol=code,
+            period=frequency,
+            start_date=f"{start_date} 09:30:00",
+            end_date=f"{end_date} 15:00:00",
+            adjust="qfq",
+        )
+
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        column_map = {
+            "时间": "datetime",
+            "开盘": "open",
+            "收盘": "close",
+            "最高": "high",
+            "最低": "low",
+            "成交量": "volume",
+            "成交额": "amount",
+            "涨跌幅": "pct_chg",
+            "换手率": "turnover_rate",
+        }
+        df = df.rename(columns=column_map)
+        df["datetime"] = pd.to_datetime(df["datetime"])
+
+        available = [c for c in ["datetime", "open", "high", "low", "close",
+                                 "volume", "amount", "pct_chg", "turnover_rate"]
+                     if c in df.columns]
+        df = df[available].copy()
+
+        numeric_cols = [c for c in available if c != "datetime"]
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        logger.info(f"[AKShare] {code} {frequency}min 获取成功: {len(df)} 条")
+        return df
+
     def get_announcements(self, code: str, limit: int = 20) -> pd.DataFrame:
         """获取公司公告（东方财富）
         底层接口: ak.stock_notice_report(symbol="全部", date=today) + 按代码过滤

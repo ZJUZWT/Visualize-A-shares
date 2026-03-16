@@ -142,6 +142,23 @@ class DuckDBStore:
             )
         """)
 
+        # 分钟级 K 线表（按频率分表）
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS stock_kline_60m (
+                code        VARCHAR NOT NULL,
+                datetime    TIMESTAMP NOT NULL,
+                open        DOUBLE,
+                high        DOUBLE,
+                low         DOUBLE,
+                close       DOUBLE,
+                volume      BIGINT,
+                amount      DOUBLE,
+                pct_chg     DOUBLE,
+                turnover_rate DOUBLE,
+                PRIMARY KEY (code, datetime)
+            )
+        """)
+
         # ── InfoEngine schema ──
         self._conn.execute("CREATE SCHEMA IF NOT EXISTS info")
         self._conn.execute("CREATE SEQUENCE IF NOT EXISTS info.news_articles_id_seq START 1")
@@ -461,6 +478,54 @@ class DuckDBStore:
             WHERE date = (SELECT MAX(date) FROM cluster_results)
             ORDER BY code
         """).fetchdf()
+
+    # ── 分钟级 K 线 ──
+
+    # 频率 → 表名白名单，防止 SQL 注入
+    VALID_KLINE_TABLES: dict[str, str] = {"60m": "stock_kline_60m"}
+
+    def _kline_table(self, frequency: str) -> str:
+        """安全获取 K 线表名"""
+        if frequency not in self.VALID_KLINE_TABLES:
+            raise ValueError(f"不支持的 K 线频率: {frequency}")
+        return self.VALID_KLINE_TABLES[frequency]
+
+    def save_kline(self, df: pd.DataFrame, frequency: str):
+        """保存分钟级 K 线（UPSERT）"""
+        table = self._kline_table(frequency)
+        if df.empty:
+            return
+        # 确保 BaoStock 数据（无 pct_chg/turnover_rate）不会报错
+        for col in ["pct_chg", "turnover_rate"]:
+            if col not in df.columns:
+                df[col] = None
+        self._conn.execute(f"""
+            INSERT OR REPLACE INTO {table}
+            SELECT code, datetime, open, high, low, close,
+                   volume, amount, pct_chg, turnover_rate
+            FROM df
+        """)
+        logger.debug(f"K线保存: {len(df)} 条 → {table}")
+
+    def get_kline(
+        self, code: str, frequency: str,
+        start_datetime: str = "", end_datetime: str = "",
+    ) -> pd.DataFrame:
+        """查询分钟级 K 线"""
+        table = self._kline_table(frequency)
+        query = f"SELECT * FROM {table} WHERE code = ?"
+        params: list = [code]
+        if start_datetime:
+            query += " AND datetime >= ?"
+            params.append(start_datetime)
+        if end_datetime:
+            query += " AND datetime <= ?"
+            params.append(end_datetime)
+        query += " ORDER BY datetime"
+        try:
+            return self._conn.execute(query, params).fetchdf()
+        except Exception:
+            return pd.DataFrame()
 
     def get_stock_count(self) -> int:
         """获取股票数量"""
