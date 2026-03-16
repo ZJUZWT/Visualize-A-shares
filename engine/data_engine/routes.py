@@ -112,7 +112,16 @@ async def get_kline(
     df = await asyncio.to_thread(de.get_kline, code, frequency.value, days)
     if df.empty:
         return {"code": code, "frequency": frequency.value, "records": [], "count": 0}
+    # datetime 列转字符串，NaN/Inf 替换确保 JSON 可序列化
+    import math
+    if "datetime" in df.columns:
+        df["datetime"] = df["datetime"].astype(str)
     records = df.to_dict(orient="records")
+    # 清理 NaN/Inf（pandas to_dict 会保留 float('nan')）
+    for rec in records:
+        for k, v in rec.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                rec[k] = None
     return {
         "code": code,
         "frequency": frequency.value,
