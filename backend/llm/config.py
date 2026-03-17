@@ -73,7 +73,7 @@ class LLMConfig(BaseModel):
     # 系统提示词
     system_prompt: str = Field(
         default=(
-            "你是 StockTerrain 智能分析助手，专注 A 股市场分析。"
+            "你是 StockScape 智能分析助手，专注 A 股市场分析。"
             "你可以看到用户当前浏览的 3D 地形数据，包括股票聚类信息、涨跌幅、成交量等。"
             "请基于提供的实时数据，给出专业、简洁的市场分析和投资洞察。"
             "注意：你的分析仅供参考，不构成投资建议。"

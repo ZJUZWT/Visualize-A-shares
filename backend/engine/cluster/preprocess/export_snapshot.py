@@ -26,7 +26,7 @@ from engine.cluster.algorithm.pipeline import AlgorithmPipeline
 def export_snapshot():
     """生成地形计算快照并保存为 JSON"""
     print("=" * 60)
-    print("StockTerrain — 导出静态快照")
+    print("StockScape — 导出静态快照")
     print("=" * 60)
 
     t0 = time.time()

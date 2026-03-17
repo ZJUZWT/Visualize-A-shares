@@ -1,4 +1,4 @@
 """
-StockTerrain API 层
+StockScape API 层
 REST + WebSocket 接口
 """

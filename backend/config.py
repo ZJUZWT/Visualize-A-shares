@@ -1,5 +1,5 @@
 """
-StockTerrain 全局配置
+StockScape 全局配置
 """
 
 from pathlib import Path

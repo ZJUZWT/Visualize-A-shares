@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "StockTerrain — A股3D地形",
+  title: "StockScape — A股 AI 投研平台",
   description: "A股多维聚类3D地形可视化平台",
 };
 

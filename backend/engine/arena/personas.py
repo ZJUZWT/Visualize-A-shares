@@ -49,7 +49,7 @@ def build_system_prompt(agent_role: str, calibration_weight: float) -> str:
     persona = AGENT_PERSONAS[agent_role]
     forbidden = "、".join(persona["forbidden_factors"])
 
-    return f"""你是 StockTerrain 的{persona['role']}。
+    return f"""你是 StockScape 的{persona['role']}。
 
 ## 分析视角
 {persona['perspective']}

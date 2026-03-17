@@ -81,10 +81,10 @@ function LeftPanel() {
           </div>
           <div className="min-w-0">
             <h1 className="text-base font-semibold tracking-tight text-[var(--text-primary)]">
-              StockTerrain
+              StockScape
             </h1>
             <p className="text-[10px] text-[var(--text-tertiary)] truncate">
-              A股多维聚类 3D 地形可视化
+              A股 AI 投研平台
             </p>
           </div>
           <span className="text-[10px] text-[var(--text-tertiary)] font-mono ml-auto bg-[var(--accent-light)] px-2 py-0.5 rounded-full flex-shrink-0">

@@ -3,7 +3,7 @@ setlocal
 
 cd /d "%~dp0\.."
 
-echo === StockTerrain 环境配置 ===
+echo === StockScape 环境配置 ===
 
 :: 检测 Python
 where python >nul 2>&1

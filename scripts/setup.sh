@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
-echo "=== StockTerrain 环境配置 ==="
+echo "=== StockScape 环境配置 ==="
 
 # 检测 Python 3.10+
 if ! command -v python3 &>/dev/null; then

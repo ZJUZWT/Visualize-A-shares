@@ -9,7 +9,7 @@ cd "$PROJECT_ROOT"
 [ -d backend/.venv ] || { echo "❌ 请先运行 scripts/setup.sh"; exit 1; }
 [ -d frontend/node_modules ] || { echo "❌ 请先运行 scripts/setup.sh"; exit 1; }
 
-echo "=== 启动 StockTerrain ==="
+echo "=== 启动 StockScape ==="
 
 # 后端
 cd "$PROJECT_ROOT/backend"

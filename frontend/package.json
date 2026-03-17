@@ -2,7 +2,7 @@
   "name": "stockterrain-web",
   "version": "0.1.0",
   "private": true,
-  "description": "StockTerrain — A股3D地形可视化渲染引擎",
+  "description": "StockScape — A股 AI 投研平台",
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",

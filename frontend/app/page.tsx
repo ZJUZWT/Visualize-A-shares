@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * StockTerrain v3.0 主页面
+ * StockScape v3.0 主页面
  *
  * 支持两种模式:
  * - 动态模式: 连接后端 API 实时计算
@@ -51,7 +51,7 @@ export default function Home() {
       {/* Layer 2: 底部版权 */}
       <div className="overlay fixed bottom-3 right-4">
         <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
-          StockTerrain v3.1 · Data is the terrain
+          StockScape v3.1 · Data is the terrain
         </span>
       </div>
     </main>
@@ -63,10 +63,10 @@ function LoadingScreen() {
     <div className="fixed inset-0 bg-[#F8FAFE] flex items-center justify-center">
       <div className="text-center">
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#4F8EF7] to-[#7B68EE] flex items-center justify-center text-white text-xl font-bold mx-auto mb-4 shadow-lg loading-pulse">
-          T
+          S
         </div>
         <div className="text-sm font-medium text-[var(--text-primary)] mb-1">
-          StockTerrain
+          StockScape
         </div>
         <div className="text-xs text-[var(--text-tertiary)]">
           渲染引擎初始化中...

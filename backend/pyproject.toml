@@ -1,7 +1,7 @@
 [project]
 name = "stockterrain-engine"
 version = "0.1.0"
-description = "StockTerrain — A股多维聚类3D地形可视化平台 数据与算法引擎"
+description = "StockScape — A股 AI 投研平台 后端引擎"
 requires-python = ">=3.11"
 dependencies = [
     # Web 框架

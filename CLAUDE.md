@@ -1,4 +1,4 @@
-# StockTerrain — A股多维聚类3D地形可视化平台
+# StockScape — A股 AI 投研平台
 
 ## 项目结构
 - `backend/` — Python 后端 (FastAPI + DuckDB + HDBSCAN/UMAP 算法流水线)

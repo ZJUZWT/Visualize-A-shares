@@ -31,7 +31,7 @@ export default function NavSidebar() {
         </span>
         <span className="ml-1 text-sm font-semibold text-[var(--text-primary)] whitespace-nowrap
                          opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-75">
-          StockTerrain
+          StockScape
         </span>
       </div>
 
