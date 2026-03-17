@@ -1,11 +1,15 @@
 """
-AKShare 数据源 — Level 1 主力
-数据来源：东方财富
+AKShare 数据源 — Level 1 备选
+数据来源：东方财富（通过 AKShare 封装）
 特点：零门槛、全市场实时快照、免费无限制
+
+注意：AKShare 底层也是打东方财富 HTTP API，
+     与 EastMoneyDirect 共享全局并发信号量，避免同时打爆东财服务器。
 """
 
 import time
 import random
+import threading
 from typing import Optional
 
 import pandas as pd
@@ -13,10 +17,16 @@ from loguru import logger
 
 from .base import BaseDataSource
 
+# 与 EastMoneyDirect 共享的全局并发信号量和断路器
+from .eastmoney_direct import (
+    _EASTMONEY_SEMAPHORE,
+    _circuit_is_open, _circuit_record_success, _circuit_record_failure,
+)
+
 
 class AKShareSource(BaseDataSource):
     name = "akshare"
-    priority = 1  # 最高优先级
+    priority = 1  # EastMoneyDirect(0.5) 之后
 
     # 重试配置
     MAX_RETRIES = 3
@@ -32,14 +42,29 @@ class AKShareSource(BaseDataSource):
             raise
 
     def _fetch_with_retry(self, func, func_name: str, **kwargs):
-        """带重试的数据拉取（指数退避 + 随机抖动）"""
+        """带重试 + 全局并发限流 + 断路器的数据拉取（指数退避 + 随机抖动）"""
+        # 断路器：东财不可用时快速返回
+        if _circuit_is_open():
+            logger.debug(f"[AKShare] {func_name} 断路器打开，跳过请求")
+            raise ConnectionError(f"东财断路器打开，跳过 {func_name}")
+
         last_err = None
         for attempt in range(1, self.MAX_RETRIES + 1):
+            # 全局并发限流（与 EastMoneyDirect 共享）
+            acquired = _EASTMONEY_SEMAPHORE.acquire(timeout=30)
+            if not acquired:
+                logger.warning(f"[AKShare] {func_name} 并发限流等待超时")
+                continue
             try:
                 result = func(**kwargs) if kwargs else func()
+                _circuit_record_success()
                 return result
             except Exception as e:
                 last_err = e
+                # 连接类错误记录到断路器
+                err_str = str(e)
+                if "RemoteDisconnected" in err_str or "Connection aborted" in err_str:
+                    _circuit_record_failure()
                 if attempt < self.MAX_RETRIES:
                     # 指数退避 + 随机抖动 0~2s
                     wait = self.RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 2)
@@ -48,10 +73,16 @@ class AKShareSource(BaseDataSource):
                         f"{wait:.1f}s 后重试..."
                     )
                     time.sleep(wait)
+                    # 断路器打开后停止重试
+                    if _circuit_is_open():
+                        logger.info(f"[AKShare] {func_name} 断路器已打开，停止重试")
+                        break
                 else:
                     logger.error(
                         f"[AKShare] {func_name} {self.MAX_RETRIES} 次重试全部失败: {e}"
                     )
+            finally:
+                _EASTMONEY_SEMAPHORE.release()
         raise last_err
 
     def get_realtime_quotes(self) -> pd.DataFrame:

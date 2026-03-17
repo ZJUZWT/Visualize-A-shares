@@ -46,7 +46,8 @@ INDUSTRY_COGNITION_PROMPT = """你是产业链分析专家。请基于你对 {in
 - common_traps 是最关键的部分，必须列出该行业中投资者最容易犯的认知错误
 - 每个陷阱要说明「表面逻辑」和「实际逻辑」的差异
 - cycle_position 必须给出明确判断，不能模棱两可
-- 所有分析基于 {as_of_date} 时点的行业状态"""
+- 所有分析基于 {as_of_date} 时点的行业状态
+- 直接输出 JSON，不要输出任何思考过程、解释或额外文字"""
 
 
 INDUSTRY_STANDALONE_PROMPT = """你是产业链分析专家。请基于你对 {industry} 行业的深度理解，生成以下结构化分析。
@@ -70,7 +71,8 @@ INDUSTRY_STANDALONE_PROMPT = """你是产业链分析专家。请基于你对 {i
 要求：
 - common_traps 必须列出投资者最容易犯的认知错误，说明「表面逻辑」和「实际逻辑」
 - cycle_position 必须给出明确判断
-- 所有分析基于 {as_of_date} 时点"""
+- 所有分析基于 {as_of_date} 时点
+- 直接输出 JSON，不要输出任何思考过程、解释或额外文字"""
 
 
 class IndustryAgent:
@@ -130,7 +132,25 @@ class IndustryAgent:
             raw = "".join(chunks)
             logger.debug(f"行业认知 LLM 原始返回 (前200字): {raw[:200] if raw else '(空)'}")
 
-            parsed = _lenient_json_loads(raw)
+            try:
+                parsed = _lenient_json_loads(raw)
+            except json.JSONDecodeError:
+                # 首次解析失败，用更强约束重试一次
+                logger.info(f"行业认知首次 JSON 解析失败，重试 (行业={industry})")
+                retry_prompt = (
+                    prompt
+                    + "\n\n重要：你必须只输出一个合法的 JSON 对象，不要输出任何其他内容。"
+                    "不要使用 <think> 标签，不要输出 markdown 代码块，直接输出 {{ 开头的 JSON。"
+                )
+                chunks2: list[str] = []
+                async for token in self._llm.chat_stream(
+                    [ChatMessage(role="user", content=retry_prompt)]
+                ):
+                    chunks2.append(token)
+                raw2 = "".join(chunks2)
+                logger.debug(f"行业认知重试 LLM 返回 (前200字): {raw2[:200] if raw2 else '(空)'}")
+                parsed = _lenient_json_loads(raw2)
+
             if not isinstance(parsed, dict):
                 logger.warning(f"行业认知 LLM 返回非 dict: {type(parsed)}")
                 return None
@@ -157,8 +177,26 @@ class IndustryAgent:
 # ── JSON 解析工具 ──
 
 def _extract_json(text: str) -> str:
-    """从 LLM 输出提取 JSON"""
+    """从 LLM 输出提取 JSON（支持 MiniMax/DeepSeek 等模型的特殊标签）"""
+    # 剥离各种模型特有标签（闭合的）
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
+    text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL).strip()
+    text = re.sub(r"<tool_code>.*?</tool_code>", "", text, flags=re.DOTALL).strip()
+    # 未闭合的 <think> 标签
+    if "<think>" in text and "</think>" not in text:
+        # 尝试从 think 内容中提取 JSON（模型可能在思考过程中嵌入了 JSON）
+        after_tag = text.split("<think>", 1)[-1]
+        # 查找最外层 JSON 对象
+        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', after_tag, re.DOTALL)
+        if json_match:
+            logger.debug("从未闭合 <think> 内容中提取到 JSON 片段")
+            text = json_match.group(0)
+        else:
+            text = ""  # 确实无有效 JSON
+    elif "</think>" in text:
+        text = text.split("</think>", 1)[-1].strip()
+    # 提取 markdown 代码块中的 JSON
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
     result = match.group(1).strip() if match else text.strip()
     result = result.replace("\u201c", '"').replace("\u201d", '"')

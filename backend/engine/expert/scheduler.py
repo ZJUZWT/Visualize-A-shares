@@ -199,7 +199,11 @@ class ScheduledTaskManager:
 
     def start_scheduler(self):
         """启动 APScheduler 并从 DB 恢复所有 active 任务"""
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        try:
+            from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        except ImportError:
+            logger.error("❌ apscheduler 未安装，定时任务功能不可用！请运行: pip install apscheduler>=3.10.0")
+            return
 
         self._scheduler = AsyncIOScheduler()
         self._scheduler.start()

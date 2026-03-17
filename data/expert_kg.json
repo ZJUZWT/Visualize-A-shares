@@ -285,31 +285,65 @@
       "id": "83f99713-cb7d-448a-ba61-64df686e26a4"
     },
     {
-      "id": "931ef567-8f43-40a3-86ec-f2c866d28369",
       "type": "stock",
       "code": "002470",
       "name": "金正大",
       "industry": "化肥行业",
-      "zjh_industry": "制造业-化学原料和化学制品制造业"
+      "zjh_industry": "制造业-化学原料和化学制品制造业",
+      "id": "931ef567-8f43-40a3-86ec-f2c866d28369"
     },
     {
-      "id": "e24fb955-1d85-44b9-86d1-40ca37357d16",
       "type": "sector",
       "name": "化肥行业",
-      "category": "industry"
+      "category": "industry",
+      "id": "e24fb955-1d85-44b9-86d1-40ca37357d16"
     },
     {
-      "id": "88f2a71e-e589-4814-b3bf-0bfafbb5769b",
       "type": "stock",
       "code": "300033",
       "name": "同花顺",
       "industry": "软件服务",
-      "zjh_industry": "金融业-其他金融业"
+      "zjh_industry": "金融业-其他金融业",
+      "id": "88f2a71e-e589-4814-b3bf-0bfafbb5769b"
     },
     {
-      "id": "761b036e-dafb-458b-ba39-be5267d87d15",
       "type": "sector",
       "name": "软件服务",
+      "category": "industry",
+      "id": "761b036e-dafb-458b-ba39-be5267d87d15"
+    },
+    {
+      "type": "stock",
+      "code": "300435",
+      "name": "中泰股份",
+      "industry": "燃气",
+      "zjh_industry": "电力、热力、燃气及水生产和供应业-燃气生产和供应业",
+      "id": "7ecedd0b-48e2-42ba-b035-0aa20d6cee14"
+    },
+    {
+      "type": "sector",
+      "name": "燃气",
+      "category": "industry",
+      "id": "f0f9d112-7ada-4a6d-902f-b115282fa791"
+    },
+    {
+      "type": "material",
+      "name": "铝",
+      "category": "raw_material",
+      "id": "45c20b80-fcc9-482d-ab8b-fc3e1d6558b3"
+    },
+    {
+      "id": "c254d1b1-ca89-43ef-bed6-f4bb20d8d064",
+      "type": "stock",
+      "code": "601233",
+      "name": "601233",
+      "industry": "化纤行业",
+      "zjh_industry": "制造业-化学纤维制造业"
+    },
+    {
+      "id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb",
+      "type": "sector",
+      "name": "化纤行业",
       "category": "industry"
     }
   ],
@@ -581,18 +615,46 @@
       "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
-      "source_id": "931ef567-8f43-40a3-86ec-f2c866d28369",
-      "target_id": "e24fb955-1d85-44b9-86d1-40ca37357d16",
       "relation": "belongs_to",
       "reason": "金正大属于化肥行业行业",
-      "timestamp": "2026-03-17T16:54:44.055173"
+      "timestamp": "2026-03-17T16:54:44.055173",
+      "source_id": "931ef567-8f43-40a3-86ec-f2c866d28369",
+      "target_id": "e24fb955-1d85-44b9-86d1-40ca37357d16"
     },
     {
-      "source_id": "88f2a71e-e589-4814-b3bf-0bfafbb5769b",
-      "target_id": "761b036e-dafb-458b-ba39-be5267d87d15",
       "relation": "belongs_to",
       "reason": "同花顺属于软件服务行业",
-      "timestamp": "2026-03-17T17:53:15.337796"
+      "timestamp": "2026-03-17T17:53:15.337796",
+      "source_id": "88f2a71e-e589-4814-b3bf-0bfafbb5769b",
+      "target_id": "761b036e-dafb-458b-ba39-be5267d87d15"
+    },
+    {
+      "relation": "belongs_to",
+      "reason": "中泰股份属于燃气行业",
+      "timestamp": "2026-03-17T23:37:00.408349",
+      "source_id": "7ecedd0b-48e2-42ba-b035-0aa20d6cee14",
+      "target_id": "f0f9d112-7ada-4a6d-902f-b115282fa791"
+    },
+    {
+      "relation": "consumes",
+      "reason": "中泰股份使用铝",
+      "timestamp": "2026-03-17T23:37:00.408563",
+      "source_id": "7ecedd0b-48e2-42ba-b035-0aa20d6cee14",
+      "target_id": "45c20b80-fcc9-482d-ab8b-fc3e1d6558b3"
+    },
+    {
+      "relation": "consumes",
+      "reason": "中泰股份使用石油",
+      "timestamp": "2026-03-17T23:37:00.408625",
+      "source_id": "7ecedd0b-48e2-42ba-b035-0aa20d6cee14",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
+    },
+    {
+      "source_id": "c254d1b1-ca89-43ef-bed6-f4bb20d8d064",
+      "target_id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb",
+      "relation": "belongs_to",
+      "reason": "601233属于化纤行业行业",
+      "timestamp": "2026-03-18T00:39:05.910856"
     }
   ]
 }

@@ -1,15 +1,22 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import NavSidebar from "@/components/ui/NavSidebar";
 import { ExpertSidebar } from "@/components/expert/ExpertSidebar";
 import { ChatArea } from "@/components/expert/ChatArea";
 import { InputBar } from "@/components/expert/InputBar";
+import { ExportChatModal } from "@/components/expert/ExportChatModal";
 import { useExpertStore } from "@/stores/useExpertStore";
 
 export default function ExpertPageRoute() {
-  const { fetchProfiles, activeExpert, profiles } = useExpertStore();
+  const { fetchProfiles, activeExpert, profiles, chatHistories, sessions, activeSessions } = useExpertStore();
   const profile = profiles.find((p) => p.type === activeExpert);
+  const [showExportModal, setShowExportModal] = useState(false);
+
+  // 获取当前 session 标题
+  const activeSessionId = activeSessions[activeExpert];
+  const currentSession = (sessions[activeExpert] ?? []).find(s => s.id === activeSessionId);
+  const sessionTitle = currentSession?.title;
 
   useEffect(() => {
     fetchProfiles();
@@ -73,9 +80,19 @@ export default function ExpertPageRoute() {
           <ChatArea />
 
           {/* 输入栏 */}
-          <InputBar />
+          <InputBar onExport={() => setShowExportModal(true)} />
         </div>
       </div>
+
+      {/* 导出弹窗 */}
+      {showExportModal && profile && (
+        <ExportChatModal
+          messages={chatHistories[activeExpert] ?? []}
+          profile={profile}
+          sessionTitle={sessionTitle}
+          onClose={() => setShowExportModal(false)}
+        />
+      )}
     </main>
   );
 }

@@ -19,16 +19,21 @@ from .sources.tencent_source import TencentSource
 from .sources.akshare_source import AKShareSource
 from .sources.baostock_source import BaoStockSource
 from .sources.eastmoney_direct import EastMoneyDirectSource
+from .sources.ths_source import THSSource
 
 
 class DataCollector:
     """
-    三级数据源编排器
+    多级数据源编排器
     
-    Level 0: Tencent  (腾讯行情，最稳定，实时快照)
-    Level 1: AKShare  (实时行情 + 日线 + 基本面)
-    Level 2: BaoStock (历史K线 + 财务数据)
-    Fallback: 逐级降级
+    Level 0:   Tencent            (腾讯行情，最稳定，实时快照)
+    Level 0.5: EastMoneyDirect    (东财直连，板块首选，持久连接池 + 并发限流)
+    Level 1:   AKShare            (东财封装，全面但并发下容易断连)
+    Level 1.5: THS                (同花顺，板块独立备选，7×24h 可用)
+    Level 2:   BaoStock           (历史K线 + 财务数据)
+    
+    板块数据降级链: EastMoneyDirect → AKShare → THS → DuckDB
+    个股数据降级链: Tencent → AKShare → EastMoney → BaoStock
     """
 
     def __init__(self):
@@ -43,17 +48,23 @@ class DataCollector:
         except Exception as e:
             logger.warning(f"Tencent 初始化失败: {e}")
 
-        # Level 1: AKShare
+        # Level 0.5: EastMoney Direct（东财直连，板块首选）
+        try:
+            self._sources.append(EastMoneyDirectSource())
+        except Exception as e:
+            logger.warning(f"EastMoneyDirect 初始化失败: {e}")
+
+        # Level 1: AKShare（东财封装，备选）
         try:
             self._sources.append(AKShareSource())
         except Exception as e:
             logger.warning(f"AKShare 初始化失败: {e}")
 
-        # Level 1.5: EastMoney Direct（东财直连，AKShare 的完整备选）
+        # Level 1.5: THS（同花顺，板块数据的独立备选，不走东财服务器）
         try:
-            self._sources.append(EastMoneyDirectSource())
+            self._sources.append(THSSource())
         except Exception as e:
-            logger.warning(f"EastMoneyDirect 初始化失败: {e}")
+            logger.warning(f"THS 初始化失败: {e}")
 
         # Level 2: BaoStock
         try:

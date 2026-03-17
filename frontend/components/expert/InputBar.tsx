@@ -2,15 +2,20 @@
 
 import { useState, useRef } from "react";
 import { useExpertStore } from "@/stores/useExpertStore";
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, Square, Download } from "lucide-react";
 
-export function InputBar() {
+interface InputBarProps {
+  onExport?: () => void;
+}
+
+export function InputBar({ onExport }: InputBarProps) {
   const [input, setInput] = useState("");
-  const { sendMessage, stopStreaming, status, error, activeExpert, profiles } = useExpertStore();
+  const { sendMessage, stopStreaming, status, error, activeExpert, profiles, chatHistories } = useExpertStore();
   const isThinking = status === "thinking";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const profile = profiles.find((p) => p.type === activeExpert);
   const color = profile?.color ?? "#60A5FA";
+  const hasMessages = (chatHistories[activeExpert] ?? []).length > 0;
 
   const handleSend = async () => {
     if (!input.trim() || isThinking) return;
@@ -63,6 +68,19 @@ export function InputBar() {
           } as React.CSSProperties
         }
       >
+        {/* 导出按钮 */}
+        {hasMessages && !isThinking && onExport && (
+          <button
+            onClick={onExport}
+            className="shrink-0 w-8 h-8 rounded-xl flex items-center justify-center
+                       text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]
+                       hover:bg-[var(--bg-primary)] transition-all duration-150"
+            title="导出对话"
+          >
+            <Download size={14} />
+          </button>
+        )}
+
         <textarea
           ref={textareaRef}
           value={input}

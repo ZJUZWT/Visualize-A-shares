@@ -426,41 +426,41 @@ function BottomToolbar() {
 
       {/* 底部工具栏 */}
       <div className="overlay fixed bottom-4 left-[340px] right-4 flex justify-center z-20">
-        <div className="glass-panel px-4 py-2 flex items-center gap-1">
+        <div className="glass-panel px-4 py-2 flex items-center gap-2">
           <button
             onClick={() => togglePopup("playback")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-smooth ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-smooth ${
               activePopup === "playback"
                 ? "bg-[var(--accent-light)] text-[var(--accent)] font-medium"
                 : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-gray-50"
             }`}
           >
-            <History className="w-3.5 h-3.5" />
+            <History className="w-4 h-4" />
             历史回放
           </button>
-          <div className="w-px h-4 bg-[var(--border)]" />
+          <div className="w-px h-6 bg-[var(--border)]" />
           <button
             onClick={() => togglePopup("settings")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-smooth ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-smooth ${
               activePopup === "settings"
                 ? "bg-[var(--accent-light)] text-[var(--accent)] font-medium"
                 : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-gray-50"
             }`}
           >
-            <Settings2 className="w-3.5 h-3.5" />
+            <Settings2 className="w-4 h-4" />
             高级设置
           </button>
-          <div className="w-px h-4 bg-[var(--border)]" />
+          <div className="w-px h-6 bg-[var(--border)]" />
           <button
             onClick={() => togglePopup("quality")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-smooth ${
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-smooth ${
               activePopup === "quality"
                 ? "bg-[var(--accent-light)] text-[var(--accent)] font-medium"
                 : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-gray-50"
             }`}
             disabled={!terrainData.cluster_quality}
           >
-            <Activity className="w-3.5 h-3.5" />
+            <Activity className="w-4 h-4" />
             质量
           </button>
         </div>

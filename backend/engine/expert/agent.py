@@ -150,22 +150,78 @@ class ExpertAgent:
         logger.info(f"⏱️ recall_and_think 耗时 {elapsed:.1f}s (nodes={len(recalled_nodes)}, memories={len(memories)}, needs_data={think_output.needs_data})")
         return recalled_nodes, memories, think_output
 
+    @staticmethod
+    def _detect_tool_error(result_text: str, is_expert: bool = False) -> bool:
+        """判断工具结果是否为错误
+
+        区分两种场景：
+        - 专家回复(is_expert=True)：LLM 生成的自然语言，需要严格匹配结构化错误前缀，
+          避免正文中出现"⚠️ 风险提示"或"XX失败"等字眼被误判。
+        - 普通工具调用(is_expert=False)：通常是 JSON 或短文本，可以用关键词匹配。
+        """
+        if not result_text:
+            return True
+
+        if is_expert:
+            # 专家回复 — 仅匹配明确的调用层错误前缀
+            expert_error_prefixes = [
+                "专家 ", "调用专家 ", "缺少 question",
+            ]
+            expert_error_keywords = [
+                "连接超时", "连接中断", "读取失败", "请求失败",
+                "未返回有效内容",
+            ]
+            text_start = result_text[:200]
+            for prefix in expert_error_prefixes:
+                if text_start.startswith(prefix) and any(
+                    kw in text_start for kw in ["错误:", "失败:", "超时"]
+                ):
+                    return True
+            return any(kw in text_start for kw in expert_error_keywords)
+        else:
+            # 普通工具调用 — 结果短，关键词匹配
+            error_keywords = [
+                "工具调用失败", "error", "未找到", "无快照数据",
+                "无法解析", "无法识别", "需要具体股票代码",
+            ]
+            text_lower = result_text[:300].lower()
+            # JSON error 字段检测
+            try:
+                data = json.loads(result_text)
+                if isinstance(data, dict) and "error" in data:
+                    return True
+            except (json.JSONDecodeError, Exception):
+                pass
+            return any(kw.lower() in text_lower for kw in error_keywords)
+
     async def execute_tools(self, tool_calls: list[ToolCall]) -> list[dict]:
-        """并行执行工具调用，返回 tool_results"""
+        """并行执行工具调用，返回 tool_results（兼容旧接口）"""
         if not tool_calls:
             return []
+        results: list[dict] = []
+        async for r in self.execute_tools_streaming(tool_calls):
+            results.append(r)
+        return results
 
-        async def _exec(tc: ToolCall) -> dict:
+    async def execute_tools_streaming(self, tool_calls: list[ToolCall]) -> AsyncGenerator[dict, None]:
+        """并行执行工具调用，逐个完成时 yield 结果（用于流式推送）"""
+        if not tool_calls:
+            return
+
+        async def _exec(idx: int, tc: ToolCall) -> tuple[int, dict]:
             result = await self._tools.execute(tc.engine, tc.action, tc.params)
-            return {
+            return idx, {
                 "engine": tc.engine,
                 "action": tc.action,
                 "result": result,
                 "is_expert": tc.engine == "expert",
             }
 
-        results = await asyncio.gather(*[_exec(tc) for tc in tool_calls])
-        return list(results)
+        tasks = [asyncio.create_task(_exec(i, tc)) for i, tc in enumerate(tool_calls)]
+
+        for coro in asyncio.as_completed(tasks):
+            _idx, result = await coro
+            yield result
 
     async def learn_from_context(self, message: str, tool_results: list[dict]) -> None:
         """图谱自动学习 — 从对话和工具结果中提取股票/板块/产业链节点"""
@@ -237,15 +293,13 @@ class ExpertAgent:
                 "label": f"咨询{expert_label}" if is_expert_call else f"{tc.engine}.{tc.action}",
             }}
 
-        tool_results = await self.execute_tools(tool_calls)
-
-        # 按完成顺序发送 tool_result 事件
-        for r in tool_results:
+        tool_results: list[dict] = []
+        async for r in self.execute_tools_streaming(tool_calls):
+            tool_results.append(r)
             is_expert = r.get("is_expert")
             expert_label = EXPERT_NAMES.get(r["action"], r["action"]) if is_expert else ""
             result_text = r.get("result", "")
-            error_keywords = ["失败", "error", "无快照数据", "超时", "未返回有效内容", "⚠️"]
-            has_error = any(kw in result_text[:200] for kw in error_keywords)
+            has_error = self._detect_tool_error(result_text, is_expert=bool(is_expert))
             # K 线数据提取
             chart_data = {}
             if r["action"] in ("query_history", "query_hourly") and result_text:
@@ -315,7 +369,7 @@ class ExpertAgent:
                     query_type = classify_query(message)
                     tools_used = [tc.action for tc in tool_calls]
                     has_error = any(
-                        any(kw in r.get("result", "")[:200] for kw in ["失败", "error", "超时"])
+                        self._detect_tool_error(r.get("result", ""), is_expert=r.get("is_expert", False))
                         for r in tool_results
                     )
                     tracker.record(query_type, tools_used, success=not has_error)
@@ -552,41 +606,74 @@ class ExpertAgent:
         # 拼合所有可用上下文：LLM 输出 + 用户原始消息
         combined = text + "\n" + user_message
 
-        # ── 提取股票信息用于生成精准问题 ──
-        code_match = re.search(r'\b(\d{6})\b', combined)
-        detected_code = code_match.group(1) if code_match else ""
-        # 尝试从名称映射中找到股票名
-        stock_hint = ""
-        if detected_code:
-            stock_hint = f"({detected_code})"
-        else:
-            # 尝试从消息中提取股票名
-            name_map = self._get_stock_name_map()
-            for name in name_map:
-                if len(name) >= 2 and name in user_message:
-                    stock_hint = f"{name}({name_map[name]})"
-                    detected_code = name_map[name]
-                    break
+        # ── 提取所有股票信息用于生成精准问题 ──
+        # 1) 提取所有 6 位代码
+        detected_codes: list[str] = re.findall(r'\b(\d{6})\b', combined)
+        # 去重但保持顺序
+        seen_codes: set[str] = set()
+        unique_codes: list[str] = []
+        for c in detected_codes:
+            if c not in seen_codes:
+                seen_codes.add(c)
+                unique_codes.append(c)
+
+        # 2) 从用户消息中提取股票名称（可能没有代码）
+        name_map = self._get_stock_name_map()
+        detected_names: dict[str, str] = {}  # name → code
+        for name in sorted(name_map, key=len, reverse=True):  # 长名优先避免子串误匹配
+            if len(name) >= 2 and name in user_message and name not in detected_names:
+                code = name_map[name]
+                detected_names[name] = code
+                if code not in seen_codes:
+                    seen_codes.add(code)
+                    unique_codes.append(code)
+
+        # 3) 构建股票提示字符串
+        # 反向映射 code → name
+        code_to_name: dict[str, str] = {v: k for k, v in name_map.items()}
+        for name, code in detected_names.items():
+            code_to_name[code] = name
+
+        stock_hints: list[str] = []
+        for code in unique_codes:
+            name = code_to_name.get(code, "")
+            if name:
+                stock_hints.append(f"{name}({code})")
+            else:
+                stock_hints.append(f"({code})")
+
+        # 兼容旧逻辑的单股票变量
+        stock_hint = "、".join(stock_hints) if stock_hints else ""
+        detected_code = unique_codes[0] if unique_codes else ""
+
+        if len(unique_codes) > 1:
+            logger.info(f"容错解析检测到多只股票: {stock_hints}")
 
         # ── 为不同专家生成精准问题的辅助函数 ──
+        def _make_single_stock_question(expert_type: str, single_hint: str) -> str:
+            """为单只股票生成精准问题"""
+            if expert_type == "data":
+                return f"查询{single_hint}最近30天行情走势、成交量变化和涨跌幅"
+            elif expert_type == "quant":
+                return f"分析{single_hint}的技术指标(RSI/MACD/KDJ)，给出支撑位和阻力位"
+            elif expert_type == "info":
+                return f"查询{single_hint}最近的新闻和公告，评估消息面利好利空"
+            elif expert_type == "industry":
+                return f"分析{single_hint}所在行业的产业链位置和行业周期阶段"
+            return user_message
+
         def make_question(expert_type: str) -> str:
             base = user_message
+            if not stock_hint:
+                return base
             if expert_type == "data":
-                if stock_hint:
-                    return f"查询{stock_hint}最近30天行情走势、成交量变化和涨跌幅"
-                return base
+                return f"查询{stock_hint}最近30天行情走势、成交量变化和涨跌幅"
             elif expert_type == "quant":
-                if stock_hint:
-                    return f"分析{stock_hint}的技术指标(RSI/MACD/KDJ)，给出支撑位和阻力位"
-                return base
+                return f"分析{stock_hint}的技术指标(RSI/MACD/KDJ)，给出支撑位和阻力位"
             elif expert_type == "info":
-                if stock_hint:
-                    return f"查询{stock_hint}最近的新闻和公告，评估消息面利好利空"
-                return base
+                return f"查询{stock_hint}最近的新闻和公告，评估消息面利好利空"
             elif expert_type == "industry":
-                if stock_hint:
-                    return f"分析{stock_hint}所在行业的产业链位置和行业周期阶段"
-                return base
+                return f"分析{stock_hint}所在行业的产业链位置和行业周期阶段"
             return base
 
         # ── 先检测是否是"综合分析"型问题 → 直接调全部 4 个专家 ──
@@ -600,17 +687,32 @@ class ExpertAgent:
             re.search(p, user_message, re.IGNORECASE) for p in comprehensive_patterns
         )
         if is_comprehensive:
-            for expert_type in ["data", "quant", "info", "industry"]:
-                tool_calls.append({
-                    "engine": "expert",
-                    "action": expert_type,
-                    "params": {"question": make_question(expert_type)},
-                })
-            logger.info("think 容错解析: 综合分析问题，调用全部4个专家（精准子问题）")
+            # 多只股票时：为每只股票分别创建独立的专家调用
+            if len(stock_hints) > 1:
+                for single_hint in stock_hints:
+                    for expert_type in ["data", "quant", "info", "industry"]:
+                        q = _make_single_stock_question(expert_type, single_hint)
+                        tool_calls.append({
+                            "engine": "expert",
+                            "action": expert_type,
+                            "params": {"question": q},
+                        })
+                logger.info(
+                    f"think 容错解析: 综合分析问题，{len(stock_hints)}只股票 × 4个专家"
+                    f" = {len(tool_calls)}个调用 ({stock_hints})"
+                )
+            else:
+                for expert_type in ["data", "quant", "info", "industry"]:
+                    tool_calls.append({
+                        "engine": "expert",
+                        "action": expert_type,
+                        "params": {"question": make_question(expert_type)},
+                    })
+                logger.info("think 容错解析: 综合分析问题，调用全部4个专家（精准子问题）")
             return ThinkOutput(
                 needs_data=True,
                 tool_calls=[ToolCall(**tc) for tc in tool_calls],
-                reasoning="容错解析: 综合分析问题，调用全部4个专家",
+                reasoning=f"容错解析: 综合分析问题，{len(stock_hints)}只股票×4个专家",
             )
 
         # ── 细粒度匹配：同时扫描 LLM 输出和用户消息 ──
@@ -634,14 +736,28 @@ class ExpertAgent:
                     break
 
         if detected_experts:
-            for expert_type in detected_experts:
-                tool_calls.append({
-                    "engine": "expert",
-                    "action": expert_type,
-                    "params": {"question": make_question(expert_type)},
-                })
+            # 多只股票时：为每只股票分别创建独立的专家调用
+            if len(stock_hints) > 1:
+                for single_hint in stock_hints:
+                    for expert_type in detected_experts:
+                        q = _make_single_stock_question(expert_type, single_hint)
+                        tool_calls.append({
+                            "engine": "expert",
+                            "action": expert_type,
+                            "params": {"question": q},
+                        })
+            else:
+                for expert_type in detected_experts:
+                    tool_calls.append({
+                        "engine": "expert",
+                        "action": expert_type,
+                        "params": {"question": make_question(expert_type)},
+                    })
 
-            logger.info(f"think 容错解析: 检测到需要咨询 {list(detected_experts)}（精准子问题）")
+            logger.info(
+                f"think 容错解析: 检测到需要咨询 {list(detected_experts)}"
+                f"{'，' + str(len(stock_hints)) + '只股票' if len(stock_hints) > 1 else ''}（精准子问题）"
+            )
             return ThinkOutput(
                 needs_data=True,
                 tool_calls=[ToolCall(**tc) for tc in tool_calls],
@@ -1012,6 +1128,12 @@ class ExpertAgent:
                     system += "\n\n" + profile_prompt
         except Exception:
             pass
+
+        # 统一声明：数据来自实时工具，不受 LLM 训练截止限制
+        system += (
+            "\n\n⚠️ 重要：专家团队的所有数据通过工具从 AKShare/EastMoney 等数据源实时拉取，"
+            "不受模型训练截止日期限制。绝对不要提及「知识截止」「训练数据截止」等字眼。"
+        )
 
         # 构建消息列表（含对话历史）
         messages = [ChatMessage("system", system)]

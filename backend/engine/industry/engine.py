@@ -210,6 +210,52 @@ class IndustryEngine:
             if target in ind or ind in target:
                 return ind, ""
 
+        # 常见行业别名/概念名 → 标准行业名映射
+        INDUSTRY_ALIASES: dict[str, str] = {
+            "新能源汽车": "汽车整车",
+            "电力设备": "输配电气",
+            "光伏": "光伏设备",
+            "锂电": "电池",
+            "锂电池": "电池",
+            "固态电池": "电池",
+            "储能": "电池",
+            "芯片": "半导体",
+            "AI": "计算机应用",
+            "人工智能": "计算机应用",
+            "白酒": "饮料制造",
+            "军工": "航天航空",
+            "国防军工": "航天航空",
+            "医药": "化学制药",
+            "生物医药": "化学制药",
+            "消费电子": "消费电子",
+            "机器人": "机械行业",
+            "无人机": "航天航空",
+            "券商": "证券",
+            "保险": "保险",
+            "银行": "银行",
+            "地产": "房地产开发",
+            "房地产": "房地产开发",
+            "钢铁": "普钢",
+            "煤炭": "煤炭开采",
+            "石油": "油气开采",
+            "石油开采": "油气开采",
+            "有色": "小金属",
+            "稀土": "小金属",
+            "风电": "风电设备",
+            "水电": "电力行业",
+            "电力": "电力行业",
+        }
+        alias_target = INDUSTRY_ALIASES.get(target)
+        if alias_target:
+            logger.debug(f"行业别名解析: '{target}' → '{alias_target}'")
+            return alias_target, ""
+
+        # 概念性词汇黑名单 — 这些不是具体行业，无需识别
+        _BLACKLIST = {"热点板块", "市场", "市场整体", "大盘", "板块", "概念", "题材", "全市场"}
+        if target in _BLACKLIST:
+            logger.debug(f"跳过非行业词汇: '{target}'")
+            return "", ""
+
         # 尝试当作公司名查找股票代码，再通过代码查行业
         profiles = self._data.get_profiles()
         for code, info in profiles.items():

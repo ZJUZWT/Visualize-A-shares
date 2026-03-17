@@ -26,6 +26,13 @@ from engine.expert.schemas import (
 # 触发信念召回的关键词
 BELIEF_KEYWORDS = ["政策", "基本面", "情绪", "估值", "资金", "技术", "分散", "集中"]
 
+# 模糊问题中的市场/行业关键词 → 用于在精确匹配失败时召回相关行业节点
+FUZZY_MARKET_KEYWORDS = [
+    "短线", "机会", "今天", "市场", "大盘", "板块", "热点", "题材",
+    "轮动", "龙头", "涨停", "跌停", "反弹", "突破", "资金流",
+    "北向", "主力", "游资", "趋势", "走势", "行情",
+]
+
 # 节点类型优先级（越小越优先）
 NODE_PRIORITY = {
     "stock": 0, "sector": 1, "material": 2, "region": 3,
@@ -98,14 +105,13 @@ class KnowledgeGraph:
         return neighbors
 
     def recall(self, message: str, persona: str = "rag") -> list[dict]:
-        """5步图谱召回算法，返回最多10个相关节点（含 id 字段）
+        """7步图谱召回算法，返回最多10个相关节点（含 id 字段）
 
         Args:
             message: 用户消息
             persona: 人格类型，信念召回按此过滤（股票/行业等节点共享）
 
-        v2: 修复过于宽松的匹配 — 只做精确子串匹配，信念仅在命中关键词时召回，
-            1-hop 扩展只针对实体节点（stock/sector/material）不扩展 belief。
+        v3: 增强模糊召回 — 精确匹配失败时，基于近期活跃节点和行业关键词补充召回。
         """
         matched_ids: set[str] = set()
 
@@ -138,7 +144,46 @@ class KnowledgeGraph:
             for node_id, _ in belief_nodes[:3]:
                 matched_ids.add(node_id)
 
-        # Step 4: 1-hop 扩展 — 仅扩展实体节点（stock/sector/material/region）的邻居
+        # ── Step 4 (NEW): 模糊召回 — 精确匹配失败时的补充策略 ──
+        # 统计精确匹配到的实体节点数（不含 belief/stance）
+        entity_matched = sum(
+            1 for nid in matched_ids
+            if self.graph.nodes[nid].get("type") in ("stock", "sector", "material", "region", "event")
+        )
+
+        if entity_matched == 0:
+            is_market_query = any(kw in message for kw in FUZZY_MARKET_KEYWORDS)
+
+            # 4a: 近期活跃节点召回 — 按 updated_at/created_at 排序，取最近交互的股票/行业
+            recent_entity_nodes: list[tuple[str, str]] = []  # (node_id, timestamp)
+            for node_id in self.graph.nodes():
+                data = self.graph.nodes[node_id]
+                ntype = data.get("type")
+                if ntype in ("stock", "sector"):
+                    ts = data.get("updated_at") or data.get("created_at") or ""
+                    recent_entity_nodes.append((node_id, ts))
+            # 按时间倒排
+            recent_entity_nodes.sort(key=lambda x: x[1], reverse=True)
+            for node_id, _ in recent_entity_nodes[:5]:
+                matched_ids.add(node_id)
+
+            # 4b: 市场类问题 — 额外召回高置信度信念（即使没有精确关键词命中）
+            if is_market_query and not has_belief_keyword:
+                belief_nodes = [
+                    (node_id, self.graph.nodes[node_id])
+                    for node_id in self.graph.nodes()
+                    if self.graph.nodes[node_id].get("type") == "belief"
+                    and self.graph.nodes[node_id].get("persona", "rag") == persona
+                ]
+                belief_nodes.sort(key=lambda x: x[1].get("confidence", 0), reverse=True)
+                for node_id, _ in belief_nodes[:3]:
+                    matched_ids.add(node_id)
+
+            if matched_ids - set():  # 有新增
+                fuzzy_count = len(matched_ids) - entity_matched
+                logger.info(f"📡 图谱模糊召回补充: +{fuzzy_count} 个节点 (market_query={is_market_query})")
+
+        # Step 5: 1-hop 扩展 — 仅扩展实体节点（stock/sector/material/region）的邻居
         #   不扩展 belief/stance/event，避免召回大量无关节点
         EXPANDABLE_TYPES = {"stock", "sector", "material", "region"}
         hop_ids: set[str] = set()
@@ -152,7 +197,7 @@ class KnowledgeGraph:
                 hop_ids.add(neighbor)
         matched_ids.update(hop_ids)
 
-        # Step 5: 按节点类型优先级排序，截取前10个
+        # Step 6: 按节点类型优先级排序，截取前10个
         def priority(node_id: str) -> int:
             t = self.graph.nodes[node_id].get("type", "")
             return NODE_PRIORITY.get(t, 99)
