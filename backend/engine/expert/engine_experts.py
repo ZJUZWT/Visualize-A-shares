@@ -1003,6 +1003,9 @@ class EngineExpert:
             "不受模型训练截止日期限制。绝对不要提及「知识截止」「训练数据截止」等字眼。"
             "\n\n🚫 绝对不要使用 <think> 标签！直接输出你的分析和结论。"
             "不要输出任何思考过程标签，直接给出完整的专业分析回复。"
+            "\n\n🚫 绝对不要在回复中输出任何工具调用！包括 [TOOL_CALL]、<tool_call>、"
+            "function_call 等任何格式的工具调用语法。你的工具已在前一步自动执行完毕，"
+            "结果已包含在上下文中。直接基于已有数据进行分析和回答，不要试图调用新工具。"
         )
         if context_parts:
             system += "\n\n" + "\n\n".join(context_parts)
@@ -1020,13 +1023,15 @@ class EngineExpert:
         skip_end_tag = ""        # 当前跳过区域的结束标签
         raw_buffer = ""
 
-        # 需要过滤的标签及其结束标签
+        # 需要过滤的标签及其结束标签（包括 XML 尖括号和方括号格式）
         SKIP_TAGS = {
             "<think>": "</think>",
             "<minimax:tool_call>": "</minimax:tool_call>",
             "<minimax:search_result>": "</minimax:search_result>",
             "<tool_call>": "</tool_call>",
             "<tool_code>": "</tool_code>",
+            "[TOOL_CALL]": "[/TOOL_CALL]",
+            "[tool_call]": "[/tool_call]",
         }
 
         try:
@@ -1075,8 +1080,9 @@ class EngineExpert:
                         raw_buffer = raw_buffer[-50:]
                     continue
 
-                # 正常正文：检查是否可能是不完整的标签
-                if "<" in raw_buffer and not raw_buffer.endswith(">"):
+                # 正常正文：检查是否可能是不完整的标签（< 或 [ 开头）
+                if (("<" in raw_buffer and not raw_buffer.endswith(">")) or
+                        ("[" in raw_buffer and raw_buffer.rstrip().endswith("]") is False and "[TOOL" in raw_buffer.upper())):
                     if len(raw_buffer) < 30:
                         continue
 
