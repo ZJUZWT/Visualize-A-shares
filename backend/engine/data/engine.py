@@ -54,25 +54,51 @@ class DataEngine:
 
     # ── 日线历史 ──
 
+    @staticmethod
+    def _count_trading_days_between(d1: datetime.date, d2: datetime.date) -> int:
+        """估算 d1 到 d2 之间有多少个交易日（不含 d1、d2 本身）
+
+        简单规则：排除周六日。不考虑节假日（节假日后首个交易日会多等1天，可接受）。
+        """
+        if d1 >= d2:
+            return 0
+        count = 0
+        cur = d1 + datetime.timedelta(days=1)
+        while cur < d2:
+            if cur.weekday() < 5:  # 0=Mon … 4=Fri
+                count += 1
+            cur += datetime.timedelta(days=1)
+        return count
+
     def get_daily_history(self, code: str, start: str, end: str) -> pd.DataFrame:
         """获取个股日线，优先本地 DuckDB，缺失或过期则通过 collector 拉取"""
         df = self._store.get_daily(code, start, end)
         if df is not None and len(df) > 0:
-            # ── 新鲜度检查：如果缓存最后一条日期离今天超过 2 天，尝试重新拉取 ──
+            # ── 新鲜度检查：缓存最后一条到今天之间是否有遗漏的交易日 ──
             stale = False
+            missed = 0
             try:
                 date_col = "date" if "date" in df.columns else ("trade_date" if "trade_date" in df.columns else None)
                 if date_col:
                     last_date = pd.to_datetime(df[date_col].iloc[-1]).date()
-                    gap = (datetime.date.today() - last_date).days
-                    if gap > 2:  # 周末间隔最大2天，>2说明缺少最近交易日数据
+                    today = datetime.date.today()
+                    now = datetime.datetime.now()
+                    # 1) 中间有遗漏交易日（如缓存到周一、现在周三→遗漏了周二）
+                    missed = self._count_trading_days_between(last_date, today)
+                    if missed >= 1:
                         stale = True
+                    # 2) 今天本身是交易日且已开盘(>9:30)，但缓存还不是今天
+                    elif (today.weekday() < 5
+                          and now.time() >= datetime.time(9, 30)
+                          and last_date < today):
+                        stale = True
+                        missed = 1
             except Exception:
                 pass
             if not stale:
                 return df
             # 缓存过期，重新拉取
-            logger.debug(f"📡 {code} 本地日线数据过期，重新拉取...")
+            logger.debug(f"📡 {code} 本地日线数据过期(遗漏{missed}个交易日)，重新拉取...")
         # 本地无数据或过期，尝试网络拉取
         fresh = self._collector.get_daily_history(code, start, end)
         if fresh is not None and len(fresh) > 0:

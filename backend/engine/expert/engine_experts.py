@@ -295,6 +295,7 @@ class EngineExpert:
 
             # ── 智能重试：检测失败/空结果，让 LLM 修正参数后重试一次 ──
             is_failure = self._is_tool_result_failure(result)
+            is_empty = self._is_tool_result_empty(result)
             if is_failure:
                 data_fetch_log.append({
                     "action": action_name, "params": params,
@@ -326,6 +327,14 @@ class EngineExpert:
                         })
                 else:
                     logger.warning(f"❌ [{self.expert_type}] {action_name} LLM 无法修正参数，放弃重试")
+            elif is_empty:
+                # 数据为空但参数没错（正常现象），记录但不重试
+                data_fetch_log.append({
+                    "action": action_name, "params": params,
+                    "status": "EMPTY", "reason": result[:200],
+                    "retried": False,
+                })
+                logger.debug(f"📭 [{self.expert_type}] {action_name} 数据为空(正常): {result[:100]}")
             else:
                 data_fetch_log.append({
                     "action": action_name, "params": params,
@@ -356,10 +365,12 @@ class EngineExpert:
         if data_fetch_log:
             ok_count = sum(1 for d in data_fetch_log if d["status"].startswith("OK"))
             fail_count = sum(1 for d in data_fetch_log if d["status"].startswith("FAIL"))
+            empty_count = sum(1 for d in data_fetch_log if d["status"] == "EMPTY")
             retry_count = sum(1 for d in data_fetch_log if d["retried"])
             logger.info(
                 f"📊 [{self.expert_type}] 数据获取统计: "
-                f"总计={len(data_fetch_log)}, 成功={ok_count}, 失败={fail_count}, 重试={retry_count}"
+                f"总计={len(data_fetch_log)}, 成功={ok_count}, 空数据={empty_count}, "
+                f"失败={fail_count}, 重试={retry_count}"
             )
             for entry in data_fetch_log:
                 if entry["status"].startswith("FAIL"):
@@ -500,23 +511,51 @@ class EngineExpert:
 
     @staticmethod
     def _is_tool_result_failure(result: str) -> bool:
-        """判断工具结果是否为失败/空数据"""
+        """判断工具结果是否为真正的失败（需要重试）。
+
+        "数据为空"（如某个股近7天无公告）不算失败，不应触发重试。
+        只有参数错误、接口异常等真正的错误才需要重试。
+
+        约定:
+        - {"error": "..."} → 真正的错误（参数不对、接口挂了），触发重试
+        - {"empty": true, "note": "..."} → 数据为空（正常现象），不触发重试
+        """
         if not result:
             return True
-        fail_keywords = [
-            "工具调用失败", "error", "未找到", "无快照数据", "无法解析",
-            "无法识别", "失败", "未知", "object is not subscriptable",
-            "需要具体股票代码",
-        ]
-        result_lower = result[:300].lower()
-        # JSON 结构中的 error 字段
+
+        # JSON 结构判断（优先）
         try:
             data = json.loads(result)
-            if isinstance(data, dict) and "error" in data:
+            if isinstance(data, dict):
+                # 显式标记为"空数据"的，不算失败
+                if data.get("empty"):
+                    return False
+                # 显式标记为错误的
+                if "error" in data:
+                    return True
+        except (json.JSONDecodeError, Exception):
+            pass
+
+        # 纯文本关键词匹配（兜底，用于非 JSON 返回）
+        fail_keywords = [
+            "工具调用失败", "无法解析", "无法识别",
+            "object is not subscriptable", "需要具体股票代码",
+        ]
+        result_lower = result[:300].lower()
+        return any(kw.lower() in result_lower for kw in fail_keywords)
+
+    @staticmethod
+    def _is_tool_result_empty(result: str) -> bool:
+        """判断工具结果是否为"数据为空"（正常现象，不需要重试）"""
+        if not result:
+            return False
+        try:
+            data = json.loads(result)
+            if isinstance(data, dict) and data.get("empty"):
                 return True
         except (json.JSONDecodeError, Exception):
             pass
-        return any(kw.lower() in result_lower for kw in fail_keywords)
+        return False
 
     async def _retry_with_fix(self, failed_tc: dict, error_msg: str, original_question: str) -> dict | None:
         """让 LLM 根据错误信息修正工具参数，返回修正后的 tool_call dict，或 None"""
@@ -606,9 +645,9 @@ class EngineExpert:
                 return await self._exec_industry_tool(action, params)
         except Exception as e:
             logger.error(f"工具执行失败 [{action}]: {e}")
-            return f"工具调用失败: {e}"
+            return json.dumps({"error": f"工具调用失败: {e}"}, ensure_ascii=False)
 
-        return "未知引擎类型"
+        return json.dumps({"error": "未知引擎类型"}, ensure_ascii=False)
 
     async def _exec_data_tool(self, action: str, params: dict) -> str:
         """DataEngine 工具 — 直接调用引擎单例"""
@@ -674,7 +713,7 @@ class EngineExpert:
             start = (today - datetime.timedelta(days=int(calendar_days))).strftime("%Y-%m-%d")
             df = await asyncio.to_thread(de.get_daily_history, code, start, end)
             if df is None or df.empty:
-                return json.dumps({"error": f"无 {code} 日线数据"}, ensure_ascii=False)
+                return json.dumps({"empty": True, "note": f"无 {code} 日线数据"}, ensure_ascii=False)
 
             # ── 用实时快照补充当天数据（仅交易时段：工作日 9:15~15:30） ──
             try:
@@ -726,7 +765,7 @@ class EngineExpert:
             ce = get_cluster_engine()
             cluster_id = params.get("cluster_id", 0)
             result = ce.get_cluster_stocks(cluster_id)
-            return json.dumps(result, ensure_ascii=False, default=str) if result else f"聚类 {cluster_id} 无数据"
+            return json.dumps(result, ensure_ascii=False, default=str) if result else json.dumps({"empty": True, "note": f"聚类 {cluster_id} 无数据"}, ensure_ascii=False)
 
         elif action == "find_similar_stocks":
             from engine.cluster import get_cluster_engine
@@ -734,7 +773,7 @@ class EngineExpert:
             code = self._resolve_code(params.get("code", ""))
             top_k = params.get("top_k", 10)
             result = ce.find_similar(code, top_k)
-            return json.dumps(result, ensure_ascii=False, default=str) if result else f"未找到 {code} 的相似股票"
+            return json.dumps(result, ensure_ascii=False, default=str) if result else json.dumps({"empty": True, "note": f"未找到 {code} 的相似股票"}, ensure_ascii=False)
 
         elif action == "run_screen":
             snap = await self._ensure_snapshot(de)
@@ -757,13 +796,13 @@ class EngineExpert:
             days = int(params.get("days", 5))
             df = await asyncio.to_thread(de.get_kline, code, "60m", days)
             if df is None or df.empty:
-                return json.dumps({"error": f"无 {code} 小时线数据"}, ensure_ascii=False)
+                return json.dumps({"empty": True, "note": f"无 {code} 小时线数据"}, ensure_ascii=False)
             records = df.tail(20).to_dict("records")
             return json.dumps({"code": code, "frequency": "60m", "records": records,
                                 "total_bars": len(df)},
                               ensure_ascii=False, default=str)
 
-        return f"未知 data 工具: {action}"
+        return json.dumps({"error": f"未知 data 工具: {action}"}, ensure_ascii=False)
 
     async def _exec_quant_tool(self, action: str, params: dict) -> str:
         """QuantEngine 工具 — 直接调用引擎单例"""
@@ -882,13 +921,13 @@ class EngineExpert:
             days = int(params.get("days", 5))
             df = await asyncio.to_thread(de.get_kline, code, "60m", days)
             if df is None or df.empty:
-                return json.dumps({"error": f"无 {code} 小时线数据"}, ensure_ascii=False)
+                return json.dumps({"empty": True, "note": f"无 {code} 小时线数据"}, ensure_ascii=False)
             records = df.tail(20).to_dict("records")
             return json.dumps({"code": code, "frequency": "60m", "records": records,
                                 "total_bars": len(df)},
                               ensure_ascii=False, default=str)
 
-        return f"未知 quant 工具: {action}"
+        return json.dumps({"error": f"未知 quant 工具: {action}"}, ensure_ascii=False)
 
     async def _exec_info_tool(self, action: str, params: dict) -> str:
         """InfoEngine 工具 — 直接调用引擎单例"""
@@ -903,7 +942,7 @@ class EngineExpert:
             limit = params.get("limit", 20)
             news_df = await asyncio.to_thread(de.get_news, code, limit)
             if news_df is None or (hasattr(news_df, 'empty') and news_df.empty):
-                return json.dumps({"error": f"无 {code} 新闻数据"}, ensure_ascii=False)
+                return json.dumps({"empty": True, "note": f"{code} 近期无新闻数据"}, ensure_ascii=False)
             # DataFrame → list[dict]
             if hasattr(news_df, 'to_dict'):
                 records = news_df.to_dict("records")
@@ -917,7 +956,7 @@ class EngineExpert:
             try:
                 ann_df = await asyncio.to_thread(de.get_announcements, code, limit)
                 if ann_df is None or (hasattr(ann_df, 'empty') and ann_df.empty):
-                    return json.dumps({"error": f"无 {code} 公告数据"}, ensure_ascii=False)
+                    return json.dumps({"empty": True, "note": f"{code} 近7天无公告"}, ensure_ascii=False)
                 if hasattr(ann_df, 'to_dict'):
                     records = ann_df.to_dict("records")
                 else:
@@ -958,9 +997,9 @@ class EngineExpert:
             ie = get_industry_engine()
             try:
                 result = await asyncio.to_thread(ie.get_industry_mapping)
-                return json.dumps(result, ensure_ascii=False, default=str) if result else "无映射数据"
+                return json.dumps(result, ensure_ascii=False, default=str) if result else json.dumps({"empty": True, "note": "无映射数据"}, ensure_ascii=False)
             except Exception as e:
-                return f"行业映射查询失败: {e}"
+                return json.dumps({"error": f"行业映射查询失败: {e}"}, ensure_ascii=False)
 
         elif action == "query_capital_structure":
             from engine.industry import get_industry_engine
