@@ -12,6 +12,7 @@ from loguru import logger
 from engine.expert.knowledge_graph import KnowledgeGraph
 from engine.expert.personas import (
     INITIAL_BELIEFS,
+    SHORT_TERM_BELIEFS,
     THINK_SYSTEM_PROMPT,
     BELIEF_UPDATE_PROMPT,
     format_graph_context,
@@ -30,6 +31,7 @@ from engine.expert.schemas import (
     ToolCall,
 )
 from engine.expert.tools import ExpertTools
+from llm.context_guard import ContextGuard
 
 
 # 专家类型到中文名的映射
@@ -86,6 +88,7 @@ class ExpertAgent:
         self._tools = tools
         self._llm = tools.llm_engine
         self._lock = asyncio.Lock()
+        self._context_guard = ContextGuard()
 
         # 知识图谱
         self._graph = KnowledgeGraph(kg_path)
@@ -105,34 +108,42 @@ class ExpertAgent:
                 logger.warning(f"AgentMemory 初始化失败，跳过记忆功能: {e}")
 
     def _seed_initial_beliefs(self) -> None:
-        """将初始信念写入图谱"""
+        """将初始信念写入图谱（投资顾问 + 短线专家各自独立）"""
+        count = 0
         for b in INITIAL_BELIEFS:
-            node = BeliefNode(content=b["content"], confidence=b["confidence"])
+            node = BeliefNode(content=b["content"], confidence=b["confidence"], persona="rag")
             self._graph.add_node_sync(node)
+            count += 1
+        for b in SHORT_TERM_BELIEFS:
+            node = BeliefNode(content=b["content"], confidence=b["confidence"], persona="short_term")
+            self._graph.add_node_sync(node)
+            count += 1
         self._graph.save_sync()
-        logger.info(f"初始信念已写入图谱: {len(INITIAL_BELIEFS)} 条")
+        logger.info(f"初始信念已写入图谱: {count} 条 (投资顾问 {len(INITIAL_BELIEFS)} + 短线专家 {len(SHORT_TERM_BELIEFS)})")
 
     async def recall_and_think(
         self,
         query: str,
         history: list[dict] | None = None,
+        persona: str = "rag",
     ) -> tuple[list[dict], list[dict], "ThinkOutput"]:
         """图谱召回 + 记忆召回 + think，不执行工具
 
         Returns: (recalled_nodes, memories, think_output)
         """
         t0 = time.monotonic()
-        recalled_nodes = self._graph.recall(query)
+        agent_role = "short_term" if persona == "short_term" else "expert"
+        recalled_nodes = self._graph.recall(query, persona=persona)
         memories: list[dict] = []
         if self._memory:
             try:
-                memories = self._memory.recall(agent_role="expert", query=query, top_k=5)
+                memories = self._memory.recall(agent_role=agent_role, query=query, top_k=5)
             except Exception as e:
                 logger.warning(f"记忆召回失败: {e}")
 
         think_output = ThinkOutput(needs_data=False)
         if self._llm:
-            think_output = await self._think(query, recalled_nodes, memories, history or [])
+            think_output = await self._think(query, recalled_nodes, memories, history or [], persona=persona)
 
         elapsed = time.monotonic() - t0
         logger.info(f"⏱️ recall_and_think 耗时 {elapsed:.1f}s (nodes={len(recalled_nodes)}, memories={len(memories)}, needs_data={think_output.needs_data})")
@@ -166,36 +177,39 @@ class ExpertAgent:
         memories: list[dict],
         tool_results: list[dict],
         history: list[dict] | None = None,
+        persona: str = "rag",
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复，yield (token, full_text)"""
         async for token, full_text in self._reply_stream(
-            message, nodes, memories, tool_results, history or []
+            message, nodes, memories, tool_results, history or [], persona=persona
         ):
             yield token, full_text
 
-    async def belief_update(self, message: str, reply: str) -> list[dict]:
+    async def belief_update(self, message: str, reply: str, persona: str = "rag") -> list[dict]:
         """信念更新 — 根据对话结论更新 BeliefNode confidence
 
         返回更新事件列表 [{event: "belief_updated", data: {...}}]
         """
         events = []
-        async for event in self._belief_update(message, reply):
+        async for event in self._belief_update(message, reply, persona=persona):
             events.append(event)
         return events
 
-    async def chat(self, message: str, history: list[dict] | None = None) -> AsyncGenerator[dict, None]:
+    async def chat(self, message: str, history: list[dict] | None = None, persona: str = "rag") -> AsyncGenerator[dict, None]:
         """完整对话流程，yield 结构化事件 dict
 
         Args:
             message: 用户消息
             history: 对话历史 [{"role": "user"|"expert", "content": "..."}]
+            persona: 人格类型 "rag"(投资顾问) 或 "short_term"(短线专家)
         """
         conv_history = history or []
+        agent_role = "short_term" if persona == "short_term" else "expert"
         t0_chat = time.monotonic()
         yield {"event": "thinking_start", "data": {}}
 
         # 1-3. 图谱召回 + 记忆召回 + think
-        recalled_nodes, memories, think_output = await self.recall_and_think(message, conv_history)
+        recalled_nodes, memories, think_output = await self.recall_and_think(message, conv_history, persona=persona)
         yield {"event": "graph_recall", "data": {"nodes": [
             {
                 "id": n["id"],
@@ -261,7 +275,7 @@ class ExpertAgent:
             logger.debug(f"开始 _reply_stream, tool_results={len(tool_results)}条, "
                          f"expert={len([r for r in tool_results if r.get('is_expert')])}条")
             async for token, full_text in self.generate_reply_stream(
-                message, recalled_nodes, memories, tool_results, conv_history
+                message, recalled_nodes, memories, tool_results, conv_history, persona=persona
             ):
                 expert_reply = full_text
                 yield {"event": "reply_token", "data": {"token": token}}
@@ -273,7 +287,7 @@ class ExpertAgent:
 
         # 7. 信念更新
         if self._llm and expert_reply:
-            for event in await self.belief_update(message, expert_reply):
+            for event in await self.belief_update(message, expert_reply, persona=persona):
                 yield event
 
         # 8. 记忆存储
@@ -282,13 +296,43 @@ class ExpertAgent:
                 stock_codes = [n["code"] for n in recalled_nodes if n.get("type") == "stock"]
                 target = stock_codes[0] if stock_codes else "general"
                 self._memory.store(
-                    agent_role="expert",
+                    agent_role=agent_role,
                     target=target,
                     content=f"用户: {message}\n专家: {expert_reply}",
                     metadata={"tools_used": str([tc.action for tc in tool_calls])},
                 )
             except Exception as e:
                 logger.warning(f"记忆存储失败: {e}")
+
+        # 9. 工具使用反馈记录（借鉴 OpenClaw TOOLS 层）
+        if tool_calls:
+            try:
+                from engine.expert.tool_tracker import classify_query
+                from engine.expert.routes import get_tool_tracker
+                tracker = get_tool_tracker()
+                if tracker:
+                    query_type = classify_query(message)
+                    tools_used = [tc.action for tc in tool_calls]
+                    has_error = any(
+                        any(kw in r.get("result", "")[:200] for kw in ["失败", "error", "超时"])
+                        for r in tool_results
+                    )
+                    tracker.record(query_type, tools_used, success=not has_error)
+            except Exception as e:
+                logger.debug(f"工具反馈记录失败: {e}")
+
+        # 10. 用户偏好提取（借鉴 OpenClaw USER 层）
+        try:
+            from engine.expert.user_profile import extract_preferences
+            from engine.expert.routes import get_user_profile_tracker
+            upt = get_user_profile_tracker()
+            if upt:
+                prefs = extract_preferences(message)
+                if prefs:
+                    upt.update("global", prefs)
+                    logger.info(f"用户偏好更新: {prefs}")
+        except Exception as e:
+            logger.debug(f"用户偏好提取失败: {e}")
 
         chat_elapsed = time.monotonic() - t0_chat
         logger.info(f"⏱️ ExpertAgent.chat 总耗时 {chat_elapsed:.1f}s")
@@ -388,13 +432,34 @@ class ExpertAgent:
         nodes: list[dict],
         memories: list[dict],
         history: list[dict] | None = None,
+        persona: str = "rag",
     ) -> ThinkOutput:
         """think 步骤：LLM 决策是否需要工具调用（流式收集 + 多层容错解析）"""
         from llm.providers import ChatMessage
-        prompt = THINK_SYSTEM_PROMPT.format(
-            graph_context=format_graph_context(nodes),
-            memory_context=format_memory_context(memories),
-        )
+        # 根据 persona 选择 system prompt
+        if persona == "short_term":
+            from engine.expert.personas import SHORT_TERM_THINK_PROMPT
+            prompt = SHORT_TERM_THINK_PROMPT.format(
+                graph_context=format_graph_context(nodes),
+                memory_context=format_memory_context(memories),
+            )
+        else:
+            prompt = THINK_SYSTEM_PROMPT.format(
+                graph_context=format_graph_context(nodes),
+                memory_context=format_memory_context(memories),
+            )
+
+        # 注入工具使用经验（借鉴 OpenClaw TOOLS 层）
+        try:
+            from engine.expert.routes import get_tool_tracker
+            tracker = get_tool_tracker()
+            if tracker:
+                experience = tracker.format_experience_prompt()
+                if experience:
+                    prompt += "\n\n" + experience
+        except Exception:
+            pass
+
         try:
             # 构建消息列表（含对话历史）
             messages = [ChatMessage("system", prompt)]
@@ -403,6 +468,11 @@ class ExpertAgent:
                 content = h.get("content", "")
                 messages.append(ChatMessage(role, content))
             messages.append(ChatMessage("user", message))
+
+            # 上下文窗口保护
+            msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
+            msg_dicts = self._context_guard.guard_messages(msg_dicts)
+            messages = [ChatMessage(m["role"], m["content"]) for m in msg_dicts]
 
             # 流式收集
             chunks: list[str] = []
@@ -825,6 +895,7 @@ class ExpertAgent:
         memories: list[dict],
         tool_results: list[dict],
         history: list[dict] | None = None,
+        persona: str = "rag",
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复（含 <think> 标签过滤），yield (token, accumulated_text)"""
         from llm.providers import ChatMessage
@@ -848,16 +919,32 @@ class ExpertAgent:
                 f"- {r['engine']}.{r['action']}: {r['result']}" for r in data_results
             ))
 
-        system = (
-            "你是A股投资专家总顾问。你的专家团队（数据、量化、资讯、产业链专家）已为你完成了分析。\n"
-            "请基于他们的分析报告和你自己的知识图谱，给出**综合性、有深度**的投资分析。\n"
-            "要求：\n"
-            "1. 综合多位专家的观点，而非简单罗列\n"
-            "2. 指出各专家分析中的一致之处和分歧\n"
-            "3. 给出你自己的独立判断\n"
-            "4. 使用 Markdown 格式，善用表格展示数据\n\n"
-            + "\n\n".join(context_parts)
-        )
+        # 根据 persona 选择 system prompt
+        if persona == "short_term":
+            from engine.expert.personas import SHORT_TERM_REPLY_SYSTEM
+            system = SHORT_TERM_REPLY_SYSTEM + "\n\n".join(context_parts)
+        else:
+            system = (
+                "你是A股投资专家总顾问。你的专家团队（数据、量化、资讯、产业链专家）已为你完成了分析。\n"
+                "请基于他们的分析报告和你自己的知识图谱，给出**综合性、有深度**的投资分析。\n"
+                "要求：\n"
+                "1. 综合多位专家的观点，而非简单罗列\n"
+                "2. 指出各专家分析中的一致之处和分歧\n"
+                "3. 给出你自己的独立判断\n"
+                "4. 使用 Markdown 格式，善用表格展示数据\n\n"
+                + "\n\n".join(context_parts)
+            )
+
+        # 注入用户偏好（借鉴 OpenClaw USER 层）
+        try:
+            from engine.expert.routes import get_user_profile_tracker
+            upt = get_user_profile_tracker()
+            if upt:
+                profile_prompt = upt.format_profile_prompt("global")
+                if profile_prompt:
+                    system += "\n\n" + profile_prompt
+        except Exception:
+            pass
 
         # 构建消息列表（含对话历史）
         messages = [ChatMessage("system", system)]
@@ -866,6 +953,11 @@ class ExpertAgent:
             content = h.get("content", "")
             messages.append(ChatMessage(role, content))
         messages.append(ChatMessage("user", message))
+
+        # 上下文窗口保护
+        msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
+        msg_dicts = self._context_guard.guard_messages(msg_dicts)
+        messages = [ChatMessage(m["role"], m["content"]) for m in msg_dicts]
 
         accumulated = ""
         in_skip = False          # 跳过区域（内容被丢弃）
@@ -959,10 +1051,11 @@ class ExpertAgent:
         self,
         user_message: str,
         expert_reply: str,
+        persona: str = "rag",
     ) -> AsyncGenerator[dict, None]:
-        """信念更新步骤，yield belief_updated 事件"""
+        """信念更新步骤，yield belief_updated 事件（只更新对应 persona 的信念）"""
         from llm.providers import ChatMessage
-        beliefs = self._graph.get_all_beliefs()
+        beliefs = self._graph.get_all_beliefs(persona=persona)
         prompt = BELIEF_UPDATE_PROMPT.format(
             beliefs_context=format_beliefs_context(beliefs),
             user_message=user_message,
