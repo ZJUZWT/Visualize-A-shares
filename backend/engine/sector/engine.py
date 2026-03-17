@@ -30,16 +30,19 @@ from engine.sector.schemas import (
 
 
 # ─── 内存缓存（避免短时间并发重复请求 AKShare 被封）────────
-CACHE_TTL = 60  # 秒
+CACHE_TTL = 60  # 秒（板块列表等高频变化数据）
+CONSTITUENTS_CACHE_TTL = 86400  # 24 小时（成分股极少变化）
+CONSTITUENTS_DB_MAX_AGE_DAYS = 7  # DuckDB 成分股数据 7 天内视为有效
 
 
 @dataclass
 class _CacheEntry:
     data: Any
+    ttl: float = CACHE_TTL
     ts: float = field(default_factory=time.monotonic)
 
     def expired(self) -> bool:
-        return (time.monotonic() - self.ts) > CACHE_TTL
+        return (time.monotonic() - self.ts) > self.ttl
 
 
 class SectorEngine:
@@ -58,8 +61,8 @@ class SectorEngine:
             return entry.data
         return None
 
-    def _set_cache(self, key: str, data: Any):
-        self._cache[key] = _CacheEntry(data=data)
+    def _set_cache(self, key: str, data: Any, ttl: float = CACHE_TTL):
+        self._cache[key] = _CacheEntry(data=data, ttl=ttl)
 
     def _get_lock(self, key: str) -> asyncio.Lock:
         if key not in self._locks:
@@ -268,34 +271,85 @@ class SectorEngine:
     async def get_constituents(
         self, board_name: str, board_code: str = "",
     ) -> SectorConstituentsResponse:
-        """获取板块成分股"""
+        """获取板块成分股（三层缓存：内存24h → DuckDB 7天 → 远程拉取+回填）"""
         t0 = time.monotonic()
-        df = await asyncio.to_thread(
-            self._data.get_sector_constituents, board_name
-        )
-        items = []
-        if not df.empty:
-            for _, row in df.iterrows():
-                items.append(ConstituentItem(
-                    code=str(row.get("code", "")),
-                    name=str(row.get("name", "")),
-                    price=self._safe_float(row.get("price")),
-                    pct_chg=self._safe_float(row.get("pct_chg")),
-                    volume=self._safe_float(row.get("volume")),
-                    amount=self._safe_float(row.get("amount")),
-                    turnover_rate=self._safe_float(row.get("turnover_rate")),
-                    pe_ttm=self._safe_float(row.get("pe_ttm")) or None,
-                    pb=self._safe_float(row.get("pb")) or None,
-                ))
-        elapsed = time.monotonic() - t0
-        logger.info(
-            f"⏱️ SectorEngine.get_constituents({board_name}) 耗时 {elapsed:.1f}s, "
-            f"{len(items)} 只成分股"
-        )
-        return SectorConstituentsResponse(
-            board_code=board_code, board_name=board_name,
-            constituents=items, total=len(items),
-        )
+        cache_key = f"constituents:{board_name}"
+
+        # ── L1: 内存缓存（24h TTL）──
+        cached = self._get_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        # 并发锁防击穿
+        lock = self._get_lock(cache_key)
+        async with lock:
+            cached = self._get_cache(cache_key)
+            if cached is not None:
+                return cached
+
+            items: list[ConstituentItem] = []
+
+            # ── L2: DuckDB 本地（7 天内有效）──
+            db_age = self._data.store.get_sector_constituents_age(board_name)
+            if db_age is not None and db_age <= CONSTITUENTS_DB_MAX_AGE_DAYS:
+                local_df = self._data.store.get_sector_constituents(board_name)
+                if not local_df.empty:
+                    for _, row in local_df.iterrows():
+                        items.append(ConstituentItem(
+                            code=str(row.get("code", "")),
+                            name=str(row.get("name", "")),
+                            # DuckDB 只缓存 code/name，实时行情字段为 0
+                            price=0.0, pct_chg=0.0, volume=0.0,
+                            amount=0.0, turnover_rate=0.0,
+                        ))
+                    elapsed = time.monotonic() - t0
+                    logger.info(
+                        f"⏱️ SectorEngine.get_constituents({board_name}) "
+                        f"DuckDB 命中(age={db_age}d) 耗时 {elapsed:.3f}s, "
+                        f"{len(items)} 只成分股"
+                    )
+                    result = SectorConstituentsResponse(
+                        board_code=board_code, board_name=board_name,
+                        constituents=items, total=len(items),
+                    )
+                    self._set_cache(cache_key, result, ttl=CONSTITUENTS_CACHE_TTL)
+                    return result
+
+            # ── L3: 远程拉取 + 自动回填 DuckDB ──
+            df = await asyncio.to_thread(
+                self._data.get_sector_constituents, board_name
+            )
+            if not df.empty:
+                for _, row in df.iterrows():
+                    items.append(ConstituentItem(
+                        code=str(row.get("code", "")),
+                        name=str(row.get("name", "")),
+                        price=self._safe_float(row.get("price")),
+                        pct_chg=self._safe_float(row.get("pct_chg")),
+                        volume=self._safe_float(row.get("volume")),
+                        amount=self._safe_float(row.get("amount")),
+                        turnover_rate=self._safe_float(row.get("turnover_rate")),
+                        pe_ttm=self._safe_float(row.get("pe_ttm")) or None,
+                        pb=self._safe_float(row.get("pb")) or None,
+                    ))
+                # 回填 DuckDB
+                try:
+                    self._data.store.save_sector_constituents(board_name, df)
+                except Exception as e:
+                    logger.warning(f"成分股回填 DuckDB 失败({board_name}): {e}")
+
+            elapsed = time.monotonic() - t0
+            logger.info(
+                f"⏱️ SectorEngine.get_constituents({board_name}) "
+                f"远程拉取 耗时 {elapsed:.1f}s, {len(items)} 只成分股"
+            )
+
+            result = SectorConstituentsResponse(
+                board_code=board_code, board_name=board_name,
+                constituents=items, total=len(items),
+            )
+            self._set_cache(cache_key, result, ttl=CONSTITUENTS_CACHE_TTL)
+            return result
 
     async def get_rotation(
         self, days: int = 10, board_type: str = "industry",
