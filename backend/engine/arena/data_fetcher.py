@@ -6,6 +6,7 @@
 import asyncio
 import datetime
 import importlib
+import time
 from typing import Any
 
 import pandas as pd
@@ -128,6 +129,7 @@ class DataFetcher:
     async def fetch_by_request(self, req) -> Any:
         """按 DataRequest 路由到对应引擎方法或 DataFetcher 自身方法"""
         import re
+        t0 = time.monotonic()
         # NO_CODE_ACTIONS 跳过 code 解析守卫
         if req.action not in NO_CODE_ACTIONS:
             if "code" in req.params and not re.fullmatch(r"\d{6}", str(req.params["code"]).strip()):
@@ -136,21 +138,26 @@ class DataFetcher:
                     req.params = {**req.params, "code": resolved}
                 else:
                     return {"error": f"无法解析股票代码: {req.params['code']}"}
-        if req.action in ACTION_DISPATCH:
-            module_name, getter_fn, method_name, is_async = ACTION_DISPATCH[req.action]
-            mod = importlib.import_module(module_name)
-            engine = getattr(mod, getter_fn)()
-            method = getattr(engine, method_name)
-            if is_async:
-                return await method(**req.params)
+        try:
+            if req.action in ACTION_DISPATCH:
+                module_name, getter_fn, method_name, is_async = ACTION_DISPATCH[req.action]
+                mod = importlib.import_module(module_name)
+                engine = getattr(mod, getter_fn)()
+                method = getattr(engine, method_name)
+                if is_async:
+                    result = await method(**req.params)
+                else:
+                    result = await asyncio.to_thread(method, **req.params)
+                return result
+            elif req.action in SELF_DISPATCH:
+                method = getattr(self, req.action)
+                result = await asyncio.to_thread(method, **req.params)
+                return result
             else:
-                return await asyncio.to_thread(method, **req.params)
-        elif req.action in SELF_DISPATCH:
-            method = getattr(self, req.action)
-            result = await asyncio.to_thread(method, **req.params)
-            return result
-        else:
-            raise ValueError(f"不支持的 action: {req.action}")
+                raise ValueError(f"不支持的 action: {req.action}")
+        finally:
+            elapsed = time.monotonic() - t0
+            logger.info(f"⏱️ DataFetcher.{req.action} 耗时 {elapsed:.1f}s")
 
     def _resolve_code(self, name: str) -> str:
         """按名称模糊匹配股票代码，找不到返回空字符串"""

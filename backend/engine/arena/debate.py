@@ -797,10 +797,10 @@ def _serialize_facts_for_compression(blackboard: Blackboard) -> str:
         items = news if isinstance(news, list) else [news]
         for item in items:
             if isinstance(item, dict):
-                parts.append(f"  [{item.get('sentiment','')}] {item.get('title','')} — {str(item.get('content',''))[:200]}")
+                parts.append(f"  [{item.get('sentiment','')}] {item.get('title','')} — {str(item.get('content',''))}")
             elif hasattr(item, "model_dump"):
                 d = item.model_dump()
-                parts.append(f"  [{d.get('sentiment','')}] {d.get('title','')} — {str(d.get('content',''))[:200]}")
+                parts.append(f"  [{d.get('sentiment','')}] {d.get('title','')} — {str(d.get('content',''))}")
 
     ic = blackboard.industry_cognition
     if ic:
@@ -1426,6 +1426,9 @@ async def run_debate(
     judge: JudgeRAG 实例（可选）。不为 None 时走 RAG 路径（预分析 + RAG 小评 + RAG 裁决）。
     """
 
+    t0_debate = time.monotonic()
+    round_count = 0
+
     # target 类型解析（替换旧的 resolve_stock_code）
     from engine.arena.target_resolver import TargetResolver
     resolver = TargetResolver(llm=llm)
@@ -1511,6 +1514,8 @@ async def run_debate(
 
     while blackboard.round < blackboard.max_rounds:
         blackboard.round += 1
+        round_count += 1
+        t0_round = time.monotonic()
         is_final = (blackboard.round == blackboard.max_rounds)
 
         if is_final:
@@ -1612,7 +1617,12 @@ async def run_debate(
         except Exception as e:
             logger.warning(f"评委小评失败，跳过: {e}")
 
-        # 7. 轮次控制
+        # 7. 轮次耗时统计
+        round_elapsed = time.monotonic() - t0_round
+        logger.info(f"⏱️ 辩论第 {blackboard.round} 轮 耗时 {round_elapsed:.1f}s")
+        yield sse("timing", {"round": blackboard.round, "elapsed_s": round(round_elapsed, 1)})
+
+        # 8. 轮次控制
         if blackboard.bull_conceded and blackboard.bear_conceded:
             blackboard.termination_reason = "both_conceded"
             break
@@ -1632,6 +1642,11 @@ async def run_debate(
         "reason": blackboard.termination_reason,
         "rounds_completed": blackboard.round,
     })
+
+    # 辩论总耗时统计
+    total_elapsed = time.monotonic() - t0_debate
+    logger.info(f"⏱️ 辩论总耗时 {total_elapsed:.1f}s ({round_count} 轮)")
+    yield sse("timing", {"total_elapsed_s": round(total_elapsed, 1), "rounds": round_count})
 
     judge_verdict = None
     if judge is not None:

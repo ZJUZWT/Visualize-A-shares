@@ -15,7 +15,9 @@ from pathlib import Path
 # 将 backend 目录加入 Python 路径
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fastapi import FastAPI
+import time
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
@@ -61,6 +63,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ─── 请求耗时中间件 ──────────────────────────────────
+@app.middleware("http")
+async def timing_middleware(request: Request, call_next):
+    """记录每个请求的耗时，慢请求额外 warning"""
+    start = time.monotonic()
+    response = await call_next(request)
+    elapsed = time.monotonic() - start
+    path = request.url.path
+    method = request.method
+    status = response.status_code
+    # 跳过健康检查等高频低价值路由
+    if path not in ("/api/v1/health", "/", "/docs", "/redoc", "/openapi.json"):
+        logger.info(f"⏱️ {method} {path} → {status} 耗时 {elapsed:.2f}s")
+    if elapsed > 5.0:
+        logger.warning(f"🐢 慢请求: {method} {path} 耗时 {elapsed:.1f}s")
+    response.headers["X-Response-Time"] = f"{elapsed:.3f}s"
+    return response
 
 # ─── 注册路由 ─────────────────────────────────────────
 app.include_router(data_router)

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+import time
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -120,6 +121,7 @@ class ExpertAgent:
 
         Returns: (recalled_nodes, memories, think_output)
         """
+        t0 = time.monotonic()
         recalled_nodes = self._graph.recall(query)
         memories: list[dict] = []
         if self._memory:
@@ -132,6 +134,8 @@ class ExpertAgent:
         if self._llm:
             think_output = await self._think(query, recalled_nodes, memories, history or [])
 
+        elapsed = time.monotonic() - t0
+        logger.info(f"⏱️ recall_and_think 耗时 {elapsed:.1f}s (nodes={len(recalled_nodes)}, memories={len(memories)}, needs_data={think_output.needs_data})")
         return recalled_nodes, memories, think_output
 
     async def execute_tools(self, tool_calls: list[ToolCall]) -> list[dict]:
@@ -187,6 +191,7 @@ class ExpertAgent:
             history: 对话历史 [{"role": "user"|"expert", "content": "..."}]
         """
         conv_history = history or []
+        t0_chat = time.monotonic()
         yield {"event": "thinking_start", "data": {}}
 
         # 1-3. 图谱召回 + 记忆召回 + think
@@ -284,6 +289,9 @@ class ExpertAgent:
                 )
             except Exception as e:
                 logger.warning(f"记忆存储失败: {e}")
+
+        chat_elapsed = time.monotonic() - t0_chat
+        logger.info(f"⏱️ ExpertAgent.chat 总耗时 {chat_elapsed:.1f}s")
 
     @staticmethod
     def _extract_outermost_json(text: str) -> str | None:
@@ -393,8 +401,6 @@ class ExpertAgent:
             for h in (history or []):
                 role = "assistant" if h["role"] == "expert" else h["role"]
                 content = h.get("content", "")
-                if len(content) > 500:
-                    content = content[:500] + "..."
                 messages.append(ChatMessage(role, content))
             messages.append(ChatMessage("user", message))
 
@@ -858,8 +864,6 @@ class ExpertAgent:
         for h in (history or []):
             role = "assistant" if h["role"] == "expert" else h["role"]
             content = h.get("content", "")
-            if len(content) > 800:
-                content = content[:800] + "..."
             messages.append(ChatMessage(role, content))
         messages.append(ChatMessage("user", message))
 

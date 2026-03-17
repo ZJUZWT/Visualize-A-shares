@@ -49,7 +49,7 @@ class ExpertTools:
                 result = {"error": f"Unknown engine: {engine}"}
 
             summary = json.dumps(result, ensure_ascii=False, default=str)
-            return summary[:500]
+            return summary
         except Exception as e:
             logger.error(f"工具调用失败 {engine}.{action}: {e}")
             return f"工具调用失败: {e}"

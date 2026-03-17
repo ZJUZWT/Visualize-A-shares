@@ -582,8 +582,6 @@ class EngineExpert:
         for h in (history or []):
             role = "assistant" if h["role"] == "expert" else h["role"]
             content = h.get("content", "")
-            if len(content) > 500:
-                content = content[:500] + "..."
             messages.append(ChatMessage(role, content))
         messages.append(ChatMessage("user", message))
 

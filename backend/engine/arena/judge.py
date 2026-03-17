@@ -33,8 +33,8 @@ class JudgeRAG:
         target = blackboard.target
         bull_entries = [e for e in blackboard.transcript if e.role == "bull_expert"]
         bear_entries = [e for e in blackboard.transcript if e.role == "bear_expert"]
-        bull_summary = bull_entries[-1].argument[:300] if bull_entries else ""
-        bear_summary = bear_entries[-1].argument[:300] if bear_entries else ""
+        bull_summary = bull_entries[-1].argument if bull_entries else ""
+        bear_summary = bear_entries[-1].argument if bear_entries else ""
         return (
             f"对股票 {target} 进行了 {rounds} 轮辩论。"
             f"多头最终论点：{bull_summary}。"
@@ -68,7 +68,7 @@ class JudgeRAG:
                 pass
         # fallback: 构造简单 briefing
         return {
-            "summary": reply[:500] if reply else "预分析完成",
+            "summary": reply if reply else "预分析完成",
             "focus_areas": [],
             "related_stocks": [],
             "key_data": [],
@@ -186,9 +186,9 @@ class JudgeRAG:
 
         try:
             # 构造 recall query（截断到 500 字）
-            bull_arg = bull_entry.argument[:250] if bull_entry else ""
-            bear_arg = bear_entry.argument[:250] if bear_entry else ""
-            recall_query = f"{bull_arg} {bear_arg}".strip()[:500]
+            bull_arg = bull_entry.argument if bull_entry else ""
+            bear_arg = bear_entry.argument if bear_entry else ""
+            recall_query = f"{bull_arg} {bear_arg}".strip()
 
             # 图谱召回
             recalled_nodes = self._expert._graph.recall(recall_query)
@@ -209,7 +209,7 @@ class JudgeRAG:
             ]
             observer_text = "\n".join(observer_lines) if observer_lines else "（无）"
             done_data = [r for r in blackboard.data_requests if r.status == "done" and r.round == round_num]
-            data_text = "\n".join(f"- {r.action}: {str(r.result)[:200]}" for r in done_data) if done_data else "（无）"
+            data_text = "\n".join(f"- {r.action}: {str(r.result)}" for r in done_data) if done_data else "（无）"
 
             bull_text = f"[{bull_entry.stance}] confidence={bull_conf:.2f}\n{bull_entry.argument}" if bull_entry else "（无发言）"
             bear_text = f"[{bear_entry.stance}] confidence={bear_conf:.2f}\n{bear_entry.argument}" if bear_entry else "（无发言）"

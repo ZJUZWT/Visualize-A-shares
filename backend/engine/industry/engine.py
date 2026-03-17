@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -51,6 +52,7 @@ class IndustryEngine:
         Returns:
             IndustryCognition 或 None（无行业信息时）
         """
+        t0 = time.monotonic()
         industry, code = self._resolve_industry(target)
         if not industry:
             logger.info(f"无法识别行业: {target}")
@@ -63,7 +65,8 @@ class IndustryEngine:
         if not force_refresh:
             cached = self._load_cached(industry, as_of_date)
             if cached:
-                logger.info(f"行业认知缓存命中: {industry} @ {as_of_date}")
+                elapsed = time.monotonic() - t0
+                logger.info(f"⏱️ IndustryEngine.analyze({industry}) 缓存命中 耗时 {elapsed:.1f}s")
                 return cached
 
         # Agent 生成
@@ -78,6 +81,8 @@ class IndustryEngine:
         )
         if cognition:
             self._save_cache(cognition)
+        elapsed = time.monotonic() - t0
+        logger.info(f"⏱️ IndustryEngine.analyze({industry}) 耗时 {elapsed:.1f}s, {'生成成功' if cognition else 'LLM未配置'}")
         return cognition
 
     # ── 行业映射 ──
@@ -114,6 +119,7 @@ class IndustryEngine:
 
     async def get_capital_structure(self, code: str, as_of_date: str = "") -> CapitalStructure:
         """汇聚资金流向 + 北向持股 + 融资融券 + 换手率，构建结构化资金构成"""
+        t0 = time.monotonic()
         from engine.arena.data_fetcher import DataFetcher
         fetcher = DataFetcher(as_of_date=as_of_date)
 
@@ -154,6 +160,8 @@ class IndustryEngine:
         # 构建摘要
         cs.structure_summary = self._build_capital_summary(cs)
 
+        elapsed = time.monotonic() - t0
+        logger.info(f"⏱️ IndustryEngine.get_capital_structure({code}) 耗时 {elapsed:.1f}s")
         return cs
 
     def _build_capital_summary(self, cs: CapitalStructure) -> str:
