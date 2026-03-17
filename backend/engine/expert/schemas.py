@@ -55,6 +55,7 @@ class BeliefNode(BaseModel):
     type: Literal["belief"] = "belief"
     content: str
     confidence: float = Field(ge=0.0, le=1.0)
+    persona: str = "rag"         # "rag"(投资顾问) | "short_term"(短线专家)
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 

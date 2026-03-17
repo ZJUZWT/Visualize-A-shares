@@ -6,13 +6,12 @@ import { SectorDashboard } from "@/components/sector/SectorDashboard";
 import { useSectorStore } from "@/stores/useSectorStore";
 
 export default function SectorPageRoute() {
-  const { loadBoards, loadHeatmap, loadRotation } = useSectorStore();
+  const { loadBoards, loadRotation } = useSectorStore();
 
   useEffect(() => {
     loadBoards();
-    loadHeatmap();
     loadRotation();
-  }, [loadBoards, loadHeatmap, loadRotation]);
+  }, [loadBoards, loadRotation]);
 
   return (
     <main

@@ -18,6 +18,7 @@ from engine.expert.personas import (
     format_graph_context,
     format_memory_context,
     format_beliefs_context,
+    get_current_date_context,
 )
 from engine.expert.schemas import (
     BeliefNode,
@@ -440,11 +441,13 @@ class ExpertAgent:
         if persona == "short_term":
             from engine.expert.personas import SHORT_TERM_THINK_PROMPT
             prompt = SHORT_TERM_THINK_PROMPT.format(
+                current_date=get_current_date_context(),
                 graph_context=format_graph_context(nodes),
                 memory_context=format_memory_context(memories),
             )
         else:
             prompt = THINK_SYSTEM_PROMPT.format(
+                current_date=get_current_date_context(),
                 graph_context=format_graph_context(nodes),
                 memory_context=format_memory_context(memories),
             )
@@ -922,16 +925,27 @@ class ExpertAgent:
         # 根据 persona 选择 system prompt
         if persona == "short_term":
             from engine.expert.personas import SHORT_TERM_REPLY_SYSTEM
-            system = SHORT_TERM_REPLY_SYSTEM + "\n\n".join(context_parts)
+            system = SHORT_TERM_REPLY_SYSTEM.format(
+                current_date=get_current_date_context(),
+            ) + "\n\n".join(context_parts)
         else:
             system = (
-                "你是A股投资专家总顾问。你的专家团队（数据、量化、资讯、产业链专家）已为你完成了分析。\n"
-                "请基于他们的分析报告和你自己的知识图谱，给出**综合性、有深度**的投资分析。\n"
-                "要求：\n"
-                "1. 综合多位专家的观点，而非简单罗列\n"
-                "2. 指出各专家分析中的一致之处和分歧\n"
-                "3. 给出你自己的独立判断\n"
-                "4. 使用 Markdown 格式，善用表格展示数据\n\n"
+                "你是「总师爷」，A股投资专家总顾问，在市场摸爬滚打25年的老江湖。\n"
+                "你手下有4个顶级专家（数据、量化、资讯、产业链），他们已经完成了各自的分析。\n"
+                f"⏰ 当前时间：{get_current_date_context()}\n\n"
+                "## 你的人格\n"
+                "- 你不是和事佬，你是拍板的人。综合专家意见后，你必须给出**自己的明确判断**\n"
+                "- 你敢推荐：当多数证据指向同一方向时，你会直说「我推荐关注XX」「XX值得买入」\n"
+                "- 你也敢否定：当专家们意见分歧时，你会明确站队并解释为什么\n"
+                "- 你善于发现专家们各自角度的盲区，给出更全面的判断\n"
+                "- 你对用户负责，不说正确但无用的废话\n\n"
+                "## 输出要求\n"
+                "1. **结论先行**：开头就给出核心判断（看多/看空/中性 + 具体标的）\n"
+                "2. 综合各专家的一致观点和分歧点\n"
+                "3. 给出你自己的独立判断和具体建议\n"
+                "4. 涉及个股时，给出操作建议（买入/持有/卖出）和关键价位\n"
+                "5. 使用 Markdown 格式，善用表格展示数据\n"
+                "6. ⚠️ 末尾附一句简短风险提示即可\n\n"
                 + "\n\n".join(context_parts)
             )
 
