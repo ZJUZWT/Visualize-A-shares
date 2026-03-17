@@ -271,17 +271,45 @@
       "id": "600e92fd-6c41-4517-862b-10162c2acb4d"
     },
     {
-      "id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c",
       "type": "stock",
       "code": "600759",
       "name": "洲际油气",
       "industry": "石油行业",
-      "zjh_industry": "采矿业-石油和天然气开采业"
+      "zjh_industry": "采矿业-石油和天然气开采业",
+      "id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c"
     },
     {
-      "id": "83f99713-cb7d-448a-ba61-64df686e26a4",
       "type": "sector",
       "name": "石油行业",
+      "category": "industry",
+      "id": "83f99713-cb7d-448a-ba61-64df686e26a4"
+    },
+    {
+      "id": "931ef567-8f43-40a3-86ec-f2c866d28369",
+      "type": "stock",
+      "code": "002470",
+      "name": "金正大",
+      "industry": "化肥行业",
+      "zjh_industry": "制造业-化学原料和化学制品制造业"
+    },
+    {
+      "id": "e24fb955-1d85-44b9-86d1-40ca37357d16",
+      "type": "sector",
+      "name": "化肥行业",
+      "category": "industry"
+    },
+    {
+      "id": "88f2a71e-e589-4814-b3bf-0bfafbb5769b",
+      "type": "stock",
+      "code": "300033",
+      "name": "同花顺",
+      "industry": "软件服务",
+      "zjh_industry": "金融业-其他金融业"
+    },
+    {
+      "id": "761b036e-dafb-458b-ba39-be5267d87d15",
+      "type": "sector",
+      "name": "软件服务",
       "category": "industry"
     }
   ],
@@ -539,18 +567,32 @@
       "target_id": "6df1ebfc-e787-4fbb-b516-78fedf50d967"
     },
     {
-      "source_id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c",
-      "target_id": "83f99713-cb7d-448a-ba61-64df686e26a4",
       "relation": "belongs_to",
       "reason": "洲际油气属于石油行业行业",
-      "timestamp": "2026-03-17T16:42:38.136664"
+      "timestamp": "2026-03-17T16:42:38.136664",
+      "source_id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c",
+      "target_id": "83f99713-cb7d-448a-ba61-64df686e26a4"
     },
     {
-      "source_id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c",
-      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
       "relation": "consumes",
       "reason": "洲际油气使用石油",
-      "timestamp": "2026-03-17T16:42:38.136773"
+      "timestamp": "2026-03-17T16:42:38.136773",
+      "source_id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
+    },
+    {
+      "source_id": "931ef567-8f43-40a3-86ec-f2c866d28369",
+      "target_id": "e24fb955-1d85-44b9-86d1-40ca37357d16",
+      "relation": "belongs_to",
+      "reason": "金正大属于化肥行业行业",
+      "timestamp": "2026-03-17T16:54:44.055173"
+    },
+    {
+      "source_id": "88f2a71e-e589-4814-b3bf-0bfafbb5769b",
+      "target_id": "761b036e-dafb-458b-ba39-be5267d87d15",
+      "relation": "belongs_to",
+      "reason": "同花顺属于软件服务行业",
+      "timestamp": "2026-03-17T17:53:15.337796"
     }
   ]
 }

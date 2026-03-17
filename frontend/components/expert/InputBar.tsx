@@ -6,14 +6,14 @@ import { ArrowUp, Square } from "lucide-react";
 
 export function InputBar() {
   const [input, setInput] = useState("");
-  const { sendMessage, status, error, activeExpert, profiles } = useExpertStore();
+  const { sendMessage, stopStreaming, status, error, activeExpert, profiles } = useExpertStore();
   const isThinking = status === "thinking";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const profile = profiles.find((p) => p.type === activeExpert);
   const color = profile?.color ?? "#60A5FA";
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isThinking) return;
     const msg = input;
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
@@ -21,14 +21,20 @@ export function InputBar() {
   };
 
   const handleStop = () => {
-    // sendMessage 内部会处理 abort
-    useExpertStore.setState({ status: "idle" });
+    stopStreaming();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 输入法正在组合中（如拼音选词、日文假名确认），Enter 交给 IME 处理，不触发发送
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      if (isThinking) {
+        handleStop();
+      } else {
+        handleSend();
+      }
     }
   };
 
@@ -62,7 +68,11 @@ export function InputBar() {
           value={input}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
-          placeholder={`向${profile?.name ?? "专家"}提问… (Enter 发送，Shift+Enter 换行)`}
+          placeholder={
+            isThinking
+              ? "AI 正在思考… 按 Enter 或点击按钮停止"
+              : `向${profile?.name ?? "专家"}提问… (Enter 发送，Shift+Enter 换行)`
+          }
           rows={1}
           className="flex-1 bg-transparent text-sm text-[var(--text-primary)]
                      placeholder:text-[var(--text-tertiary)] resize-none outline-none
@@ -78,8 +88,8 @@ export function InputBar() {
           }}
         />
 
-        {/* 思考中：停止按钮 */}
-        {isThinking && !input.trim() ? (
+        {/* 思考中：始终显示停止按钮（不管输入框是否有内容） */}
+        {isThinking ? (
           <button
             onClick={handleStop}
             className="shrink-0 w-8 h-8 rounded-xl flex items-center justify-center

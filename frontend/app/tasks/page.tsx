@@ -1,17 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
 import NavSidebar from "@/components/ui/NavSidebar";
-import { SectorDashboard } from "@/components/sector/SectorDashboard";
-import { useSectorStore } from "@/stores/useSectorStore";
+import { TaskManager } from "@/components/tasks/TaskManager";
 
-export default function SectorPageRoute() {
-  const { loadBoards } = useSectorStore();
-
-  useEffect(() => {
-    loadBoards();
-  }, [loadBoards]);
-
+export default function TasksPageRoute() {
   return (
     <main
       className="debate-dark relative h-screen flex flex-col overflow-hidden"
@@ -22,7 +14,7 @@ export default function SectorPageRoute() {
       }}
     >
       <NavSidebar />
-      <SectorDashboard />
+      <TaskManager />
     </main>
   );
 }

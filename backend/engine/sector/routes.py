@@ -6,7 +6,7 @@ from engine.sector.engine import SectorEngine
 from engine.sector.schemas import (
     SectorBoardsResponse, SectorHistoryResponse,
     SectorHeatmapResponse, SectorRotationResponse,
-    SectorConstituentsResponse,
+    SectorConstituentsResponse, StockSectorsResponse,
 )
 
 router = APIRouter(prefix="/api/v1/sector", tags=["sector"])
@@ -49,6 +49,51 @@ async def get_rotation(
     """获取轮动预测"""
     engine = _get_engine()
     return await engine.get_rotation(days=days, board_type=type)
+
+
+@router.get("/stock-sectors", response_model=StockSectorsResponse)
+async def get_stock_sectors(
+    code: str = Query("", description="股票代码"),
+    name: str = Query("", description="股票名称"),
+):
+    """反查股票所属的所有板块（行业+概念）"""
+    engine = _get_engine()
+    return await engine.get_stock_sectors_fast(stock_code=code, stock_name=name)
+
+
+@router.get("/search-stock")
+async def search_stock_in_boards(
+    q: str = Query("", description="搜索关键词（股票代码或名称）"),
+    type: str = Query("industry"),
+):
+    """在已加载的板块成分股中搜索股票，返回匹配的板块"""
+    engine = _get_engine()
+    boards_resp = await engine.get_boards(board_type=type)
+    results = []
+    q_lower = q.lower().strip()
+    if not q_lower:
+        return {"results": []}
+
+    for board in boards_resp.boards:
+        try:
+            cons_resp = await engine.get_constituents(
+                board_name=board.board_name, board_code=board.board_code,
+            )
+            for c in cons_resp.constituents:
+                if q_lower in c.code.lower() or q_lower in c.name.lower():
+                    results.append({
+                        "stock_code": c.code,
+                        "stock_name": c.name,
+                        "board_code": board.board_code,
+                        "board_name": board.board_name,
+                        "board_type": type,
+                        "stock_pct_chg": c.pct_chg,
+                        "board_pct_chg": board.pct_chg,
+                    })
+        except Exception:
+            continue
+
+    return {"results": results[:50]}  # 限制返回数量
 
 
 @router.post("/fetch")

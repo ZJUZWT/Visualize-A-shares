@@ -78,6 +78,8 @@ export interface ExpertMessage {
   content: string;
   thinking: ThinkingItem[];
   isStreaming: boolean;
+  /** 用户消息的发送状态（仅 role=user 时有意义） */
+  sendStatus?: "pending" | "sent" | "failed";
 }
 
 export type ExpertStatus = "idle" | "thinking" | "error";

@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Mountain, Scale, BrainCircuit, TrendingUp } from "lucide-react";
+import { Mountain, Scale, BrainCircuit, TrendingUp, ClipboardList } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/", icon: Mountain, label: "地形图" },
   { href: "/debate", icon: Scale, label: "专家辩论" },
   { href: "/expert", icon: BrainCircuit, label: "投资专家" },
+  { href: "/tasks", icon: ClipboardList, label: "事务管理" },
   { href: "/sector", icon: TrendingUp, label: "板块研究" },
 ];
 

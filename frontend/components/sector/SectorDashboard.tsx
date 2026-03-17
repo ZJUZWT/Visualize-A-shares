@@ -1,16 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { useSectorStore } from "@/stores/useSectorStore";
 import { BoardTypeTab } from "./BoardTypeTab";
 import { DatePicker } from "./DatePicker";
 import { SectorRankTable } from "./SectorRankTable";
 import { SectorHeatMap } from "./SectorHeatMap";
 import { SectorDetailPanel } from "./SectorDetailPanel";
-import { SectorRotationPanel } from "./SectorRotationPanel";
+import { StockSearchBar } from "./StockSearchBar";
 import { RefreshCw } from "lucide-react";
 
 export function SectorDashboard() {
-  const { loading, fetchData, selectedBoard } = useSectorStore();
+  const { loading, fetchData, selectedBoard, openPanels } = useSectorStore();
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -21,6 +22,7 @@ export function SectorDashboard() {
         </h1>
         <BoardTypeTab />
         <DatePicker />
+        <StockSearchBar />
         <button
           onClick={fetchData}
           disabled={loading}
@@ -35,17 +37,27 @@ export function SectorDashboard() {
 
       {/* 主体 */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* 上半区：排行列表 + 热力图 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" style={{ minHeight: 400 }}>
+        {/* 上半区：排行列表 + 热力图（固定高度，内部滚动） */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-[420px]">
           <SectorRankTable />
           <SectorHeatMap />
         </div>
 
-        {/* 中间：板块详情（点击展开） */}
-        {selectedBoard && <SectorDetailPanel />}
-
-        {/* 下半区：轮动预测 */}
-        <SectorRotationPanel />
+        {/* 板块详情面板 — 支持多个堆叠 */}
+        {openPanels.length > 0 ? (
+          openPanels.map((panel) => (
+            <SectorDetailPanel
+              key={panel.id}
+              panelId={panel.id}
+              board={panel.board}
+              constituents={panel.constituents}
+              loading={panel.loading}
+            />
+          ))
+        ) : (
+          /* 向后兼容：如果有 selectedBoard 但没有 openPanels */
+          selectedBoard && <SectorDetailPanel />
+        )}
       </div>
     </div>
   );

@@ -6,14 +6,15 @@ from datetime import datetime
 from pathlib import Path
 
 import duckdb
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from config import settings, DB_PATH, DATA_DIR
 from engine.expert.agent import ExpertAgent
 from engine.expert.engine_experts import EngineExpert, ExpertType, get_expert_profiles
-from engine.expert.schemas import ExpertChatRequest, SessionCreateRequest
+from engine.expert.schemas import ExpertChatRequest, SessionCreateRequest, ScheduledTaskRequest
+from engine.expert.scheduler import ScheduledTaskManager
 from engine.expert.tools import ExpertTools
 from engine.expert.tool_tracker import ToolOutcomeTracker
 from engine.expert.user_profile import UserProfileTracker
@@ -27,6 +28,10 @@ _expert_agent: ExpertAgent | None = None
 _engine_experts: dict[str, EngineExpert] = {}
 _tool_tracker: ToolOutcomeTracker | None = None
 _user_profile_tracker: UserProfileTracker | None = None
+_task_manager: ScheduledTaskManager | None = None
+
+# WebSocket 通知客户端集合
+_ws_notify_clients: set[WebSocket] = set()
 
 # 专家对话历史使用独立数据库，避免与 stockterrain.duckdb 的 WAL 冲突
 EXPERT_DB_PATH = DATA_DIR / "expert_chat.duckdb"
@@ -137,6 +142,17 @@ async def _init_db():
     global _user_profile_tracker
     _user_profile_tracker = UserProfileTracker(str(EXPERT_DB_PATH))
     logger.info("UserProfileTracker 已初始化")
+
+    # 初始化定时任务管理器
+    global _task_manager
+    _task_manager = ScheduledTaskManager(
+        db_path=str(EXPERT_DB_PATH),
+        agent=_expert_agent,
+        engine_experts=_engine_experts,
+        on_complete=_broadcast_task_complete,
+    )
+    _task_manager.start_scheduler()
+    logger.info("ScheduledTaskManager 已初始化")
 
 
 def get_expert_agent() -> ExpertAgent:
@@ -278,6 +294,17 @@ async def get_session_messages(session_id: str):
             con.close()
 
 
+@router.post("/sessions/{session_id}/messages/save-user")
+async def save_user_message(session_id: str, body: dict):
+    """前端发送时立即将用户消息写入 DB（确保 session message_count 及时更新）"""
+    content = body.get("content", "")
+    if not content:
+        return {"ok": False, "error": "content is empty"}
+    _save_message(session_id, "user", content)
+    _auto_title(session_id, content)
+    return {"ok": True}
+
+
 def _get_session_history(session_id: str, limit: int = MAX_CONTEXT_TURNS) -> list[dict]:
     """获取指定 session 的最近 N 轮对话（用于注入 LLM 上下文）"""
     if not session_id:
@@ -395,9 +422,8 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
-        # 存入 session 消息
+        # 存入 session 消息（用户消息已由前端 save-user 接口写入，此处只存 expert 回复）
         if session_id:
-            _save_message(session_id, "user", req.message)
             _save_message(session_id, "expert", full_reply)
             _auto_title(session_id, req.message)
 
@@ -442,9 +468,8 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
-        # 存入 session 消息
+        # 存入 session 消息（用户消息已由前端 save-user 接口写入，此处只存 expert 回复）
         if session_id:
-            _save_message(session_id, "user", req.message)
             _save_message(session_id, "expert", full_reply, thinking_items)
             _auto_title(session_id, req.message)
 
@@ -505,3 +530,131 @@ async def get_kg_stats():
     """获取知识图谱统计"""
     agent = get_expert_agent()
     return agent._graph.stats()
+
+
+# ══════════════════════════════════════════════════════════
+# 定时任务调度
+# ══════════════════════════════════════════════════════════
+
+
+def get_task_manager() -> ScheduledTaskManager | None:
+    return _task_manager
+
+
+async def _broadcast_task_complete(task_id: str, task_name: str, full_text: str):
+    """任务完成时通过 WebSocket 广播通知"""
+    import json as _json
+    msg = _json.dumps({
+        "type": "task_completed",
+        "task_id": task_id,
+        "task_name": task_name,
+        "summary": full_text[:200] if full_text else "",
+    }, ensure_ascii=False)
+
+    dead: list[WebSocket] = []
+    for ws in _ws_notify_clients:
+        try:
+            await ws.send_text(msg)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _ws_notify_clients.discard(ws)
+
+
+@router.websocket("/ws/notifications")
+async def ws_notifications(websocket: WebSocket):
+    """WebSocket 通知通道 — 推送定时任务完成事件"""
+    await websocket.accept()
+    _ws_notify_clients.add(websocket)
+    logger.info(f"🔔 通知 WebSocket 已连接 (当前 {len(_ws_notify_clients)} 个客户端)")
+    try:
+        while True:
+            # 保持连接活跃（等待客户端 ping 或断连）
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _ws_notify_clients.discard(websocket)
+        logger.info(f"🔔 通知 WebSocket 已断开 (剩余 {len(_ws_notify_clients)} 个客户端)")
+
+
+@router.post("/tasks")
+async def create_task(req: ScheduledTaskRequest):
+    """创建定时任务"""
+    if not _task_manager:
+        return {"error": "任务调度器未初始化"}
+
+    session_id = None
+    if req.create_session:
+        # 自动创建专属 session
+        con = None
+        try:
+            con = _get_db()
+            session_id = str(uuid.uuid4())
+            now = datetime.now()
+            con.execute(
+                "INSERT INTO expert.sessions (id, expert_type, title, created_at, updated_at) VALUES (?,?,?,?,?)",
+                [session_id, req.expert_type, f"⏰ {req.name}", now, now],
+            )
+        except Exception as e:
+            logger.error(f"创建任务 session 失败: {e}")
+        finally:
+            if con:
+                con.close()
+
+    task = _task_manager.create_task(
+        name=req.name,
+        expert_type=req.expert_type,
+        persona=req.persona,
+        message=req.message,
+        cron_expr=req.cron_expr,
+        session_id=session_id,
+    )
+    return task
+
+
+@router.get("/tasks")
+async def list_tasks():
+    """列出所有定时任务"""
+    if not _task_manager:
+        return []
+    return _task_manager.list_tasks()
+
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(task_id: str):
+    """删除定时任务"""
+    if not _task_manager:
+        return {"error": "任务调度器未初始化"}
+    _task_manager.delete_task(task_id)
+    return {"ok": True}
+
+
+@router.post("/tasks/{task_id}/pause")
+async def pause_task(task_id: str):
+    """暂停定时任务"""
+    if not _task_manager:
+        return {"error": "任务调度器未初始化"}
+    _task_manager.pause_task(task_id)
+    return {"ok": True}
+
+
+@router.post("/tasks/{task_id}/resume")
+async def resume_task(task_id: str):
+    """恢复定时任务"""
+    if not _task_manager:
+        return {"error": "任务调度器未初始化"}
+    _task_manager.resume_task(task_id)
+    return {"ok": True}
+
+
+@router.post("/tasks/{task_id}/run")
+async def run_task_now(task_id: str):
+    """立即执行一次定时任务"""
+    if not _task_manager:
+        return {"error": "任务调度器未初始化"}
+    try:
+        result = await _task_manager.execute_task(task_id)
+        return {"ok": True, "result_length": len(result), "summary": result[:300]}
+    except Exception as e:
+        return {"error": str(e)}

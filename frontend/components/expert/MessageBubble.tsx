@@ -1,7 +1,9 @@
 "use client";
 
 import type { ExpertMessage } from "@/types/expert";
+import { useExpertStore } from "@/stores/useExpertStore";
 import { ThinkingPanel } from "./ThinkingPanel";
+import { AlertCircle, RotateCw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -80,11 +82,29 @@ export function MessageBubble({
   const isUser = message.role === "user";
 
   if (isUser) {
+    const isFailed = message.sendStatus === "failed";
+    const isPending = message.sendStatus === "pending";
     return (
-      <div className="flex justify-end">
+      <div className="flex justify-end items-end gap-2">
+        {/* 发送失败：红色感叹号 + 点击重试 */}
+        {isFailed && (
+          <button
+            onClick={() => useExpertStore.getState().retryMessage(message.id)}
+            className="shrink-0 flex items-center gap-1 text-red-500 hover:text-red-400 transition-colors mb-1"
+            title="发送失败，点击重试"
+          >
+            <AlertCircle size={16} />
+            <RotateCw size={12} />
+          </button>
+        )}
+        {isPending && (
+          <span className="shrink-0 mb-1">
+            <span className="inline-block w-3 h-3 border-2 border-white/30 border-t-white/80 rounded-full animate-spin" />
+          </span>
+        )}
         <div
-          className="max-w-[72%] px-4 py-2.5 rounded-2xl rounded-br-sm
-                      text-white text-sm leading-relaxed"
+          className={`max-w-[72%] px-4 py-2.5 rounded-2xl rounded-br-sm
+                      text-white text-sm leading-relaxed ${isFailed ? "opacity-60" : ""}`}
           style={{ backgroundColor: expertColor }}
         >
           {message.content}

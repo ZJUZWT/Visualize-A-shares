@@ -127,3 +127,18 @@ class SectorConstituentsResponse(BaseModel):
     board_name: str = ""
     constituents: list[ConstituentItem] = []
     total: int = 0
+
+
+class StockSectorInfo(BaseModel):
+    """股票所属的单个板块信息"""
+    board_code: str = ""
+    board_name: str = ""
+    board_type: str = ""  # 'industry' / 'concept'
+    pct_chg: float = 0.0
+
+
+class StockSectorsResponse(BaseModel):
+    """股票所属板块反查结果"""
+    stock_code: str = ""
+    stock_name: str = ""
+    sectors: list[StockSectorInfo] = []

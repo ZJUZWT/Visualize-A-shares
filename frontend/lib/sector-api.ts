@@ -120,3 +120,38 @@ export async function triggerSectorFetch(type: string) {
   const res = await fetch(`${API_BASE}/api/v1/sector/fetch?type=${type}`, { method: "POST" });
   return res.json();
 }
+
+export interface StockSectorInfo {
+  board_code: string;
+  board_name: string;
+  board_type: string;
+  pct_chg: number;
+}
+
+export async function fetchStockSectors(code: string, name = "") {
+  const params = new URLSearchParams();
+  if (code) params.set("code", code);
+  if (name) params.set("name", name);
+  const res = await fetch(`${API_BASE}/api/v1/sector/stock-sectors?${params}`);
+  return res.json() as Promise<{
+    stock_code: string;
+    stock_name: string;
+    sectors: StockSectorInfo[];
+  }>;
+}
+
+export interface StockSearchResult {
+  stock_code: string;
+  stock_name: string;
+  board_code: string;
+  board_name: string;
+  board_type: string;
+  stock_pct_chg: number;
+  board_pct_chg: number;
+}
+
+export async function searchStockInBoards(q: string, type = "industry") {
+  const params = new URLSearchParams({ q, type });
+  const res = await fetch(`${API_BASE}/api/v1/sector/search-stock?${params}`);
+  return res.json() as Promise<{ results: StockSearchResult[] }>;
+}
