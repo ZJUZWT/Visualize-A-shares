@@ -279,6 +279,15 @@ class ExpertAgent:
 
         tool_calls: list[ToolCall] = think_output.tool_calls if think_output.needs_data else []
 
+        # ── 去重：当已有 expert.data 调用时，过滤掉多余的 data.get_daily_history ──
+        # （数据专家内部会自动获取历史行情，投资顾问不需要额外重复调用）
+        has_data_expert = any(tc.engine == "expert" and tc.action == "data" for tc in tool_calls)
+        if has_data_expert:
+            before_len = len(tool_calls)
+            tool_calls = [tc for tc in tool_calls if not (tc.engine == "data" and tc.action == "get_daily_history")]
+            if len(tool_calls) < before_len:
+                logger.info(f"已过滤 {before_len - len(tool_calls)} 个多余的 data.get_daily_history 调用（已有 expert.data）")
+
         # 4. 工具调用（并行执行所有专家）
         # 容错：确保每个 expert 调用的 question 非空（但不覆盖 LLM 精心拆解的问题）
         for tc in tool_calls:
