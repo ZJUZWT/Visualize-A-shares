@@ -15,6 +15,7 @@ from engine.expert.agent import ExpertAgent
 from engine.expert.engine_experts import EngineExpert, ExpertType, get_expert_profiles
 from engine.expert.schemas import ExpertChatRequest, SessionCreateRequest
 from engine.expert.tools import ExpertTools
+from engine.expert.tool_tracker import ToolOutcomeTracker
 from llm.config import llm_settings
 from llm.providers import LLMProviderFactory
 
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/api/v1/expert", tags=["expert"])
 # 全局 Agent 实例
 _expert_agent: ExpertAgent | None = None
 _engine_experts: dict[str, EngineExpert] = {}
+_tool_tracker: ToolOutcomeTracker | None = None
 
 # 专家对话历史使用独立数据库，避免与 stockterrain.duckdb 的 WAL 冲突
 EXPERT_DB_PATH = DATA_DIR / "expert_chat.duckdb"
@@ -124,12 +126,22 @@ async def _init_db():
     except Exception as e:
         logger.error(f"引擎专家初始化失败: {e}")
 
+    # 初始化工具使用追踪器
+    global _tool_tracker
+    _tool_tracker = ToolOutcomeTracker(str(EXPERT_DB_PATH))
+    logger.info("ToolOutcomeTracker 已初始化")
+
 
 def get_expert_agent() -> ExpertAgent:
     """获取 RAG Agent 实例"""
     if _expert_agent is None:
         raise RuntimeError("Expert Agent 未初始化")
     return _expert_agent
+
+
+def get_tool_tracker() -> ToolOutcomeTracker | None:
+    """获取工具使用追踪器"""
+    return _tool_tracker
 
 
 # ══════════════════════════════════════════════════════════
@@ -340,6 +352,10 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
     if expert_type == "rag":
         return await _rag_chat(req)
 
+    # 短线专家复用 RAG Agent，但使用 short_term 人格
+    if expert_type == "short_term":
+        return await _rag_chat(req, persona="short_term")
+
     expert = _engine_experts.get(expert_type)
     if not expert:
         return StreamingResponse(
@@ -382,7 +398,7 @@ async def expert_chat(req: ExpertChatRequest):
     return await _rag_chat(req)
 
 
-async def _rag_chat(req: ExpertChatRequest):
+async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
     """RAG 专家对话"""
     agent = get_expert_agent()
     session_id = req.session_id or ""
@@ -394,7 +410,7 @@ async def _rag_chat(req: ExpertChatRequest):
         tools_used = []
         thinking_items = []
         try:
-            async for event in agent.chat(req.message, history=history):
+            async for event in agent.chat(req.message, history=history, persona=persona):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":
                     full_reply = event["data"].get("full_text", "")
