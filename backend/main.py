@@ -31,6 +31,7 @@ from api.routes.debate import router as debate_router
 from engine.info.routes import router as info_router
 from engine.expert.routes import router as expert_router, _init_db as expert_init_db
 from engine.industry.routes import router as industry_router
+from engine.sector.routes import router as sector_router
 
 # ─── 配置日志 ──────────────────────────────────────────
 logger.remove()
@@ -93,6 +94,7 @@ app.include_router(debate_router)
 app.include_router(info_router)
 app.include_router(expert_router)
 app.include_router(industry_router)
+app.include_router(sector_router)
 
 
 # ─── 启动/关闭事件 ────────────────────────────────────
@@ -192,6 +194,10 @@ async def root():
             "industry_cognition": "GET /api/v1/industry/cognition/{target}",
             "industry_mapping": "GET /api/v1/industry/mapping",
             "industry_capital": "GET /api/v1/industry/capital/{code}",
+            "sector_boards": "GET /api/v1/sector/boards?type=industry",
+            "sector_heatmap": "GET /api/v1/sector/heatmap?type=industry",
+            "sector_rotation": "GET /api/v1/sector/rotation?days=10",
+            "sector_fetch": "POST /api/v1/sector/fetch?type=industry",
         },
     }
 

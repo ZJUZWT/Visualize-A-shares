@@ -206,3 +206,55 @@ class DataEngine:
             "stock_count": self.get_stock_count(),
             "profiles_count": len(self._profiles),
         }
+
+    # ── 板块数据方法 ──
+
+    def get_sector_board_list(self, board_type: str = "industry") -> pd.DataFrame:
+        """获取板块列表 + 实时行情"""
+        return self._collector.get_sector_board_list(board_type=board_type)
+
+    def get_sector_board_history(
+        self, board_name: str, board_code: str = "",
+        board_type: str = "industry",
+        start_date: str = "", end_date: str = "",
+    ) -> pd.DataFrame:
+        """获取板块历史 K 线（本地优先 + 远程回填）"""
+        # 先查本地
+        if board_code:
+            local = self._store.get_sector_board_history(
+                board_code, start_date=start_date, end_date=end_date
+            )
+            if not local.empty and len(local) >= 5:
+                return local
+
+        # 远程拉取
+        df = self._collector.get_sector_board_history(
+            board_name=board_name, board_type=board_type,
+            start_date=start_date, end_date=end_date,
+        )
+        if not df.empty and board_code:
+            df["board_code"] = board_code
+            df["board_name"] = board_name
+            df["board_type"] = board_type
+            self._store.save_sector_board_daily(df)
+        return df
+
+    def get_sector_fund_flow_rank(
+        self, indicator: str = "今日", sector_type: str = "行业资金流"
+    ) -> pd.DataFrame:
+        """获取板块资金流排行"""
+        return self._collector.get_sector_fund_flow_rank(
+            indicator=indicator, sector_type=sector_type
+        )
+
+    def get_sector_constituents(self, board_name: str) -> pd.DataFrame:
+        """获取板块成分股"""
+        return self._collector.get_sector_constituents(board_name=board_name)
+
+    def save_sector_board_daily(self, df: pd.DataFrame):
+        """保存板块日行情到 DuckDB"""
+        self._store.save_sector_board_daily(df)
+
+    def save_sector_fund_flow(self, df: pd.DataFrame):
+        """保存板块资金流向到 DuckDB"""
+        self._store.save_sector_fund_flow(df)

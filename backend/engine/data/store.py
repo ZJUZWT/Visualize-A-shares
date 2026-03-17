@@ -253,6 +253,41 @@ class DuckDBStore:
             )
         """)
 
+        # ── sector 板块数据 ──
+        self._conn.execute("CREATE SCHEMA IF NOT EXISTS sector")
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS sector.board_daily (
+                board_code VARCHAR,
+                board_name VARCHAR,
+                board_type VARCHAR,
+                date DATE,
+                open DOUBLE,
+                high DOUBLE,
+                low DOUBLE,
+                close DOUBLE,
+                pct_chg DOUBLE,
+                volume DOUBLE,
+                amount DOUBLE,
+                turnover_rate DOUBLE,
+                PRIMARY KEY (board_code, date)
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS sector.fund_flow_daily (
+                board_code VARCHAR,
+                board_name VARCHAR,
+                board_type VARCHAR,
+                date DATE,
+                main_force_net_inflow DOUBLE,
+                main_force_net_ratio DOUBLE,
+                super_large_net_inflow DOUBLE,
+                large_net_inflow DOUBLE,
+                medium_net_inflow DOUBLE,
+                small_net_inflow DOUBLE,
+                PRIMARY KEY (board_code, date)
+            )
+        """)
+
         logger.info("数据表初始化完成")
 
         # ─── 迁移：为已有表添加新列 ────────────────────
@@ -579,6 +614,114 @@ class DuckDBStore:
         except Exception as e:
             logger.warning(f"chat_history 查询失败: {e}")
             return []
+
+    # ── Sector 板块数据方法 ──
+
+    def save_sector_board_daily(self, df: pd.DataFrame):
+        """保存板块日行情数据"""
+        if df.empty:
+            return
+        required = ["board_code", "date"]
+        if not all(c in df.columns for c in required):
+            logger.warning(f"save_sector_board_daily: 缺少必要列 {required}")
+            return
+        cols = ["board_code", "board_name", "board_type", "date",
+                "open", "high", "low", "close", "pct_chg",
+                "volume", "amount", "turnover_rate"]
+        available = [c for c in cols if c in df.columns]
+        for c in cols:
+            if c not in df.columns:
+                df[c] = None
+        self._conn.execute(
+            f"INSERT OR REPLACE INTO sector.board_daily SELECT {', '.join(cols)} FROM df"
+        )
+        logger.info(f"保存板块日行情: {len(df)} 条")
+
+    def save_sector_fund_flow(self, df: pd.DataFrame):
+        """保存板块资金流向数据"""
+        if df.empty:
+            return
+        required = ["board_code", "date"]
+        if not all(c in df.columns for c in required):
+            logger.warning(f"save_sector_fund_flow: 缺少必要列 {required}")
+            return
+        cols = ["board_code", "board_name", "board_type", "date",
+                "main_force_net_inflow", "main_force_net_ratio",
+                "super_large_net_inflow", "large_net_inflow",
+                "medium_net_inflow", "small_net_inflow"]
+        for c in cols:
+            if c not in df.columns:
+                df[c] = None
+        self._conn.execute(
+            f"INSERT OR REPLACE INTO sector.fund_flow_daily SELECT {', '.join(cols)} FROM df"
+        )
+        logger.info(f"保存板块资金流向: {len(df)} 条")
+
+    def get_sector_board_daily(
+        self, board_type: str = "", start_date: str = "", end_date: str = ""
+    ) -> pd.DataFrame:
+        """查询板块日行情"""
+        query = "SELECT * FROM sector.board_daily WHERE 1=1"
+        params: list = []
+        if board_type:
+            query += " AND board_type = ?"
+            params.append(board_type)
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+        query += " ORDER BY date DESC, pct_chg DESC"
+        return self._conn.execute(query, params).fetchdf()
+
+    def get_sector_board_history(
+        self, board_code: str, start_date: str = "", end_date: str = ""
+    ) -> pd.DataFrame:
+        """查询单个板块的历史行情"""
+        query = "SELECT * FROM sector.board_daily WHERE board_code = ?"
+        params: list = [board_code]
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+        query += " ORDER BY date"
+        return self._conn.execute(query, params).fetchdf()
+
+    def get_sector_fund_flow(
+        self, board_type: str = "", start_date: str = "", end_date: str = ""
+    ) -> pd.DataFrame:
+        """查询板块资金流向"""
+        query = "SELECT * FROM sector.fund_flow_daily WHERE 1=1"
+        params: list = []
+        if board_type:
+            query += " AND board_type = ?"
+            params.append(board_type)
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+        query += " ORDER BY date DESC, main_force_net_inflow DESC"
+        return self._conn.execute(query, params).fetchdf()
+
+    def get_sector_fund_flow_history(
+        self, board_code: str, start_date: str = "", end_date: str = ""
+    ) -> pd.DataFrame:
+        """查询单个板块的资金流向历史"""
+        query = "SELECT * FROM sector.fund_flow_daily WHERE board_code = ?"
+        params: list = [board_code]
+        if start_date:
+            query += " AND date >= ?"
+            params.append(start_date)
+        if end_date:
+            query += " AND date <= ?"
+            params.append(end_date)
+        query += " ORDER BY date"
+        return self._conn.execute(query, params).fetchdf()
 
     def close(self):
         self._conn.close()
