@@ -37,14 +37,14 @@ function signalBadge(signal: string | null) {
 }
 
 export function SectorRankTable() {
-  const { boards, sortField, sortDesc, setSortField, selectBoard, selectedBoard, loading } =
+  const { boards, sortField, sortDesc, setSortField, openPanel, selectedBoard, loading } =
     useSectorStore();
 
   const sorted = useMemo(() => {
     const arr = [...boards];
     arr.sort((a, b) => {
-      const va = (a as Record<string, unknown>)[sortField] ?? 0;
-      const vb = (b as Record<string, unknown>)[sortField] ?? 0;
+      const va = (a as unknown as Record<string, unknown>)[sortField] ?? 0;
+      const vb = (b as unknown as Record<string, unknown>)[sortField] ?? 0;
       return sortDesc ? Number(vb) - Number(va) : Number(va) - Number(vb);
     });
     return arr;
@@ -60,12 +60,12 @@ export function SectorRankTable() {
   ];
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden flex flex-col">
-      <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] overflow-hidden flex flex-col h-full">
+      <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center justify-between shrink-0">
         <h2 className="text-sm font-semibold text-[var(--text-primary)]">板块排行</h2>
         <span className="text-[10px] text-[var(--text-tertiary)]">{boards.length} 个板块</span>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto min-h-0">
         {loading && boards.length === 0 ? (
           <div className="flex items-center justify-center h-40 text-sm text-[var(--text-tertiary)]">
             加载中...
@@ -99,7 +99,7 @@ export function SectorRankTable() {
                       ? "bg-[var(--accent-light)]"
                       : "hover:bg-[var(--bg-primary)]"
                     }`}
-                  onClick={() => selectBoard(b)}
+                  onClick={() => openPanel(b)}
                 >
                   <td className="px-3 py-2 text-[var(--text-tertiary)]">{i + 1}</td>
                   <td className="px-3 py-2 text-[var(--text-primary)] font-medium">{b.board_name}</td>

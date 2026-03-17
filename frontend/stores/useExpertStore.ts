@@ -40,6 +40,10 @@ interface ExpertStore {
   setActiveExpert: (type: ExpertType) => void;
   /** 发送消息 */
   sendMessage: (text: string) => Promise<void>;
+  /** 停止当前流式请求 */
+  stopStreaming: () => void;
+  /** 重试失败的消息 */
+  retryMessage: (messageId: string) => Promise<void>;
   /** 清除当前专家的对话（新建对话） */
   clearChat: () => void;
   /** 清除所有对话 */
@@ -186,11 +190,16 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
 
   switchSession: async (sessionId: string) => {
     const { activeExpert } = get();
+    // 先中止可能存在的流式请求
+    if (_abort) {
+      _abort.abort();
+      _abort = null;
+    }
     set((s) => ({
       activeSessions: { ...s.activeSessions, [activeExpert]: sessionId },
-      chatHistories: { ...s.chatHistories, [activeExpert]: [] },
       status: "idle",
       error: null,
+      // 注意：不清空 chatHistories，保持当前显示直到新数据加载完成
     }));
 
     // 加载该 session 的消息
@@ -212,12 +221,15 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           thinking: m.thinking || [],
           isStreaming: false,
         }));
-        set((s) => ({
-          chatHistories: {
-            ...s.chatHistories,
-            [activeExpert]: expertMessages,
-          },
-        }));
+        // 只有当 activeSession 还是这个 session 时才更新（防止用户快速切换导致数据错乱）
+        if (get().activeSessions[activeExpert] === sessionId) {
+          set((s) => ({
+            chatHistories: {
+              ...s.chatHistories,
+              [activeExpert]: expertMessages,
+            },
+          }));
+        }
       }
     } catch {
       // ignore
@@ -255,6 +267,52 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     }
   },
 
+  stopStreaming: () => {
+    // 真正中止网络请求
+    if (_abort) {
+      _abort.abort();
+      _abort = null;
+    }
+    // 将当前 streaming 消息标记为完成（避免一直显示"正在思考"）
+    const { activeExpert } = get();
+    set((s) => {
+      const history = [...(s.chatHistories[activeExpert] ?? [])];
+      const streamIdx = history.findIndex((m) => m.isStreaming);
+      if (streamIdx !== -1) {
+        history[streamIdx] = {
+          ...history[streamIdx],
+          isStreaming: false,
+          content: history[streamIdx].content || "（已停止生成）",
+        };
+      }
+      return {
+        chatHistories: { ...s.chatHistories, [activeExpert]: history },
+        status: "idle",
+      };
+    });
+  },
+
+  retryMessage: async (messageId: string) => {
+    const { activeExpert, chatHistories } = get();
+    const history = chatHistories[activeExpert] ?? [];
+    const failedMsg = history.find((m) => m.id === messageId);
+    if (!failedMsg || failedMsg.role !== "user" || failedMsg.sendStatus !== "failed") return;
+
+    // 找到这条 user 消息和紧跟其后的 expert 消息并移除
+    const userIdx = history.findIndex((m) => m.id === messageId);
+    const newHistory = [...history];
+    // 删除 user + expert pair
+    if (userIdx !== -1) {
+      const removeCount = userIdx + 1 < newHistory.length && newHistory[userIdx + 1].role === "expert" ? 2 : 1;
+      newHistory.splice(userIdx, removeCount);
+    }
+    set((s) => ({
+      chatHistories: { ...s.chatHistories, [activeExpert]: newHistory },
+    }));
+    // 重新发送
+    await get().sendMessage(failedMsg.content);
+  },
+
   sendMessage: async (text: string) => {
     // 如果上一次请求还在进行，先中止
     if (_abort) {
@@ -278,6 +336,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       content: text,
       thinking: [],
       isStreaming: false,
+      sendStatus: "pending",
     };
     const expertMsg: ExpertMessage = {
       id: newId(),
@@ -299,6 +358,31 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       status: "thinking",
       error: null,
     }));
+
+    // 立即将用户消息写入 DB（发送前），这样 session message_count 马上+1
+    if (sessionId) {
+      try {
+        await fetch(`${API_BASE}/api/v1/expert/sessions/${sessionId}/messages/save-user`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: text }),
+        });
+        // 刷新 session 列表（message_count 已更新）
+        get().fetchSessions(activeExpert);
+      } catch {
+        // 写入失败不阻塞发送
+      }
+    }
+
+    // 标记 user 消息为已发送
+    set((s) => {
+      const history = [...(s.chatHistories[activeExpert] ?? [])];
+      const idx = history.findIndex((m) => m.id === userMsg.id);
+      if (idx !== -1) {
+        history[idx] = { ...history[idx], sendStatus: "sent" };
+      }
+      return { chatHistories: { ...s.chatHistories, [activeExpert]: history } };
+    });
 
     _abort = new AbortController();
 
@@ -429,14 +513,38 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         get().fetchSessions(activeExpert);
       }
     } catch (e: unknown) {
-      if ((e as Error).name === "AbortError") return;
+      if ((e as Error).name === "AbortError") {
+        // abort 时将 streaming 消息标记为完成
+        set((s) => {
+          const history = [...(s.chatHistories[activeExpert] ?? [])];
+          const idx = history.findIndex((m) => m.id === expertMsg.id);
+          if (idx !== -1) {
+            history[idx] = {
+              ...history[idx],
+              isStreaming: false,
+              content: history[idx].content || "（已停止生成）",
+            };
+          }
+          return {
+            chatHistories: { ...s.chatHistories, [activeExpert]: history },
+            status: "idle",
+          };
+        });
+        return;
+      }
       const errMsg = (e as Error).message;
       set((s) => {
         const history = [...(s.chatHistories[activeExpert] ?? [])];
-        const idx = history.findIndex((m) => m.id === expertMsg.id);
-        if (idx !== -1) {
-          history[idx] = {
-            ...history[idx],
+        // 标记 user 消息为发送失败
+        const userIdx = history.findIndex((m) => m.id === userMsg.id);
+        if (userIdx !== -1) {
+          history[userIdx] = { ...history[userIdx], sendStatus: "failed" };
+        }
+        // 标记 expert 消息为错误
+        const expIdx = history.findIndex((m) => m.id === expertMsg.id);
+        if (expIdx !== -1) {
+          history[expIdx] = {
+            ...history[expIdx],
             content: `请求失败: ${errMsg}`,
             isStreaming: false,
           };

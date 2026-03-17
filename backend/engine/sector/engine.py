@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
 from loguru import logger
+
+# 用于去重：去掉板块名末尾的罗马数字后缀（Ⅰ Ⅱ Ⅲ Ⅳ 等）
+_ROMAN_SUFFIX = re.compile(r"[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+$")
+
+
+def _base_board_name(name: str) -> str:
+    """去掉板块名末尾的罗马数字后缀，返回基础名用于去重"""
+    return _ROMAN_SUFFIX.sub("", name).strip()
 
 from engine.data import get_data_engine
 from engine.sector.schemas import (
@@ -16,6 +25,7 @@ from engine.sector.schemas import (
     SectorBoardsResponse, SectorHistoryResponse,
     SectorHeatmapResponse, SectorRotationResponse,
     SectorConstituentsResponse, SectorPredictionItem,
+    StockSectorInfo, StockSectorsResponse,
 )
 
 
@@ -110,8 +120,14 @@ class SectorEngine:
                 }
 
         if not board_list_df.empty:
+            seen_base_names: set[str] = set()
             for _, row in board_list_df.iterrows():
                 name = row.get("board_name", "")
+                # 去重：按基础名（去掉末尾罗马数字Ⅰ/Ⅱ/Ⅲ）去重
+                base = _base_board_name(name)
+                if base in seen_base_names:
+                    continue
+                seen_base_names.add(base)
                 flow = fund_flow_map.get(name, {})
                 items.append(SectorBoardItem(
                     board_code=str(row.get("board_code", "")),
@@ -377,6 +393,116 @@ class SectorEngine:
             "saved_flows": saved_flows,
             "elapsed_s": round(elapsed, 1),
         }
+
+    async def get_stock_sectors(
+        self, stock_code: str, stock_name: str = "",
+    ) -> StockSectorsResponse:
+        """反查某只股票所属的所有板块（行业+概念）
+
+        策略：遍历已缓存的行业和概念板块，检查每个板块的成分股是否包含该股票。
+        """
+        t0 = time.monotonic()
+        sectors: list[StockSectorInfo] = []
+
+        # 遍历 industry 和 concept 两种类型
+        for board_type in ("industry", "concept"):
+            try:
+                boards_resp = await self.get_boards(board_type=board_type)
+                for board in boards_resp.boards:
+                    try:
+                        cons_resp = await self.get_constituents(
+                            board_name=board.board_name, board_code=board.board_code
+                        )
+                        for c in cons_resp.constituents:
+                            if c.code == stock_code or (stock_name and c.name == stock_name):
+                                sectors.append(StockSectorInfo(
+                                    board_code=board.board_code,
+                                    board_name=board.board_name,
+                                    board_type=board_type,
+                                    pct_chg=board.pct_chg,
+                                ))
+                                break
+                    except Exception:
+                        continue
+            except Exception as e:
+                logger.warning(f"反查 {board_type} 板块失败: {e}")
+
+        elapsed = time.monotonic() - t0
+        logger.info(
+            f"⏱️ SectorEngine.get_stock_sectors({stock_code}) 耗时 {elapsed:.1f}s, "
+            f"找到 {len(sectors)} 个板块"
+        )
+        return StockSectorsResponse(
+            stock_code=stock_code, stock_name=stock_name, sectors=sectors,
+        )
+
+    async def get_stock_sectors_fast(
+        self, stock_code: str, stock_name: str = "",
+    ) -> StockSectorsResponse:
+        """快速反查——利用东财个股所属板块接口（比遍历成分股快得多）
+
+        先尝试 AKShare 个股所属板块接口，如果无法获取则降级到遍历已加载的 boards 缓存。
+        """
+        t0 = time.monotonic()
+        sectors: list[StockSectorInfo] = []
+
+        # 方案 1：尝试从东财直接获取个股概念/行业板块
+        try:
+            import akshare as ak
+            # 个股所属行业
+            try:
+                df = ak.stock_board_industry_name_em(symbol=stock_code)
+                if df is not None and not df.empty:
+                    for _, row in df.iterrows():
+                        sectors.append(StockSectorInfo(
+                            board_code=str(row.get("板块代码", "")),
+                            board_name=str(row.get("板块名称", "")),
+                            board_type="industry",
+                            pct_chg=self._safe_float(row.get("板块涨跌幅")),
+                        ))
+            except Exception:
+                pass
+
+            # 个股所属概念
+            try:
+                df = ak.stock_board_concept_name_em(symbol=stock_code)
+                if df is not None and not df.empty:
+                    for _, row in df.iterrows():
+                        sectors.append(StockSectorInfo(
+                            board_code=str(row.get("板块代码", "")),
+                            board_name=str(row.get("板块名称", "")),
+                            board_type="concept",
+                            pct_chg=self._safe_float(row.get("板块涨跌幅")),
+                        ))
+            except Exception:
+                pass
+        except ImportError:
+            pass
+
+        # 方案 2：降级——从缓存的 boards 中遍历（只查已加载的）
+        if not sectors:
+            for board_type in ("industry", "concept"):
+                cache_key = f"boards:{board_type}:"
+                cached = self._get_cache(cache_key)
+                if cached is None:
+                    continue
+                for board in cached.boards:
+                    if stock_name and board.leading_stock == stock_name:
+                        sectors.append(StockSectorInfo(
+                            board_code=board.board_code,
+                            board_name=board.board_name,
+                            board_type=board_type,
+                            pct_chg=board.pct_chg,
+                        ))
+
+        elapsed = time.monotonic() - t0
+        logger.info(
+            f"⏱️ SectorEngine.get_stock_sectors_fast({stock_code}) 耗时 {elapsed:.1f}s, "
+            f"找到 {len(sectors)} 个板块"
+        )
+        return StockSectorsResponse(
+            stock_code=stock_code, stock_name=stock_name, sectors=sectors,
+        )
 
     def _auto_persist(self, board_df, fund_flow_df, board_type: str):
         """自动将板块数据持久化到 DuckDB（同步执行，不影响响应速度因在锁内）"""

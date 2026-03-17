@@ -141,6 +141,15 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    # 关闭定时任务调度器
+    try:
+        from engine.expert.routes import get_task_manager
+        tm = get_task_manager()
+        if tm:
+            tm.shutdown()
+    except Exception as e:
+        logger.warning(f"定时任务调度器关闭异常: {e}")
+
     # 关闭 DuckDB 连接，刷 WAL 到主库
     try:
         from engine.data import get_data_engine

@@ -50,7 +50,7 @@ export default function ExpertPageRoute() {
             </div>
 
             {/* 能力标签 */}
-            <div className="ml-auto flex gap-1.5">
+            <div className="ml-auto flex gap-1.5 items-center">
               {(profile?.description ?? "")
                 .split("、")
                 .slice(0, 3)

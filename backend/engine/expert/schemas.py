@@ -139,3 +139,13 @@ class SessionInfo(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     message_count: int = 0
+
+
+class ScheduledTaskRequest(BaseModel):
+    """创建定时任务请求体"""
+    name: str                    # "每日看茅台"
+    expert_type: str = "rag"     # rag / short_term / data / quant / info / industry
+    persona: str = "rag"         # rag / short_term
+    message: str                 # "帮我分析一下贵州茅台今天的走势"
+    cron_expr: str               # "0 15 * * 1-5" (周一到周五15:00)
+    create_session: bool = True  # 是否自动创建专属 session
