@@ -612,9 +612,11 @@ class EngineExpert:
         elif action == "query_history":
             code = self._resolve_code(params.get("code", ""))
             days = int(params.get("days", 60))
+            # days 是交易日数，乘以 1.8 换算日历天（含周末/节假日冗余）
+            calendar_days = max(days, 10) * 1.8 + 10
             today = datetime.date.today()
             end = today.strftime("%Y-%m-%d")
-            start = (today - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            start = (today - datetime.timedelta(days=int(calendar_days))).strftime("%Y-%m-%d")
             df = await asyncio.to_thread(de.get_daily_history, code, start, end)
             if df is None or df.empty:
                 return json.dumps({"error": f"无 {code} 日线数据"}, ensure_ascii=False)
@@ -631,6 +633,9 @@ class EngineExpert:
                         date_col = "date" if "date" in df.columns else ("trade_date" if "trade_date" in df.columns else None)
                         last_date = str(df[date_col].iloc[-1])[:10] if date_col else ""
                         if realtime_price > 0 and last_date != today_str:
+                            # 计算涨跌幅（基于上一交易日收盘价）
+                            prev_close = float(df["close"].iloc[-1]) if "close" in df.columns and len(df) > 0 else 0
+                            pct_chg = round((realtime_price - prev_close) / prev_close * 100, 2) if prev_close > 0 else 0
                             new_row = {
                                 "close": realtime_price,
                                 "open": float(r.get("open", realtime_price)),
@@ -638,6 +643,7 @@ class EngineExpert:
                                 "low": float(r.get("low", realtime_price)),
                                 "volume": float(r.get("volume", 0)),
                                 "amount": float(r.get("amount", 0)),
+                                "pct_chg": pct_chg,
                                 "turnover_rate": float(r.get("turnover_rate", 0)),
                             }
                             if date_col:
@@ -648,7 +654,9 @@ class EngineExpert:
             except Exception:
                 pass
 
-            records = df.tail(20).to_dict("records")
+            # 返回用户请求的天数（而非固定 20），确保数据完整
+            return_rows = max(days, 20)
+            records = df.tail(return_rows).to_dict("records")
             return json.dumps({"code": code, "records": records, "total_days": len(df)},
                               ensure_ascii=False, default=str)
 
@@ -1069,7 +1077,7 @@ class EngineExpert:
 - query_stock(code: str): 单股全维度分析，code 示例: '000001'
 - query_cluster(cluster_id: int): 查询指定聚类信息
 - find_similar_stocks(code: str, top_k: int): 跨簇相似股票搜索
-- query_history(code: str, days: int): 历史行情数据
+- query_history(code: str, days: int): 历史行情数据。days 是交易日天数（非日历天），用户问30天就传30，问60天就传60，默认60
 - query_hourly(code: str, days: int): 查询个股小时线K线（60分钟级别），默认5个交易日
 - run_screen(filters: dict): 条件选股""",
             "quant": """- get_technical_indicators(code: str): 获取技术指标（RSI/MACD/布林带）

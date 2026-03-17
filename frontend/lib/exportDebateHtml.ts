@@ -168,7 +168,7 @@ export function exportDebateHtml(
 </style>
 </head>
 <body>
-<div style='max-width:960px;margin:0 auto'>
+<div style='max-width:100%;margin:0 auto;padding:0 24px'>
   <div style='margin-bottom:20px'>
     <h1>辩论记录 · ${escapeHtml(target)}</h1>
     <div style='font-size:12px;color:#64748b;margin-top:4px'>导出时间：${now}</div>
