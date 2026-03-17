@@ -341,6 +341,23 @@ class EngineExpert:
             full_text = accumulated
             yield {"event": "reply_token", "data": {"token": token}}
 
+        # ── 回退机制：如果回复过短（<50字），说明 think 标签吞掉了大部分内容 ──
+        if len(full_text.strip()) < 50 and tool_results:
+            logger.warning(
+                f"⚠️ [{self.expert_type}] 回复过短({len(full_text)}字)，"
+                f"触发非流式重生成 (tool_results={len(tool_results)}条)"
+            )
+            try:
+                retry_text = await self._retry_reply_non_stream(message, tool_results, history=history)
+                if retry_text and len(retry_text.strip()) > len(full_text.strip()):
+                    # 用新回复替换旧的
+                    delta = retry_text[len(full_text):] if retry_text.startswith(full_text) else retry_text
+                    if delta:
+                        full_text = retry_text
+                        yield {"event": "reply_token", "data": {"token": delta}}
+            except Exception as e:
+                logger.error(f"非流式重生成失败: {e}")
+
         yield {"event": "reply_complete", "data": {"full_text": full_text}}
 
     async def _plan_tools(self, message: str) -> dict:
@@ -368,7 +385,8 @@ class EngineExpert:
 {{"tool_calls": []}}
 
 注意：当用户提到"今天"、"最近"、"本周"等相对时间时，请根据上方的当前时间来理解。
-直接输出 JSON，不要包含 markdown 代码块、不要包含任何额外文字或思考过程。"""
+直接输出 JSON，不要包含 markdown 代码块、不要包含任何额外文字。
+绝对不要输出 <think> 标签或任何思考过程，只输出纯 JSON。"""
 
         try:
             # 流式收集（保持链路活跃）
@@ -384,11 +402,25 @@ class EngineExpert:
                 logger.warning("工具规划 LLM 返回空内容，跳过工具调用")
                 return {"tool_calls": []}
 
+            # 保存原始文本（用于后续从 think 内容中提取 JSON）
+            raw_text = text
+
             # 剥离各种可能的标签
             text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
             text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
             text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL).strip()
             text = re.sub(r"<tool_code>.*?</tool_code>", "", text, flags=re.DOTALL).strip()
+
+            # 如果剥离 think 后为空，尝试从 think 内容中提取 JSON
+            if not text:
+                think_match = re.search(r"<think>(.*?)</think>", raw_text, re.DOTALL)
+                if think_match:
+                    think_content = think_match.group(1).strip()
+                    # 尝试从 think 内容中找到 JSON 对象
+                    json_match = re.search(r'\{[^{}]*"tool_calls"\s*:\s*\[.*?\]\s*\}', think_content, re.DOTALL)
+                    if json_match:
+                        text = json_match.group(0)
+                        logger.info("工具规划: 从 <think> 标签内提取到 JSON")
 
             # 提取 JSON（处理 markdown 代码块）
             if "```" in text:
@@ -399,7 +431,13 @@ class EngineExpert:
 
             # 尝试解析 JSON
             if not text:
-                return {"tool_calls": []}
+                # 最后兜底：从原始文本中尝试提取任何 JSON 对象
+                json_match = re.search(r'\{[^{}]*"tool_calls"\s*:\s*\[.*?\]\s*\}', raw_text, re.DOTALL)
+                if json_match:
+                    text = json_match.group(0)
+                    logger.info("工具规划: 从原始文本兜底提取到 JSON")
+                else:
+                    return {"tool_calls": []}
             return json.loads(text)
         except Exception as e:
             logger.warning(f"工具规划失败，跳过工具调用: {e}")
@@ -456,12 +494,14 @@ class EngineExpert:
 - 如果原参数中的股票代码不是6位数字，请替换为正确的代码
 - 如果原参数不适用（如"市场整体"），请改用更合适的工具或参数
 - 如果确实无法修正，返回 {{"action": "none", "params": {{}}}}
-直接输出 JSON，不要包含任何额外文字。"""
+直接输出 JSON，不要包含任何额外文字。
+绝对不要输出 <think> 标签，只输出纯 JSON。"""
 
         try:
             chunks: list[str] = []
             async for token in self._llm.chat_stream([
                 ChatMessage("system", fix_prompt),
+                ChatMessage("user", "请修正工具参数并返回 JSON"),
             ]):
                 chunks.append(token)
             text = "".join(chunks).strip()
@@ -572,11 +612,42 @@ class EngineExpert:
         elif action == "query_history":
             code = self._resolve_code(params.get("code", ""))
             days = int(params.get("days", 60))
-            end = datetime.date.today().strftime("%Y-%m-%d")
-            start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            today = datetime.date.today()
+            end = today.strftime("%Y-%m-%d")
+            start = (today - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
             df = await asyncio.to_thread(de.get_daily_history, code, start, end)
             if df is None or df.empty:
                 return json.dumps({"error": f"无 {code} 日线数据"}, ensure_ascii=False)
+
+            # ── 用实时快照补充当天数据 ──
+            try:
+                snap = de.get_snapshot()
+                if snap is not None and not snap.empty:
+                    row = snap[snap["code"].astype(str) == code]
+                    if not row.empty:
+                        r = row.iloc[0]
+                        realtime_price = float(r.get("price", 0))
+                        today_str = today.strftime("%Y-%m-%d")
+                        date_col = "date" if "date" in df.columns else ("trade_date" if "trade_date" in df.columns else None)
+                        last_date = str(df[date_col].iloc[-1])[:10] if date_col else ""
+                        if realtime_price > 0 and last_date != today_str:
+                            new_row = {
+                                "close": realtime_price,
+                                "open": float(r.get("open", realtime_price)),
+                                "high": float(r.get("high", realtime_price)),
+                                "low": float(r.get("low", realtime_price)),
+                                "volume": float(r.get("volume", 0)),
+                                "amount": float(r.get("amount", 0)),
+                                "turnover_rate": float(r.get("turnover_rate", 0)),
+                            }
+                            if date_col:
+                                new_row[date_col] = today_str
+                            if "code" in df.columns:
+                                new_row["code"] = code
+                            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            except Exception:
+                pass
+
             records = df.tail(20).to_dict("records")
             return json.dumps({"code": code, "records": records, "total_days": len(df)},
                               ensure_ascii=False, default=str)
@@ -630,6 +701,7 @@ class EngineExpert:
         import asyncio
         import datetime
         import json
+        import pandas as pd
         from engine.quant import get_quant_engine
         from engine.data import get_data_engine
 
@@ -639,14 +711,58 @@ class EngineExpert:
         if action == "get_technical_indicators":
             code = self._resolve_code(params.get("code", ""))
             days = 120
-            end = datetime.date.today().strftime("%Y-%m-%d")
-            start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            today = datetime.date.today()
+            end = today.strftime("%Y-%m-%d")
+            start = (today - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
             daily = await asyncio.to_thread(de.get_daily_history, code, start, end)
             if daily is None or daily.empty:
                 return json.dumps({"error": f"无 {code} 日线数据，无法计算技术指标"}, ensure_ascii=False)
+
+            # ── 用实时快照补充当天数据，避免日线缺少当天行情 ──
+            realtime_price = None
+            realtime_pct = None
+            try:
+                snap = de.get_snapshot()
+                if snap is not None and not snap.empty:
+                    row = snap[snap["code"].astype(str) == code]
+                    if not row.empty:
+                        r = row.iloc[0]
+                        realtime_price = float(r.get("price", 0))
+                        realtime_pct = float(r.get("pct_chg", 0))
+                        today_str = today.strftime("%Y-%m-%d")
+                        # 检查日线最后一条的日期
+                        date_col = "date" if "date" in daily.columns else ("trade_date" if "trade_date" in daily.columns else None)
+                        last_date = ""
+                        if date_col:
+                            last_date = str(daily[date_col].iloc[-1])[:10]
+
+                        if realtime_price > 0 and last_date != today_str:
+                            # 日线缺少今天的数据，用实时快照补一行
+                            new_row = {
+                                "close": realtime_price,
+                                "volume": float(r.get("volume", 0)),
+                                "amount": float(r.get("amount", 0)),
+                                "turnover_rate": float(r.get("turnover_rate", 0)),
+                            }
+                            if date_col:
+                                new_row[date_col] = today_str
+                            if "code" in daily.columns:
+                                new_row["code"] = code
+                            # 推算 open/high/low（用实时价近似，有 high/low 就用）
+                            new_row["open"] = float(r.get("open", realtime_price))
+                            new_row["high"] = float(r.get("high", realtime_price))
+                            new_row["low"] = float(r.get("low", realtime_price))
+                            daily = pd.concat([daily, pd.DataFrame([new_row])], ignore_index=True)
+            except Exception:
+                pass  # 快照补充失败不影响主流程
+
             indicators = qe.compute_indicators(daily)
-            return json.dumps({"code": code, "data_days": len(daily), "indicators": indicators},
-                              ensure_ascii=False, default=str)
+            result = {"code": code, "data_days": len(daily), "indicators": indicators}
+            # 附带实时价格，确保量化专家看到最新价
+            if realtime_price and realtime_price > 0:
+                result["realtime_price"] = realtime_price
+                result["realtime_pct_chg"] = realtime_pct
+            return json.dumps(result, ensure_ascii=False, default=str)
 
         elif action == "get_factor_scores":
             snap = de.get_snapshot()
@@ -797,6 +913,43 @@ class EngineExpert:
 
         return f"未知 industry 工具: {action}"
 
+    async def _retry_reply_non_stream(
+        self, message: str, tool_results: list[str],
+        history: list[dict] | None = None,
+    ) -> str:
+        """非流式重新生成回复（当流式回复被 think 标签吞掉时的回退方案）"""
+        import re
+        from llm.providers import ChatMessage
+        from engine.expert.personas import get_current_date_context
+
+        context_parts = []
+        if tool_results:
+            context_parts.append("工具调用结果：\n" + "\n---\n".join(tool_results))
+
+        system = self.profile["system_prompt"] + f"\n⏰ 当前时间：{get_current_date_context()}"
+        system += (
+            "\n\n⚠️ 重要：你的所有数据通过工具从数据源实时拉取，"
+            "不受模型训练截止日期限制。绝对不要提及「知识截止」「训练数据截止」等字眼。"
+            "\n\n🚫 绝对不要使用 <think> 标签！直接输出你的完整专业分析。"
+            "不要输出任何思考过程标签或 XML 标签。请直接用 Markdown 格式给出详细分析。"
+        )
+        if context_parts:
+            system += "\n\n" + "\n\n".join(context_parts)
+
+        messages = [ChatMessage("system", system)]
+        for h in (history or []):
+            role = "assistant" if h["role"] == "expert" else h["role"]
+            content = h.get("content", "")
+            messages.append(ChatMessage(role, content))
+        messages.append(ChatMessage("user", message))
+
+        result = await self._llm.chat(messages)
+
+        # 剥离可能的 think 标签
+        result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL).strip()
+
+        return result
+
     async def _reply_stream(
         self, message: str, tool_results: list[str],
         history: list[dict] | None = None,
@@ -813,6 +966,8 @@ class EngineExpert:
         system += (
             "\n\n⚠️ 重要：你的所有数据通过工具从数据源实时拉取，"
             "不受模型训练截止日期限制。绝对不要提及「知识截止」「训练数据截止」等字眼。"
+            "\n\n🚫 绝对不要使用 <think> 标签！直接输出你的分析和结论。"
+            "不要输出任何思考过程标签，直接给出完整的专业分析回复。"
         )
         if context_parts:
             system += "\n\n" + "\n\n".join(context_parts)
@@ -873,15 +1028,16 @@ class EngineExpert:
                 # 在跳过块内：丢弃内容，但防止缓冲区无限增长
                 if in_skip:
                     skip_bytes += len(token)
-                    # 保护：如果 skip 区域累积超过 2000 字节还未关闭，强制退出
-                    if skip_bytes > 2000:
+                    # 保护：如果 skip 区域累积超过 20000 字节还未关闭，强制退出
+                    # （MiniMax-M2.5 的 <think> 内容通常在 5000~15000 字节）
+                    if skip_bytes > 20000:
                         logger.warning(f"skip 区域未关闭(>{skip_bytes}B)，强制退出: {skip_end_tag}")
                         in_skip = False
                         raw_buffer = ""
                         skip_end_tag = ""
                         skip_bytes = 0
                     elif len(raw_buffer) > 200:
-                        raw_buffer = raw_buffer[-20:]
+                        raw_buffer = raw_buffer[-50:]
                     continue
 
                 # 正常正文：检查是否可能是不完整的标签

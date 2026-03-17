@@ -55,19 +55,35 @@ class DataEngine:
     # ── 日线历史 ──
 
     def get_daily_history(self, code: str, start: str, end: str) -> pd.DataFrame:
-        """获取个股日线，优先本地 DuckDB，缺失则通过 collector 拉取"""
+        """获取个股日线，优先本地 DuckDB，缺失或过期则通过 collector 拉取"""
         df = self._store.get_daily(code, start, end)
         if df is not None and len(df) > 0:
-            return df
-        # 本地无数据，尝试网络拉取
-        df = self._collector.get_daily_history(code, start, end)
-        if df is not None and len(df) > 0:
+            # ── 新鲜度检查：如果缓存最后一条日期离今天超过 2 天，尝试重新拉取 ──
+            stale = False
+            try:
+                date_col = "date" if "date" in df.columns else ("trade_date" if "trade_date" in df.columns else None)
+                if date_col:
+                    last_date = pd.to_datetime(df[date_col].iloc[-1]).date()
+                    gap = (datetime.date.today() - last_date).days
+                    if gap > 2:  # 周末间隔最大2天，>2说明缺少最近交易日数据
+                        stale = True
+            except Exception:
+                pass
+            if not stale:
+                return df
+            # 缓存过期，重新拉取
+            logger.debug(f"📡 {code} 本地日线数据过期，重新拉取...")
+        # 本地无数据或过期，尝试网络拉取
+        fresh = self._collector.get_daily_history(code, start, end)
+        if fresh is not None and len(fresh) > 0:
             # 补齐 save_daily 所需的列
-            if "code" not in df.columns:
-                df["code"] = code
-            if "turnover_rate" not in df.columns:
-                df["turnover_rate"] = 0.0
-            self._store.save_daily(df)
+            if "code" not in fresh.columns:
+                fresh["code"] = code
+            if "turnover_rate" not in fresh.columns:
+                fresh["turnover_rate"] = 0.0
+            self._store.save_daily(fresh)
+            return fresh
+        # 网络拉取失败，fallback 到本地缓存（有总比没有好）
         return df if df is not None else pd.DataFrame()
 
     def get_daily_history_batch(
