@@ -1,7 +1,7 @@
 # StockTerrain 部署清单
 
 > A股多维聚类 3D 地形可视化平台 — 部署与依赖文档  
-> 最后更新：2026-03-12
+> 最后更新：2026-03-17
 
 ---
 
@@ -16,6 +16,7 @@
 | **pip** | 23.0+ | 最新 | Python 包管理 |
 | **Git** | 2.30+ | 最新 | 版本控制 |
 | **Git LFS** | 3.0+ | 最新 | 大文件存储（嵌入向量等） |
+| **Docker** | 24.0+ | 最新 | 可选，容器化部署 |
 
 ### 可选组件
 
@@ -30,18 +31,25 @@
 
 ```
 Visualize-A-shares/
-├── engine/                     # Python 后端（FastAPI）
+├── backend/                    # Python 后端（FastAPI）
 │   ├── main.py                 # 入口 — uvicorn 启动
-│   ├── config.py               # 全局配置
+│   ├── config.py               # 全局配置（统一路径入口）
 │   ├── pyproject.toml          # Python 依赖声明
-│   ├── algorithm/              # UMAP / HDBSCAN / RBF 插值
+│   ├── engine/                 # 领域引擎
+│   │   ├── data/               # 数据引擎（行情、持久化）
+│   │   ├── cluster/            # 聚类引擎（UMAP / HDBSCAN / RBF）
+│   │   │   ├── algorithm/      # 算法核心
+│   │   │   └── preprocess/     # 预处理脚本
+│   │   ├── quant/              # 量化引擎（因子、技术指标）
+│   │   ├── info/               # 信息引擎（新闻、公告、情感）
+│   │   ├── industry/           # 行业引擎（认知、资本结构）
+│   │   ├── expert/             # 专家引擎（多专家并行）
+│   │   └── arena/              # 辩论引擎（多角色 + 黑板）
+│   │       └── rag/            # RAG 检索增强
 │   ├── api/                    # REST API 路由
-│   ├── data/                   # 数据采集（AKShare / BaoStock）
-│   ├── preprocess/             # 预处理脚本
-│   │   ├── build_embeddings.py # 完整流程：采集 → 嵌入
-│   │   └── rebuild_bge.py      # 快速重建嵌入
-│   └── storage/                # DuckDB 存储层
-├── web/                        # Next.js 前端
+│   ├── llm/                    # LLM 接入层
+│   └── mcpserver/              # MCP Server
+├── frontend/                   # Next.js 前端
 │   ├── package.json            # 前端依赖声明
 │   ├── next.config.ts          # Next.js 配置 + API 代理
 │   ├── app/                    # 页面路由
@@ -53,6 +61,13 @@ Visualize-A-shares/
 │       ├── company_profiles.json   # 公司概况（~5 MB）
 │       ├── stock_embeddings.npz    # 语义嵌入（~15 MB）
 │       └── precompute_meta.json    # 元信息
+├── tests/
+│   ├── unit/                   # 单元测试
+│   └── integration/            # 集成测试
+├── scripts/
+│   ├── setup.sh / setup.bat    # 一键配置环境
+│   └── start.sh / start.bat    # 一键启动服务
+├── docker-compose.yml          # Docker 编排
 └── DEPLOYMENT.md               # 本文件
 ```
 
@@ -60,8 +75,8 @@ Visualize-A-shares/
 
 ## 三、后端 Python 依赖
 
-> 声明文件：`engine/pyproject.toml`  
-> 安装方式：`cd engine && pip install -e .`（或 `pip install -e ".[dev]"` 含开发依赖）
+> 声明文件：`backend/pyproject.toml`  
+> 安装方式：`cd backend && pip install -e .`（或 `pip install -e ".[dev]"` 含开发依赖）
 
 ### 3.1 运行时依赖
 
@@ -108,8 +123,8 @@ Visualize-A-shares/
 
 ## 四、前端 Node.js 依赖
 
-> 声明文件：`web/package.json`  
-> 安装方式：`cd web && npm install`
+> 声明文件：`frontend/package.json`  
+> 安装方式：`cd frontend && npm install`
 
 ### 4.1 运行时依赖
 
@@ -175,12 +190,12 @@ Visualize-A-shares/
 
 ```bash
 # 完整流程：获取全市场股票 → 爬取公司概况 → 生成嵌入
-cd engine
-python -m preprocess.build_embeddings
+cd backend
+python -m engine.cluster.preprocess.build_embeddings
 
 # 快速重建：仅用已有概况重新编码嵌入（跳过爬取）
-cd engine
-python -m preprocess.rebuild_bge
+cd backend
+python -m engine.cluster.preprocess.rebuild_bge
 ```
 
 **降级策略**（无 GPU / 无法下载模型时）：
@@ -192,10 +207,35 @@ python -m preprocess.rebuild_bge
 
 ## 六、服务端口与启动
 
-### 6.1 后端（FastAPI）
+### 6.1 一键启动（推荐）
 
 ```bash
-cd engine
+# macOS / Linux
+scripts/setup.sh     # 首次：配置环境
+scripts/start.sh     # 启动所有服务
+
+# Windows
+scripts\setup.bat
+scripts\start.bat
+```
+
+### 6.2 Docker Compose
+
+```bash
+cp .env.example .env
+# 编辑 .env 填入 API Key
+docker compose up
+```
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| backend | 8000 | FastAPI + Uvicorn |
+| frontend | 3000 | Next.js Dev Server |
+
+### 6.3 手动启动 — 后端（FastAPI）
+
+```bash
+cd backend
 
 # 安装依赖
 pip install -e .
@@ -213,10 +253,10 @@ python main.py
 | CORS 允许 | `localhost:3000`, `localhost:5173` |
 | 日志目录 | `logs/engine_{date}.log`（保留 30 天） |
 
-### 6.2 前端（Next.js）
+### 6.4 手动启动 — 前端（Next.js）
 
 ```bash
-cd web
+cd frontend
 
 # 安装依赖
 npm install
@@ -238,7 +278,7 @@ npm run start      # → http://localhost:3000
 
 ## 七、关键配置项
 
-> 文件：`engine/config.py` — 全部硬编码默认值，无 `.env` 文件
+> 文件：`backend/config.py` — 统一路径入口 + 全局配置
 
 | 配置项 | 默认值 | 说明 |
 |--------|-------|------|
@@ -258,30 +298,63 @@ npm run start      # → http://localhost:3000
 
 ## 八、部署步骤汇总
 
+### 方式一：一键脚本
+
+```bash
+# 1. 克隆项目
+git clone <repo-url>
+cd Visualize-A-shares
+
+# 2. 一键配置
+scripts/setup.sh
+
+# 3. 编辑 .env 填入 API Key
+
+# 4. 一键启动
+scripts/start.sh
+```
+
+### 方式二：Docker Compose
+
+```bash
+# 1. 克隆项目
+git clone <repo-url>
+cd Visualize-A-shares
+
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env 填入 API Key
+
+# 3. 启动
+docker compose up -d
+```
+
+### 方式三：手动部署
+
 ```bash
 # 1. 克隆项目
 git clone <repo-url>
 cd Visualize-A-shares
 
 # 2. 后端环境
-cd engine
+cd backend
 python -m venv .venv
 source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -e .
 
 # 3. 前端环境
-cd ../web
+cd ../frontend
 npm install
 
 # 4. 预计算数据已随仓库提供，无需额外操作
-# （如需更新：cd engine && python -m preprocess.build_embeddings）
+# （如需更新：cd backend && python -m engine.cluster.preprocess.build_embeddings）
 
 # 5. 启动后端（终端 1）
-cd engine
+cd backend
 uvicorn main:app --host 0.0.0.0 --port 8000
 
 # 6. 启动前端（终端 2）
-cd web
+cd frontend
 npm run build && npm run start
 # 或开发模式：npm run dev
 ```

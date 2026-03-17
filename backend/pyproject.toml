@@ -1,0 +1,69 @@
+[project]
+name = "stockterrain-engine"
+version = "0.1.0"
+description = "StockTerrain — A股多维聚类3D地形可视化平台 数据与算法引擎"
+requires-python = ">=3.11"
+dependencies = [
+    # Web 框架
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "websockets>=13.0",
+
+    # 数据采集
+    "akshare>=1.14.0",
+    "baostock>=0.8.8",
+
+    # 数据处理
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "duckdb>=1.1.0",
+
+    # 机器学习 / 算法
+    "scikit-learn>=1.5.0",
+    "hdbscan>=0.8.38",
+    "umap-learn>=0.5.6",
+    "scipy>=1.14.0",
+
+    # 缓存 & 调度
+    "redis>=5.0.0",
+    "apscheduler>=3.10.0",
+
+    # NLP / 语义嵌入 (预处理用)
+    "sentence-transformers>=3.0.0",
+    "torch>=2.0.0",
+
+    # 图结构
+    "networkx>=3.0",
+
+    # 工具
+    "pydantic>=2.9.0",
+    "loguru>=0.7.0",
+    "httpx>=0.27.0",
+
+    # MCP Server
+    "mcp>=1.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["../tests/unit", "../tests/integration"]
+pythonpath = ["."]
+addopts = ["--import-mode=importlib"]

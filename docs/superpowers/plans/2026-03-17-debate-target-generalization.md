@@ -35,7 +35,7 @@
 **Files:**
 - Modify: `engine/agent/schemas.py:112-145`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # engine/tests/agent/test_debate_schemas.py — 追加
@@ -46,12 +46,12 @@ def test_blackboard_target_type_defaults():
     assert bb.display_name == ""
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_debate_schemas.py::test_blackboard_target_type_defaults -v`
 Expected: FAIL — `Blackboard` has no field `target_type`
 
-- [ ] **Step 3: Add fields to Blackboard**
+- [x] **Step 3: Add fields to Blackboard**
 
 In `engine/agent/schemas.py`, inside `class Blackboard`, after line 118 (`mode: Literal[...] = "standard"`), add:
 
@@ -61,12 +61,12 @@ In `engine/agent/schemas.py`, inside `class Blackboard`, after line 118 (`mode: 
     display_name: str = ""          # prompt 用展示名，也写入 debate_start SSE 事件
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_debate_schemas.py::test_blackboard_target_type_defaults -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add engine/agent/schemas.py engine/tests/agent/test_debate_schemas.py
@@ -81,7 +81,7 @@ git commit -m "feat(schemas): Blackboard 新增 target_type/sector_name/display_
 - Create: `engine/agent/target_resolver.py`
 - Create: `engine/tests/agent/test_target_resolver.py`
 
-- [ ] **Step 1: Write the failing tests for rule-based resolution**
+- [x] **Step 1: Write the failing tests for rule-based resolution**
 
 ```python
 # engine/tests/agent/test_target_resolver.py
@@ -134,12 +134,12 @@ class TestTargetResolverRules:
         assert result is None
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestTargetResolverRules -v`
 Expected: FAIL — module `agent.target_resolver` does not exist
 
-- [ ] **Step 3: Implement TargetResolver with rule-based resolution**
+- [x] **Step 3: Implement TargetResolver with rule-based resolution**
 
 ```python
 # engine/agent/target_resolver.py
@@ -299,12 +299,12 @@ class TargetResolver:
         return ""
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestTargetResolverRules -v`
 Expected: PASS (5 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add engine/agent/target_resolver.py engine/tests/agent/test_target_resolver.py
@@ -319,7 +319,7 @@ git commit -m "feat(target_resolver): TargetResolver 规则识别 — stock/sect
 - Modify: `engine/tests/agent/test_target_resolver.py`
 - (No code changes to target_resolver.py — already implemented above)
 
-- [ ] **Step 1: Write async tests for LLM classification path**
+- [x] **Step 1: Write async tests for LLM classification path**
 
 Append to `engine/tests/agent/test_target_resolver.py`:
 
@@ -388,12 +388,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 ```
 
-- [ ] **Step 2: Run tests to verify they pass**
+- [x] **Step 2: Run tests to verify they pass**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py -v`
 Expected: PASS (all 11 tests)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add engine/tests/agent/test_target_resolver.py
@@ -412,7 +412,7 @@ git commit -m "test(target_resolver): LLM 分类路径 + fallback 测试"
 - Modify: `engine/agent/data_fetcher.py`
 - Modify: `engine/tests/agent/test_target_resolver.py` (追加 DataFetcher 测试)
 
-- [ ] **Step 1: Write failing tests for get_sector_overview**
+- [x] **Step 1: Write failing tests for get_sector_overview**
 
 Append to `engine/tests/agent/test_target_resolver.py`:
 
@@ -485,12 +485,12 @@ class TestDataFetcherSectorMacro:
         assert "note" in result
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestDataFetcherSectorMacro -v`
 Expected: FAIL — `DataFetcher` has no method `get_sector_overview`
 
-- [ ] **Step 3: Implement get_sector_overview and get_macro_context**
+- [x] **Step 3: Implement get_sector_overview and get_macro_context**
 
 Add to `engine/agent/data_fetcher.py`, after `get_restrict_stock_unlock` method (after line 395), before the end of the class:
 
@@ -566,7 +566,7 @@ Add to `engine/agent/data_fetcher.py`, after `get_restrict_stock_unlock` method 
                     "note": "宏观数据暂不可用"}
 ```
 
-- [ ] **Step 4: Add to SELF_DISPATCH and NO_CODE_ACTIONS**
+- [x] **Step 4: Add to SELF_DISPATCH and NO_CODE_ACTIONS**
 
 In `engine/agent/data_fetcher.py`, add `get_sector_overview` and `get_macro_context` to `SELF_DISPATCH` (line 15):
 
@@ -604,12 +604,12 @@ Modify `fetch_by_request` (line 124) to skip code resolution for NO_CODE_ACTIONS
             # ... (existing logic unchanged)
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestDataFetcherSectorMacro -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add engine/agent/data_fetcher.py engine/tests/agent/test_target_resolver.py
@@ -623,7 +623,7 @@ git commit -m "feat(data_fetcher): get_sector_overview + get_macro_context + NO_
 **Files:**
 - Modify: `engine/agent/personas.py:107-131`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Append to `engine/tests/agent/test_target_resolver.py`:
 
@@ -648,12 +648,12 @@ class TestWhitelistByType:
         assert "get_stock_info" not in macro_wl["bull_expert"]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestWhitelistByType -v`
 Expected: FAIL — `DEBATE_DATA_WHITELIST_BY_TYPE` does not exist
 
-- [ ] **Step 3: Replace DEBATE_DATA_WHITELIST with DEBATE_DATA_WHITELIST_BY_TYPE**
+- [x] **Step 3: Replace DEBATE_DATA_WHITELIST with DEBATE_DATA_WHITELIST_BY_TYPE**
 
 In `engine/agent/personas.py`, replace lines 105-128 (`DEBATE_DATA_WHITELIST`) with:
 
@@ -699,17 +699,17 @@ DEBATE_DATA_WHITELIST_BY_TYPE: dict[str, dict[str, list[str]]] = {
 DEBATE_DATA_WHITELIST = DEBATE_DATA_WHITELIST_BY_TYPE["stock"]
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestWhitelistByType -v`
 Expected: PASS
 
-- [ ] **Step 5: Run existing debate tests to verify backward compatibility**
+- [x] **Step 5: Run existing debate tests to verify backward compatibility**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_debate_core.py -v`
 Expected: PASS (existing tests still work because `DEBATE_DATA_WHITELIST` is re-exported)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add engine/agent/personas.py engine/tests/agent/test_target_resolver.py
@@ -723,7 +723,7 @@ git commit -m "feat(personas): DEBATE_DATA_WHITELIST_BY_TYPE — 按 target_type
 **Files:**
 - Modify: `engine/agent/personas.py:287-331`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Append to `engine/tests/agent/test_target_resolver.py`:
 
@@ -754,12 +754,12 @@ class TestBuildDebateSystemPromptTargetType:
         assert "板块" in prompt
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestBuildDebateSystemPromptTargetType -v`
 Expected: FAIL — `build_debate_system_prompt` doesn't accept `target_type`
 
-- [ ] **Step 3: Modify build_debate_system_prompt**
+- [x] **Step 3: Modify build_debate_system_prompt**
 
 In `engine/agent/personas.py`, change the function signature and add prefix logic:
 
@@ -817,17 +817,17 @@ def build_debate_system_prompt(role: str, target: str, is_final_round: bool, tar
         raise ValueError(f"未知辩论角色: {role}")
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestBuildDebateSystemPromptTargetType -v`
 Expected: PASS
 
-- [ ] **Step 5: Run existing tests to verify backward compatibility**
+- [x] **Step 5: Run existing tests to verify backward compatibility**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/ -v`
 Expected: PASS (existing callers pass no `target_type`, defaults to "stock")
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add engine/agent/personas.py engine/tests/agent/test_target_resolver.py
@@ -841,7 +841,7 @@ git commit -m "feat(personas): build_debate_system_prompt 注入 target_type 前
 **Files:**
 - Modify: `engine/agent/personas.py:333-391`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Append to `engine/tests/agent/test_target_resolver.py`:
 
@@ -864,12 +864,12 @@ class TestBuildDataRequestPromptTargetType:
         assert '"query": "美联储降息"' in prompt
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestBuildDataRequestPromptTargetType -v`
 Expected: FAIL — `build_data_request_prompt` doesn't accept `target_type`
 
-- [ ] **Step 3: Modify build_data_request_prompt**
+- [x] **Step 3: Modify build_data_request_prompt**
 
 In `engine/agent/personas.py`, update `_DATA_REQUEST_TEMPLATE` params example line (line 356) and `build_data_request_prompt`:
 
@@ -933,17 +933,17 @@ def build_data_request_prompt(role: str, target: str, round: int, context: str, 
     )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestBuildDataRequestPromptTargetType -v`
 Expected: PASS
 
-- [ ] **Step 5: Run all agent tests**
+- [x] **Step 5: Run all agent tests**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/ -v`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add engine/agent/personas.py engine/tests/agent/test_target_resolver.py
@@ -961,7 +961,7 @@ git commit -m "feat(personas): build_data_request_prompt 按 target_type 调整 
 **Files:**
 - Modify: `engine/agent/debate.py:30-36,165-178`
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Append to `engine/tests/agent/test_target_resolver.py`:
 
@@ -1002,12 +1002,12 @@ class TestValidateDataRequestsTargetType:
         assert len(result) == 1
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestValidateDataRequestsTargetType -v`
 Expected: FAIL — `validate_data_requests` doesn't accept `target_type`
 
-- [ ] **Step 3: Update imports and validate_data_requests**
+- [x] **Step 3: Update imports and validate_data_requests**
 
 In `engine/agent/debate.py`, update the import (line 30-36):
 
@@ -1041,17 +1041,17 @@ def validate_data_requests(role: str, requests: list[DataRequest], target_type: 
     return valid
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_target_resolver.py::TestValidateDataRequestsTargetType -v`
 Expected: PASS
 
-- [ ] **Step 5: Run existing debate core tests**
+- [x] **Step 5: Run existing debate core tests**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/test_debate_core.py -v`
 Expected: PASS (backward compatible — default `target_type="stock"`)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add engine/agent/debate.py engine/tests/agent/test_target_resolver.py
@@ -1065,7 +1065,7 @@ git commit -m "feat(debate): validate_data_requests 接收 target_type 参数"
 **Files:**
 - Modify: `engine/agent/debate.py:609-678`
 
-- [ ] **Step 1: Update ACTION_TITLE_MAP**
+- [x] **Step 1: Update ACTION_TITLE_MAP**
 
 In `engine/agent/debate.py`, add two entries to `ACTION_TITLE_MAP` (line 670):
 
@@ -1082,7 +1082,7 @@ ACTION_TITLE_MAP = {
 }
 ```
 
-- [ ] **Step 2: Modify fetch_initial_data to branch by target_type**
+- [x] **Step 2: Modify fetch_initial_data to branch by target_type**
 
 Replace `fetch_initial_data` (lines 609-667) with:
 
@@ -1161,12 +1161,12 @@ async def fetch_initial_data(
     })
 ```
 
-- [ ] **Step 3: Run existing tests**
+- [x] **Step 3: Run existing tests**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/ -v`
 Expected: PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add engine/agent/debate.py
@@ -1180,7 +1180,7 @@ git commit -m "feat(debate): fetch_initial_data 按 target_type 分支 + ACTION_
 **Files:**
 - Modify: `engine/agent/debate.py:684-734`
 
-- [ ] **Step 1: Modify generate_industry_cognition**
+- [x] **Step 1: Modify generate_industry_cognition**
 
 Update the function signature and early-return guard:
 
@@ -1241,12 +1241,12 @@ async def generate_industry_cognition(
         })
 ```
 
-- [ ] **Step 2: Run existing tests**
+- [x] **Step 2: Run existing tests**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/ -v`
 Expected: PASS (backward compatible — default `target_override=""`)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add engine/agent/debate.py
@@ -1260,7 +1260,7 @@ git commit -m "feat(debate): generate_industry_cognition 接收 target_override 
 **Files:**
 - Modify: `engine/agent/debate.py:1396-1470`
 
-- [ ] **Step 1: Update run_debate to use TargetResolver**
+- [x] **Step 1: Update run_debate to use TargetResolver**
 
 Replace lines 1408-1414 (the `resolve_stock_code` block) with:
 
@@ -1277,7 +1277,7 @@ Replace lines 1408-1414 (the `resolve_stock_code` block) with:
                 f"code={blackboard.code}, sector={blackboard.sector_name}, display={blackboard.display_name}")
 ```
 
-- [ ] **Step 2: Update debate_start SSE event to include display_name and target_type**
+- [x] **Step 2: Update debate_start SSE event to include display_name and target_type**
 
 Update the `yield sse("debate_start", ...)` block (line 1424):
 
@@ -1294,7 +1294,7 @@ Update the `yield sse("debate_start", ...)` block (line 1424):
     })
 ```
 
-- [ ] **Step 3: Update generate_industry_cognition call to pass target_override**
+- [x] **Step 3: Update generate_industry_cognition call to pass target_override**
 
 Replace line 1450:
 
@@ -1310,7 +1310,7 @@ Replace line 1450:
             yield event
 ```
 
-- [ ] **Step 4: Update capital_structure guard**
+- [x] **Step 4: Update capital_structure guard**
 
 Replace line 1454 (`if blackboard.code:`) with:
 
@@ -1319,7 +1319,7 @@ Replace line 1454 (`if blackboard.code:`) with:
     if blackboard.code and blackboard.target_type == "stock":
 ```
 
-- [ ] **Step 5: Update speak_stream call to pass target_type**
+- [x] **Step 5: Update speak_stream call to pass target_type**
 
 In `speak_stream` (line 434), update the `build_debate_system_prompt` call:
 
@@ -1327,7 +1327,7 @@ In `speak_stream` (line 434), update the `build_debate_system_prompt` call:
     system_prompt = build_debate_system_prompt(role, blackboard.display_name or blackboard.target, is_final_round, target_type=blackboard.target_type)
 ```
 
-- [ ] **Step 6: Update request_data_for_round to pass target_type**
+- [x] **Step 6: Update request_data_for_round to pass target_type**
 
 In `request_data_for_round` (line 853), update the `build_data_request_prompt` call:
 
@@ -1341,7 +1341,7 @@ And update the `validate_data_requests` call (line 876):
     requests = validate_data_requests(role, requests, target_type=blackboard.target_type)
 ```
 
-- [ ] **Step 7: Update speak() (non-streaming) to pass target_type**
+- [x] **Step 7: Update speak() (non-streaming) to pass target_type**
 
 In `speak` (line 570), update:
 
@@ -1349,12 +1349,12 @@ In `speak` (line 570), update:
     system_prompt = build_debate_system_prompt(role, blackboard.display_name or blackboard.target, is_final_round, target_type=blackboard.target_type)
 ```
 
-- [ ] **Step 8: Run all agent tests**
+- [x] **Step 8: Run all agent tests**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/agent/ -v`
 Expected: PASS
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add engine/agent/debate.py
@@ -1368,7 +1368,7 @@ git commit -m "feat(debate): run_debate 集成 TargetResolver + 全链路 target
 **Files:**
 - Modify: `engine/api/routes/debate.py:17-47,156-188`
 
-- [ ] **Step 1: Update DebateRequest model**
+- [x] **Step 1: Update DebateRequest model**
 
 Replace `DebateRequest` (line 17-22):
 
@@ -1381,7 +1381,7 @@ class DebateRequest(BaseModel):
     as_of_date: str = Field(default="", description="回测日期，如 '2025-06-30'，空字符串表示使用最新数据")
 ```
 
-- [ ] **Step 2: Update start_debate route**
+- [x] **Step 2: Update start_debate route**
 
 Replace lines 25-47:
 
@@ -1439,7 +1439,7 @@ async def start_debate(req: DebateRequest):
     )
 ```
 
-- [ ] **Step 3: Update summarize endpoint**
+- [x] **Step 3: Update summarize endpoint**
 
 In `summarize_debate` (line 180), change:
 
@@ -1453,12 +1453,12 @@ To:
         prompt = f"""以下是关于 {req.target} 的多空辩论记录（辩论被用户中途终止）：
 ```
 
-- [ ] **Step 4: Run existing route tests**
+- [x] **Step 4: Run existing route tests**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/test_debate_history_routes.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add engine/api/routes/debate.py
@@ -1476,7 +1476,7 @@ git commit -m "feat(routes): DebateRequest 新增 target 字段 + debate_id 清�
 **Files:**
 - Modify: `web/stores/useDebateStore.ts:35-54,102-115,289-304`
 
-- [ ] **Step 1: Update DebateStore interface**
+- [x] **Step 1: Update DebateStore interface**
 
 In `web/stores/useDebateStore.ts`, change `startDebate` signature (line ~51):
 
@@ -1484,7 +1484,7 @@ In `web/stores/useDebateStore.ts`, change `startDebate` signature (line ~51):
   startDebate: (target: string, maxRounds: number, mode?: string, asOfDate?: string) => Promise<void>;
 ```
 
-- [ ] **Step 2: Update startDebate implementation**
+- [x] **Step 2: Update startDebate implementation**
 
 In the `startDebate` method (line 102), change parameter name and request body:
 
@@ -1502,7 +1502,7 @@ In the `startDebate` method (line 102), change parameter name and request body:
 
 (Rest of the method stays the same)
 
-- [ ] **Step 3: Update debate_start SSE handler to read display_name and target_type**
+- [x] **Step 3: Update debate_start SSE handler to read display_name and target_type**
 
 In `_handleSSEEvent`, case `"debate_start"` (line 289), update to store new fields:
 
@@ -1529,7 +1529,7 @@ In `_handleSSEEvent`, case `"debate_start"` (line 289), update to store new fiel
     }
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add web/stores/useDebateStore.ts
@@ -1543,7 +1543,7 @@ git commit -m "feat(store): startDebate 参数 code→target + debate_start 读�
 **Files:**
 - Modify: `web/components/debate/InputBar.tsx:17,56-65,120`
 
-- [ ] **Step 1: Update state variable name and placeholder**
+- [x] **Step 1: Update state variable name and placeholder**
 
 In `web/components/debate/InputBar.tsx`:
 
@@ -1574,7 +1574,7 @@ Update submit button (line 120):
                 disabled={!target.trim()}
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add web/components/debate/InputBar.tsx
@@ -1588,7 +1588,7 @@ git commit -m "feat(InputBar): placeholder 更新为'股票代码 / 板块名 / 
 **Files:**
 - Modify: `web/components/debate/DebatePage.tsx:41-48`
 
-- [ ] **Step 1: Update summarize request body**
+- [x] **Step 1: Update summarize request body**
 
 In `web/components/debate/DebatePage.tsx`, the `useEffect` for stopped status (line 41-48), change `code` to `target`:
 
@@ -1602,7 +1602,7 @@ In `web/components/debate/DebatePage.tsx`, the `useEffect` for stopped status (l
 
 Note: The backend `SummarizeRequest` model already has a `target` field (line 157 of routes/debate.py). This change aligns the frontend with the existing field name.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add web/components/debate/DebatePage.tsx
@@ -1613,35 +1613,35 @@ git commit -m "feat(DebatePage): summarize 请求 code→target 适配"
 
 ### Task 16: 全量回归测试 + 手动验证
 
-- [ ] **Step 1: Run all backend tests**
+- [x] **Step 1: Run all backend tests**
 
 Run: `cd engine && .venv/bin/python -m pytest tests/ -v --ignore=tests/.venv -x`
 Expected: ALL PASS
 
-- [ ] **Step 2: Run frontend type check**
+- [x] **Step 2: Run frontend type check**
 
 Run: `cd web && npx tsc --noEmit`
 Expected: No type errors
 
-- [ ] **Step 3: Manual smoke test — stock (backward compat)**
+- [x] **Step 3: Manual smoke test — stock (backward compat)**
 
 1. Start backend: `cd engine && .venv/bin/python main.py`
 2. Via MCP tool `start_debate(code="600519")` — should work as before
 3. Verify `debate_start` SSE event contains `display_name` and `target_type: "stock"`
 
-- [ ] **Step 4: Manual smoke test — sector**
+- [x] **Step 4: Manual smoke test — sector**
 
 1. Via MCP tool `start_debate(code="半导体")` — should resolve as sector
 2. Verify `fetch_initial_data` calls `get_sector_overview` instead of `get_stock_info`
 3. Verify industry cognition fires with `target_override="半导体"`
 
-- [ ] **Step 5: Manual smoke test — macro**
+- [x] **Step 5: Manual smoke test — macro**
 
 1. Via MCP tool `start_debate(code="美联储降息对A股的影响")` — should resolve as macro
 2. Verify `fetch_initial_data` calls `get_macro_context`
 3. Verify capital_structure phase is skipped
 
-- [ ] **Step 6: Final commit**
+- [x] **Step 6: Final commit**
 
 ```bash
 git add -A
