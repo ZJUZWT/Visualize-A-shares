@@ -558,7 +558,7 @@ def save_metadata(
 def main():
     """执行完整预处理流程"""
     logger.info("🚀" * 30)
-    logger.info("StockTerrain 预处理 v3.0 — 纯语义嵌入聚类")
+    logger.info("StockScape 预处理 v3.0 — 纯语义嵌入聚类")
     logger.info("🚀" * 30)
 
     t_total = time.time()

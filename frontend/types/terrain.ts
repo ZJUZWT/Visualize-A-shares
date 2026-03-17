@@ -1,5 +1,5 @@
 /**
- * StockTerrain v2.0 核心类型定义
+ * StockScape v2.0 核心类型定义
  * 前后端共享的数据契约
  */
 

@@ -1,57 +1,69 @@
-# 🏔️ StockTerrain
+# 🌄 StockScape
 
-> A股多维聚类 3D 地形可视化平台
-> *Data is the terrain. Market is the landscape.*
+> A股 AI 投研平台 — 3D 地形 · 多空辩论 · 专家对话
+>
+> *Data is the terrain. Intelligence is the landscape.*
 
-将 A股 5000+ 支股票映射为实时动态 **3D 地形图**。相似股票在空间上自然聚合，涨跌幅化为地形的高低起伏。
-
----
-
-## 部署教程
-
-### 场景一：仅查看导出的辩论报告（纯前端）
-
-如果你收到了一份 `debate-*.html` 导出文件，**不需要部署任何服务**，直接双击用浏览器打开即可。文件完全自包含，离线可用。
+将 A股 5000+ 支股票映射为实时 **3D 地形图**，用 Multi-Agent 辩论和多领域专家对话辅助投资决策。
 
 ---
 
-### 场景二：一键部署（推荐）
+## ✨ 三大核心功能
+
+### 🗺️ 全市场 3D 地形
+
+全市场股票经聚类算法（HDBSCAN + UMAP）降维到三维空间，相似股票自然聚合，涨跌幅化为地形起伏。
+
+- 8 种 Z 轴指标一键切换：涨跌幅、换手率、成交量、PE、PB…
+- 点击任意山峰定位到个股，查看关联股票
+- 右下角 AI 聊天浮窗，自动注入当前地形上下文
+- Multi-Agent 分析：基本面 + 消息面 + 技术面三维 Agent 并行输出买卖信号
+
+### ⚖️ 多空辩论
+
+多头专家 vs 空头专家对抗式辩论，散户/主力双观察员视角，AI 裁判最终裁决。
+
+- 支持股票代码、行业板块、自由话题等多种辩论目标
+- 黑板机制共享实时数据，RAG 检索增强历史知识
+- 回测模式：指定历史日期作为数据基准
+- 辩论报告可导出为自包含 HTML，离线可查看
+
+### 🧠 投资专家对话
+
+5 类可选专家（数据 / 量化 / 资讯 / 产业链 / 投资顾问），每位专家可调用后端工具获取实时数据。
+
+- 知识图谱 + 信念系统，对话中动态更新投资观点
+- 思考过程面板，透明展示 Agent 推理链和工具调用
+- 多 Session 管理，随时切换对话上下文
+
+---
+
+## 🚀 快速开始
+
+### 一键启动（推荐）
 
 ```bash
 git clone <repo-url>
-cd stockterrain
+cd StockScape
 
-# 一键配置环境
-scripts/setup.sh          # macOS / Linux
-# scripts\setup.bat       # Windows
-
-# 编辑 .env 填入 LLM API Key（辩论/分析功能必填）
-
-# 一键启动
-scripts/start.sh           # macOS / Linux
-# scripts\start.bat        # Windows
+scripts/setup.sh          # macOS / Linux（配置环境）
+# 编辑 .env 填入 LLM API Key
+scripts/start.sh           # 启动前后端
 ```
 
----
-
-### 场景三：Docker 部署
+### Docker
 
 ```bash
-git clone <repo-url>
-cd stockterrain
-
-cp .env.example .env
-# 编辑 .env 填入 LLM API Key
-
+cp .env.example .env && vim .env
 docker compose up
 ```
 
-- 后端: http://localhost:8000
-- 前端: http://localhost:3000
+→ 后端 http://localhost:8000 　前端 http://localhost:3000
 
----
+### 手动部署
 
-### 场景四：手动部署（前端 + 后端）
+<details>
+<summary>展开详细步骤</summary>
 
 #### 环境要求
 
@@ -59,171 +71,86 @@ docker compose up
 |------|---------|
 | Python | >= 3.11 |
 | Node.js | >= 20 |
-| npm / pnpm / yarn | 任意 |
 | Redis | 可选，不配置时退化为内存缓存 |
 
-#### 1. 克隆仓库
-
-```bash
-git clone <repo-url>
-cd stockterrain
-```
-
-#### 2. 配置环境变量
+#### 1. 配置环境变量
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env`，填写 LLM 配置（辩论/分析功能必填，3D 地形功能不需要）：
+编辑 `.env`，填写 LLM 配置（辩论/分析/专家功能必填，3D 地形不需要）：
 
 ```env
 LLM_ENABLED=true
 LLM_PROVIDER=openai_compatible   # 或 anthropic
-LLM_API_KEY=sk-...               # 你的 API Key
-
-# 按实际厂商填写 Base URL：
-# OpenAI:   https://api.openai.com/v1
-# DeepSeek: https://api.deepseek.com/v1
-# 通义千问: https://dashscope.aliyuncs.com/compatible-mode/v1
-# Kimi:     https://api.moonshot.cn/v1
-# Anthropic: https://api.anthropic.com
+LLM_API_KEY=sk-...
 LLM_BASE_URL=https://api.openai.com/v1
-
 LLM_MODEL=gpt-4o-mini
 ```
 
-#### 3. 启动后端
+支持的 LLM 厂商：OpenAI / DeepSeek / 通义千问 / Kimi / Anthropic 等 OpenAI 兼容接口。
+
+#### 2. 后端
 
 ```bash
 cd backend
-
-# 创建虚拟环境
 python3 -m venv .venv
-source .venv/bin/activate        # macOS/Linux
-# .venv\Scripts\activate         # Windows
-
-# 安装依赖（首次约 2~5 分钟，含 torch/sentence-transformers）
+source .venv/bin/activate
 pip install -e "." -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 启动
 python main.py
 # → http://localhost:8000
-# → API 文档: http://localhost:8000/docs
 ```
 
-> **注意：** `torch` + `sentence-transformers` 约 2GB，仅重建 BGE 嵌入时需要。
-> 如果只用辩论/分析功能，可以先跳过，等报错再装。
-
-#### 4. 启动前端
+#### 3. 前端
 
 ```bash
 cd frontend
-
 npm install
-
-# 开发模式
 npm run dev
 # → http://localhost:3000
-
-# 或生产构建
-npm run build
-npm start
 ```
 
-前端默认通过 Next.js rewrites 将 `/api/*` 代理到 `http://localhost:8000`，无需额外配置。
-
-#### 5. 验证
-
-打开 `http://localhost:3000`，后端健康检查：
+#### 4. 验证
 
 ```bash
 curl http://localhost:8000/api/v1/health
 ```
 
----
-
-### 场景五：仅部署前端（只看 3D 地形，不用 AI 功能）
-
-前端可以独立运行，但 3D 地形数据、辩论等功能需要后端。如果只想静态部署前端页面：
-
-```bash
-cd frontend
-GITHUB_PAGES=true npm run build   # 生成静态文件到 out/
-```
-
-将 `out/` 目录部署到任意静态托管（Vercel、Nginx、GitHub Pages 等）。
-
-> 静态模式下 API 调用不可用，辩论/分析/地形计算均无法使用。
+</details>
 
 ---
 
-### 生产部署建议
-
-**后端（Linux 服务器）：**
-
-```bash
-# 关闭 reload，绑定公网地址
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
-
-# 或用 systemd / supervisor 管理进程
-```
-
-修改 `backend/config.py` 中的 CORS 配置，将前端域名加入白名单：
-
-```python
-cors_origins: list[str] = ["https://your-frontend-domain.com"]
-```
-
-**前端（Vercel / 自托管）：**
-
-```bash
-npm run build && npm start
-```
-
-设置环境变量 `NEXT_PUBLIC_API_BASE=https://your-backend-domain.com`，前端会用它替代默认的 `http://localhost:8000`。
-
----
-
-## 架构
+## 🏗️ 架构
 
 ```
-stockterrain/
-├── backend/               # Python 后端 (FastAPI + Uvicorn)
+StockScape/
+├── backend/               # Python 后端 (FastAPI)
 │   ├── engine/
-│   │   ├── data/          #   行情数据 (AKShare + BaoStock)
-│   │   ├── cluster/       #   聚类算法 (HDBSCAN + UMAP + RBF)
-│   │   ├── quant/         #   量化因子 (13因子 + 技术指标)
-│   │   ├── info/          #   信息引擎 (新闻 + 公告 + 情感)
-│   │   ├── industry/      #   行业引擎 (行业认知 + 资本结构)
-│   │   ├── expert/        #   专家引擎 (多专家并行分析)
-│   │   └── arena/         #   辩论引擎 (多角色 + 黑板)
-│   │       └── rag/       #   RAG 检索增强
-│   ├── llm/               #   LLM 接入层
-│   ├── mcpserver/         #   MCP Server (stdio)
+│   │   ├── data/          #   数据引擎 — 行情拉取 + DuckDB 持久化
+│   │   ├── cluster/       #   聚类引擎 — HDBSCAN + UMAP + RBF 插值
+│   │   ├── quant/         #   量化引擎 — 13因子 + 技术指标
+│   │   ├── info/          #   信息引擎 — 新闻 + 公告 + 情感分析
+│   │   ├── industry/      #   产业链引擎 — 行业认知 + 资本结构
+│   │   ├── expert/        #   专家引擎 — 多专家并行 + 知识图谱
+│   │   └── arena/         #   辩论引擎 — 多角色对抗 + 黑板 + 裁判
+│   │       └── rag/       #     RAG 检索增强
+│   ├── llm/               #   LLM 接入层 (多厂商适配)
+│   ├── mcpserver/         #   MCP Server (22 tools)
 │   └── main.py            #   应用入口
 │
 ├── frontend/              # Next.js 15 前端
-│   ├── components/        #   UI 组件 (3D 地形 + 辩论页)
-│   ├── stores/            #   Zustand 状态管理
-│   └── lib/               #   工具函数 (含导出 HTML)
+│   ├── app/               #   3 个路由: / (地形) /debate /expert
+│   ├── components/        #   UI 组件 (Three.js 3D + 辩论 + 专家)
+│   └── stores/            #   Zustand 状态管理
 │
-├── data/                  # 本地数据
-│   └── stockterrain.duckdb  # DuckDB 单文件数据库
-│
-├── tests/                 # 测试
-│   ├── unit/              #   单元测试
-│   └── integration/       #   集成测试
-│
-├── scripts/               # 一键脚本
-│   ├── setup.sh / .bat    #   环境配置
-│   └── start.sh / .bat    #   服务启动
-│
-├── docker-compose.yml     # Docker 编排
-└── .env                   # LLM 配置（从 .env.example 复制）
+├── data/                  # DuckDB + 预计算嵌入
+├── tests/                 # unit/ + integration/
+├── scripts/               # 跨平台一键脚本
+└── docker-compose.yml
 ```
 
-## 技术栈
+## 🔧 技术栈
 
 | 层级 | 技术 |
 |------|------|
@@ -231,11 +158,24 @@ stockterrain/
 | 后端 | FastAPI + Uvicorn |
 | 算法 | HDBSCAN + UMAP + RBF 插值 |
 | 存储 | DuckDB + Redis（可选） |
+| AI | Multi-Agent 辩论 · RAG · 知识图谱 · 信念系统 |
 | 前端 | React 19 + Next.js 15 + TypeScript |
-| 3D 渲染 | React Three Fiber + drei + GLSL |
+| 3D | React Three Fiber + drei + GLSL |
 | 状态 | Zustand |
 | 样式 | Tailwind CSS v4 |
 | 部署 | Docker Compose / 一键脚本 |
+
+## 🔌 MCP Server
+
+内置 22 个 MCP Tool，可被 Claude Code 等外部 AI 直接调用：
+
+```bash
+cd backend && .venv/bin/python -m mcpserver
+```
+
+涵盖：全市场概览、股票搜索、个股全维度分析、条件选股、历史行情、技术指标、因子评分、新闻公告、事件评估、产业链认知、辩论触发等。
+
+---
 
 ## License
 

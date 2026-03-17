@@ -1,5 +1,5 @@
 """
-StockTerrain MCP Server — stdio transport
+StockScape MCP Server — stdio transport
 
 启动方式:
     cd engine
@@ -34,9 +34,9 @@ from . import tools
 # ─── 创建 MCP Server ─────────────────────────────────
 
 server = FastMCP(
-    "StockTerrain",
+    "StockScape",
     instructions=(
-        "StockTerrain MCP Server 提供 A 股全市场数据查询能力，包括：\n"
+        "StockScape MCP Server 提供 A 股全市场数据查询能力，包括：\n"
         "- 全市场概览、聚类结构、因子分析\n"
         "- 个股全维度分析（行情/因子/预测/相似股票）\n"
         "- 条件选股筛选、历史行情查询\n"

@@ -12,7 +12,7 @@ if not exist frontend\node_modules (
     exit /b 1
 )
 
-echo === 启动 StockTerrain ===
+echo === 启动 StockScape ===
 
 :: 后端
 start "StockTerrain-Backend" /D backend .venv\Scripts\python main.py
@@ -26,7 +26,7 @@ if errorlevel 1 goto wait_backend
 echo ✅ 后端: http://localhost:8000
 
 :: 前端
-start "StockTerrain-Frontend" /D frontend cmd /c "npm run dev"
+start "StockScape-Frontend" /D frontend cmd /c "npm run dev"
 
 echo ✅ 前端: http://localhost:3000
 echo.

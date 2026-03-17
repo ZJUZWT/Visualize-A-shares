@@ -1,5 +1,5 @@
 """
-StockTerrain Engine — FastAPI 应用入口
+StockScape Engine — FastAPI 应用入口
 
 启动方式:
     cd backend
@@ -46,7 +46,7 @@ logger.add(
 
 # ─── 创建 FastAPI 应用 ─────────────────────────────────
 app = FastAPI(
-    title="StockTerrain Engine",
+    title="StockScape Engine",
     description="A股多维聚类 3D 地形可视化平台 — 数据与算法引擎",
     version="0.1.0",
     docs_url="/docs",
@@ -79,7 +79,7 @@ app.include_router(industry_router)
 async def startup():
     from llm.config import llm_settings
     logger.info("=" * 60)
-    logger.info("🏔️  StockTerrain Engine 启动")
+    logger.info("🌄  StockScape Engine 启动")
     logger.info(f"   数据源: AKShare(主力) + BaoStock(备选)")
     logger.info(f"   算法: HDBSCAN + UMAP + RBF")
     logger.info(f"   预测: v2.0 (MAD去极值 + 正交化 + ICIR自适应权重)")
@@ -130,14 +130,14 @@ async def shutdown():
     except Exception as e:
         logger.warning(f"DuckDB 关闭异常: {e}")
 
-    logger.info("🏔️  StockTerrain Engine 关闭")
+    logger.info("🌄  StockScape Engine 关闭")
 
 
 # ─── 根路由 ────────────────────────────────────────────
 @app.get("/")
 async def root():
     return {
-        "name": "StockTerrain Engine",
+        "name": "StockScape Engine",
         "version": "0.1.0",
         "status": "running",
         "docs": "/docs",
