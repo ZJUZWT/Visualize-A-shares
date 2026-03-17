@@ -4,6 +4,7 @@
 由 LLM 基于引擎返回数据生成流式回复。
 """
 
+import asyncio
 import json
 from typing import AsyncGenerator, Literal
 
@@ -164,6 +165,7 @@ class EngineExpert:
 
     # 类级缓存：名称→代码映射（懒加载）
     _name_to_code: dict[str, str] | None = None
+    _snapshot_lock: asyncio.Lock | None = None  # 延迟初始化，避免在非事件循环上下文中创建
 
     @classmethod
     def _resolve_code(cls, raw: str) -> str:
@@ -230,6 +232,38 @@ class EngineExpert:
         self.expert_type = expert_type
         self.profile = EXPERT_PROFILES[expert_type]
         self._llm = llm_provider
+
+    @classmethod
+    async def _ensure_snapshot(cls, de) -> "pd.DataFrame":
+        """确保快照数据可用 — 如果 DuckDB 快照为空，自动拉取全市场行情并保存
+
+        使用类级别锁避免多个专家并发触发重复拉取。
+
+        Returns:
+            快照 DataFrame（可能为空，表示拉取也失败了）
+        """
+        import asyncio
+        snap = de.get_snapshot()
+        if snap is not None and not snap.empty:
+            return snap
+        # 快照为空，用锁保护只拉取一次
+        if cls._snapshot_lock is None:
+            cls._snapshot_lock = asyncio.Lock()
+        async with cls._snapshot_lock:
+            # double-check：拿到锁后再检查一次（另一个协程可能已完成拉取）
+            snap = de.get_snapshot()
+            if snap is not None and not snap.empty:
+                return snap
+            try:
+                logger.info("📡 快照为空，自动拉取全市场行情...")
+                fresh = await asyncio.to_thread(de.get_realtime_quotes)
+                if fresh is not None and not fresh.empty:
+                    await asyncio.to_thread(de.save_snapshot, fresh)
+                    logger.info(f"📡 自动拉取快照成功: {len(fresh)} 条")
+                    return fresh
+            except Exception as e:
+                logger.warning(f"📡 自动拉取快照失败: {e}")
+        return snap if snap is not None else __import__("pandas").DataFrame()
 
     async def chat(self, message: str, history: list[dict] | None = None) -> AsyncGenerator[dict, None]:
         """流式对话，yield SSE 事件"""
@@ -595,18 +629,18 @@ class EngineExpert:
             }, ensure_ascii=False)
 
         elif action == "query_market_overview":
-            snap = de.get_snapshot()
+            snap = await self._ensure_snapshot(de)
             if snap is None or snap.empty:
-                return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
+                return json.dumps({"error": "无快照数据，请先在主页刷新行情"}, ensure_ascii=False)
             total = len(snap)
             up = int((snap.get("pct_chg", pd.Series()) > 0).sum()) if "pct_chg" in snap.columns else 0
             down = int((snap.get("pct_chg", pd.Series()) < 0).sum()) if "pct_chg" in snap.columns else 0
             return json.dumps({"total_stocks": total, "up": up, "down": down, "flat": total - up - down}, ensure_ascii=False)
 
         elif action == "search_stocks":
-            snap = de.get_snapshot()
+            snap = await self._ensure_snapshot(de)
             if snap is None or snap.empty:
-                return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
+                return json.dumps({"error": "无快照数据，请先在主页刷新行情"}, ensure_ascii=False)
             query = params.get("query", "").lower()
             results = []
             for _, row in snap.iterrows():
@@ -622,9 +656,9 @@ class EngineExpert:
 
         elif action == "query_stock":
             code = self._resolve_code(params.get("code", ""))
-            snap = de.get_snapshot()
+            snap = await self._ensure_snapshot(de)
             if snap is None or snap.empty:
-                return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
+                return json.dumps({"error": "无快照数据，请先在主页刷新行情"}, ensure_ascii=False)
             row = snap[snap["code"].astype(str) == code]
             if row.empty:
                 return json.dumps({"error": f"未找到 {code}"}, ensure_ascii=False)
@@ -703,9 +737,9 @@ class EngineExpert:
             return json.dumps(result, ensure_ascii=False, default=str) if result else f"未找到 {code} 的相似股票"
 
         elif action == "run_screen":
-            snap = de.get_snapshot()
+            snap = await self._ensure_snapshot(de)
             if snap is None or snap.empty:
-                return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
+                return json.dumps({"error": "无快照数据，请先在主页刷新行情"}, ensure_ascii=False)
             filters = params.get("filters", {})
             result = snap.copy()
             for col, cond in filters.items():
@@ -800,9 +834,9 @@ class EngineExpert:
             return json.dumps(result, ensure_ascii=False, default=str)
 
         elif action == "get_factor_scores":
-            snap = de.get_snapshot()
+            snap = await self._ensure_snapshot(de)
             if snap is None or snap.empty:
-                return json.dumps({"error": "无快照数据"}, ensure_ascii=False)
+                return json.dumps({"error": "无快照数据，请先在主页刷新行情"}, ensure_ascii=False)
             code = self._resolve_code(params.get("code", ""))
             row = snap[snap["code"].astype(str) == code]
             if row.empty:

@@ -204,7 +204,14 @@ class ExpertAgent:
         return results
 
     async def execute_tools_streaming(self, tool_calls: list[ToolCall]) -> AsyncGenerator[dict, None]:
-        """并行执行工具调用，逐个完成时 yield 结果（用于流式推送）"""
+        """两阶段并行执行工具调用，逐个完成时 yield 结果（用于流式推送）
+
+        阶段 1：数据专家 + 非专家工具（优先执行，为其他专家准备数据）
+        阶段 2：量化/资讯/产业链专家（等数据专家完成后再并发执行）
+
+        这样量化专家在获取技术指标、因子评分等数据时，
+        数据专家已经完成了数据拉取和快照刷新，避免"无数据"问题。
+        """
         if not tool_calls:
             return
 
@@ -217,9 +224,40 @@ class ExpertAgent:
                 "is_expert": tc.engine == "expert",
             }
 
-        tasks = [asyncio.create_task(_exec(i, tc)) for i, tc in enumerate(tool_calls)]
+        # ── 分组：量化专家需要等数据专家先完成（共享快照/日线缓存）──
+        # 资讯/产业链专家不依赖数据专家，可以直接并发
+        has_data_expert = any(tc.engine == "expert" and tc.action == "data" for tc in tool_calls)
+        has_quant_expert = any(tc.engine == "expert" and tc.action == "quant" for tc in tool_calls)
 
-        for coro in asyncio.as_completed(tasks):
+        if not has_data_expert or not has_quant_expert:
+            # 没有 data+quant 同时存在，无需两阶段，直接全部并发
+            tasks = [asyncio.create_task(_exec(i, tc)) for i, tc in enumerate(tool_calls)]
+            for coro in asyncio.as_completed(tasks):
+                _idx, result = await coro
+                yield result
+            return
+
+        # ── 两阶段执行：data 先行，quant 后行，其余并发 ──
+        phase1: list[tuple[int, ToolCall]] = []   # 数据专家 + 非专家工具 + 资讯/产业链
+        phase2: list[tuple[int, ToolCall]] = []   # 量化专家（等数据专家完成后执行）
+
+        for i, tc in enumerate(tool_calls):
+            if tc.engine == "expert" and tc.action == "quant":
+                phase2.append((i, tc))
+            else:
+                phase1.append((i, tc))
+
+        # ── 阶段 1：数据专家 + 资讯/产业链专家并发执行 ──
+        logger.info(f"📋 两阶段执行: 阶段1={len(phase1)}个(含数据专家), 阶段2={len(phase2)}个(量化专家)")
+        tasks1 = [asyncio.create_task(_exec(i, tc)) for i, tc in phase1]
+        for coro in asyncio.as_completed(tasks1):
+            _idx, result = await coro
+            yield result
+
+        # ── 阶段 2：数据专家已完成，量化专家可以安全访问数据 ──
+        logger.info(f"📋 阶段1完成，启动量化专家: {[tc.action for _, tc in phase2]}")
+        tasks2 = [asyncio.create_task(_exec(i, tc)) for i, tc in phase2]
+        for coro in asyncio.as_completed(tasks2):
             _idx, result = await coro
             yield result
 
