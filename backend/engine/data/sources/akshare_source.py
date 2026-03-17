@@ -290,3 +290,152 @@ class AKShareSource(BaseDataSource):
         except Exception as e:
             logger.warning(f"[AKShare] 公司公告获取失败 {code}: {e}")
             return pd.DataFrame()
+
+    # ── 板块数据 API ──
+
+    def get_sector_board_list(self, board_type: str = "industry") -> pd.DataFrame:
+        """获取板块列表 + 实时行情
+        board_type: 'industry' (行业板块) 或 'concept' (概念板块)
+        """
+        import akshare as ak
+        func_map = {
+            "industry": ak.stock_board_industry_name_em,
+            "concept": ak.stock_board_concept_name_em,
+        }
+        func = func_map.get(board_type)
+        if not func:
+            raise ValueError(f"不支持的板块类型: {board_type}")
+        df = self._fetch_with_retry(func, f"stock_board_{board_type}_name_em")
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        column_map = {
+            "板块名称": "board_name",
+            "板块代码": "board_code",
+            "最新价": "close",
+            "涨跌幅": "pct_chg",
+            "涨跌额": "pct_chg_amount",
+            "总市值": "total_mv",
+            "换手率": "turnover_rate",
+            "上涨家数": "rise_count",
+            "下跌家数": "fall_count",
+            "领涨股票": "leading_stock",
+            "领涨涨跌幅": "leading_pct_chg",
+        }
+        available = {k: v for k, v in column_map.items() if k in df.columns}
+        df = df.rename(columns=available)
+        df["board_type"] = board_type
+        return df
+
+    def get_sector_board_history(
+        self, board_name: str, board_type: str = "industry",
+        start_date: str = "", end_date: str = "",
+    ) -> pd.DataFrame:
+        """获取单个板块的历史 K 线
+        board_name: 板块名称（如 '半导体'），可通过 get_sector_board_list 获取
+        """
+        import akshare as ak
+        func_map = {
+            "industry": ak.stock_board_industry_hist_em,
+            "concept": ak.stock_board_concept_hist_em,
+        }
+        func = func_map.get(board_type)
+        if not func:
+            raise ValueError(f"不支持的板块类型: {board_type}")
+
+        kwargs: dict = {"symbol": board_name, "adjust": ""}
+        if start_date:
+            kwargs["start_date"] = start_date.replace("-", "")
+        if end_date:
+            kwargs["end_date"] = end_date.replace("-", "")
+
+        df = self._fetch_with_retry(func, f"stock_board_{board_type}_hist_em", **kwargs)
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        column_map = {
+            "日期": "date",
+            "开盘": "open",
+            "收盘": "close",
+            "最高": "high",
+            "最低": "low",
+            "涨跌幅": "pct_chg",
+            "涨跌额": "pct_chg_amount",
+            "成交量": "volume",
+            "成交额": "amount",
+            "振幅": "amplitude",
+            "换手率": "turnover_rate",
+        }
+        available = {k: v for k, v in column_map.items() if k in df.columns}
+        df = df.rename(columns=available)
+        return df
+
+    def get_sector_fund_flow_rank(
+        self, indicator: str = "今日", sector_type: str = "行业资金流"
+    ) -> pd.DataFrame:
+        """获取板块资金流排行
+        indicator: '今日', '3日', '5日', '10日'
+        sector_type: '行业资金流', '概念资金流'
+        """
+        import akshare as ak
+        df = self._fetch_with_retry(
+            ak.stock_sector_fund_flow_rank,
+            "stock_sector_fund_flow_rank",
+            indicator=indicator,
+            sector_type=sector_type,
+        )
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        # 列名可能带有 indicator 前缀（如 "今日主力净流入-净额"），需要去除
+        df.columns = df.columns.str.replace(f"{indicator}", "", regex=False)
+        column_map = {
+            "名称": "board_name",
+            "主力净流入-净额": "main_force_net_inflow",
+            "主力净流入-净占比": "main_force_net_ratio",
+            "超大单净流入-净额": "super_large_net_inflow",
+            "超大单净流入-净占比": "super_large_net_ratio",
+            "大单净流入-净额": "large_net_inflow",
+            "大单净流入-净占比": "large_net_ratio",
+            "中单净流入-净额": "medium_net_inflow",
+            "中单净流入-净占比": "medium_net_ratio",
+            "小单净流入-净额": "small_net_inflow",
+            "小单净流入-净占比": "small_net_ratio",
+            "涨跌幅": "pct_chg",
+        }
+        available = {k: v for k, v in column_map.items() if k in df.columns}
+        df = df.rename(columns=available)
+        df["board_type"] = "industry" if "行业" in sector_type else "concept"
+        return df
+
+    def get_sector_constituents(self, board_name: str) -> pd.DataFrame:
+        """获取行业板块成分股"""
+        import akshare as ak
+        df = self._fetch_with_retry(
+            ak.stock_board_industry_cons_em,
+            "stock_board_industry_cons_em",
+            symbol=board_name,
+        )
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        column_map = {
+            "代码": "code",
+            "名称": "name",
+            "最新价": "price",
+            "涨跌幅": "pct_chg",
+            "涨跌额": "pct_chg_amount",
+            "成交量": "volume",
+            "成交额": "amount",
+            "振幅": "amplitude",
+            "最高": "high",
+            "最低": "low",
+            "今开": "open",
+            "昨收": "pre_close",
+            "换手率": "turnover_rate",
+            "市盈率-动态": "pe_ttm",
+            "市净率": "pb",
+        }
+        available = {k: v for k, v in column_map.items() if k in df.columns}
+        df = df.rename(columns=available)
+        return df
