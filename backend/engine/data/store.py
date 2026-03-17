@@ -288,6 +288,17 @@ class DuckDBStore:
             )
         """)
 
+        # 板块成分股（变动频率极低，可长期缓存）
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS sector.constituents (
+                board_name  VARCHAR NOT NULL,
+                code        VARCHAR NOT NULL,
+                name        VARCHAR,
+                updated_at  DATE DEFAULT CURRENT_DATE,
+                PRIMARY KEY (board_name, code)
+            )
+        """)
+
         logger.info("数据表初始化完成")
 
         # ─── 迁移：为已有表添加新列 ────────────────────
@@ -722,6 +733,54 @@ class DuckDBStore:
             params.append(end_date)
         query += " ORDER BY date"
         return self._conn.execute(query, params).fetchdf()
+
+    # ── Sector 成分股 ──
+
+    def save_sector_constituents(self, board_name: str, df: pd.DataFrame):
+        """保存板块成分股（全量替换该板块的记录）"""
+        if df.empty:
+            return
+        try:
+            # 先删除旧数据
+            self._conn.execute(
+                "DELETE FROM sector.constituents WHERE board_name = ?",
+                [board_name],
+            )
+            # 写入新数据
+            cons_df = pd.DataFrame({
+                "board_name": board_name,
+                "code": df["code"].astype(str) if "code" in df.columns else "",
+                "name": df["name"].astype(str) if "name" in df.columns else "",
+            })
+            self._conn.execute("""
+                INSERT INTO sector.constituents (board_name, code, name, updated_at)
+                SELECT board_name, code, name, CURRENT_DATE FROM cons_df
+            """)
+            logger.info(f"保存板块成分股: {board_name} → {len(cons_df)} 只")
+        except Exception as e:
+            logger.warning(f"保存板块成分股失败({board_name}): {e}")
+
+    def get_sector_constituents(self, board_name: str) -> pd.DataFrame:
+        """查询板块成分股，返回 (board_name, code, name, updated_at)"""
+        try:
+            return self._conn.execute(
+                "SELECT * FROM sector.constituents WHERE board_name = ? ORDER BY code",
+                [board_name],
+            ).fetchdf()
+        except Exception:
+            return pd.DataFrame()
+
+    def get_sector_constituents_age(self, board_name: str) -> int | None:
+        """返回成分股数据的天龄（距今天数），无数据返回 None"""
+        try:
+            row = self._conn.execute(
+                "SELECT MIN(CURRENT_DATE - updated_at) AS age "
+                "FROM sector.constituents WHERE board_name = ?",
+                [board_name],
+            ).fetchone()
+            return row[0] if row and row[0] is not None else None
+        except Exception:
+            return None
 
     def close(self):
         self._conn.close()
