@@ -161,6 +161,18 @@ class DataFetcher:
 
     def _resolve_code(self, name: str) -> str:
         """按名称模糊匹配股票代码，找不到返回空字符串"""
+        name = name.strip()
+        # 空字符串或过短的输入
+        if len(name) < 2:
+            return ""
+        # 非股票词汇
+        _NON_STOCK_WORDS = {
+            "市场", "市场整体", "大盘", "板块", "行业", "概念", "题材",
+            "热点板块", "全市场", "指数", "整体", "沪深",
+        }
+        if name in _NON_STOCK_WORDS:
+            logger.debug(f"跳过非股票词汇: '{name}'")
+            return ""
         try:
             from engine.data import get_data_engine
             profiles = get_data_engine().get_profiles()

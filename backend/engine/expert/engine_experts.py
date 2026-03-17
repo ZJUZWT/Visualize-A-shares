@@ -173,6 +173,23 @@ class EngineExpert:
         此方法自动解析名称→代码，保证下游数据引擎能正确查询。
         """
         raw = raw.strip()
+
+        # 空字符串或过短的输入（单字无法可靠匹配），直接跳过
+        if len(raw) < 2:
+            if raw:
+                logger.warning(f"无法解析股票代码(过短): '{raw}'")
+            return raw
+
+        # 非股票词汇黑名单 — 这些是 LLM 常见的概念性/泛化词汇
+        _NON_STOCK_WORDS = {
+            "市场", "市场整体", "大盘", "板块", "行业", "概念", "题材",
+            "热点板块", "全市场", "指数", "整体", "沪深", "主板",
+            "创业板", "科创板", "北交所",
+        }
+        if raw in _NON_STOCK_WORDS:
+            logger.debug(f"跳过非股票词汇: '{raw}'")
+            return raw
+
         # 已经是 6 位纯数字代码，直接返回
         if len(raw) == 6 and raw.isdigit():
             return raw
@@ -226,26 +243,69 @@ class EngineExpert:
         tool_plan = await self._plan_tools(message)
         tool_calls = tool_plan.get("tool_calls", [])
 
-        # 2. 执行工具调用
+        # 2. 执行工具调用（含智能重试）
         tool_results = []
+        data_fetch_log: list[dict] = []  # 数据获取可观测日志
         for tc in tool_calls:
             if not isinstance(tc, dict):
                 logger.warning(f"跳过非dict工具调用: {type(tc)}")
                 continue
+            action_name = tc.get("action", "unknown")
+            params = tc.get("params", {})
             yield {"event": "tool_call", "data": {
                 "engine": tc.get("engine", self.expert_type),
-                "action": tc.get("action", "unknown"),
-                "params": tc.get("params", {}),
+                "action": action_name,
+                "params": params,
             }}
             result = await self._execute_tool(tc)
+
+            # ── 智能重试：检测失败/空结果，让 LLM 修正参数后重试一次 ──
+            is_failure = self._is_tool_result_failure(result)
+            if is_failure:
+                data_fetch_log.append({
+                    "action": action_name, "params": params,
+                    "status": "FAIL", "reason": result[:200],
+                    "retried": True,
+                })
+                logger.warning(f"🔄 [{self.expert_type}] {action_name} 首次失败，尝试智能重试: {result[:150]}")
+                retried_tc = await self._retry_with_fix(tc, result, message)
+                if retried_tc and retried_tc != tc:
+                    retry_result = await self._execute_tool(retried_tc)
+                    retry_is_failure = self._is_tool_result_failure(retry_result)
+                    if not retry_is_failure:
+                        logger.info(f"✅ [{self.expert_type}] {action_name} 重试成功"
+                                    f" (原参数={params}, 新参数={retried_tc.get('params', {})})")
+                        data_fetch_log.append({
+                            "action": action_name,
+                            "params": retried_tc.get("params", {}),
+                            "status": "OK_RETRY", "reason": "",
+                            "retried": True,
+                        })
+                        result = retry_result
+                    else:
+                        logger.warning(f"❌ [{self.expert_type}] {action_name} 重试仍失败: {retry_result[:150]}")
+                        data_fetch_log.append({
+                            "action": action_name,
+                            "params": retried_tc.get("params", {}),
+                            "status": "FAIL_RETRY", "reason": retry_result[:200],
+                            "retried": True,
+                        })
+                else:
+                    logger.warning(f"❌ [{self.expert_type}] {action_name} LLM 无法修正参数，放弃重试")
+            else:
+                data_fetch_log.append({
+                    "action": action_name, "params": params,
+                    "status": "OK", "reason": "",
+                    "retried": False,
+                })
+
             tool_results.append(result)
             tool_result_data = {
                 "engine": tc.get("engine", self.expert_type),
-                "action": tc.get("action", "unknown"),
+                "action": action_name,
                 "summary": result[:200] if result else "无结果",
             }
             # K 线数据：query_history / query_hourly 返回 chartData
-            action_name = tc.get("action", "")
             if action_name in ("query_history", "query_hourly") and result:
                 try:
                     parsed = json.loads(result)
@@ -257,6 +317,23 @@ class EngineExpert:
                 except (json.JSONDecodeError, KeyError):
                     pass
             yield {"event": "tool_result", "data": tool_result_data}
+
+        # ── 数据获取可观测性日志 ──
+        if data_fetch_log:
+            ok_count = sum(1 for d in data_fetch_log if d["status"].startswith("OK"))
+            fail_count = sum(1 for d in data_fetch_log if d["status"].startswith("FAIL"))
+            retry_count = sum(1 for d in data_fetch_log if d["retried"])
+            logger.info(
+                f"📊 [{self.expert_type}] 数据获取统计: "
+                f"总计={len(data_fetch_log)}, 成功={ok_count}, 失败={fail_count}, 重试={retry_count}"
+            )
+            for entry in data_fetch_log:
+                if entry["status"].startswith("FAIL"):
+                    logger.warning(
+                        f"📊 [{self.expert_type}] 数据获取失败详情: "
+                        f"action={entry['action']}, params={entry['params']}, "
+                        f"reason={entry['reason']}"
+                    )
 
         # 3. 流式生成回复
         full_text = ""
@@ -327,6 +404,96 @@ class EngineExpert:
         except Exception as e:
             logger.warning(f"工具规划失败，跳过工具调用: {e}")
             return {"tool_calls": []}
+
+    @staticmethod
+    def _is_tool_result_failure(result: str) -> bool:
+        """判断工具结果是否为失败/空数据"""
+        if not result:
+            return True
+        fail_keywords = [
+            "工具调用失败", "error", "未找到", "无快照数据", "无法解析",
+            "无法识别", "失败", "未知", "object is not subscriptable",
+            "需要具体股票代码",
+        ]
+        result_lower = result[:300].lower()
+        # JSON 结构中的 error 字段
+        try:
+            data = json.loads(result)
+            if isinstance(data, dict) and "error" in data:
+                return True
+        except (json.JSONDecodeError, Exception):
+            pass
+        return any(kw.lower() in result_lower for kw in fail_keywords)
+
+    async def _retry_with_fix(self, failed_tc: dict, error_msg: str, original_question: str) -> dict | None:
+        """让 LLM 根据错误信息修正工具参数，返回修正后的 tool_call dict，或 None"""
+        if not self._llm:
+            return None
+        import re
+        from llm.providers import ChatMessage
+
+        action = failed_tc.get("action", "")
+        params = failed_tc.get("params", {})
+        tools_desc = self._get_available_tools_desc()
+
+        fix_prompt = f"""你是{self.profile['name']}。刚才你调用了工具但失败了，请修正参数后重试。
+
+原始用户问题: {original_question}
+
+失败的工具调用:
+- action: {action}
+- params: {json.dumps(params, ensure_ascii=False)}
+
+错误信息: {error_msg[:300]}
+
+可用工具:
+{tools_desc}
+
+请分析错误原因，修正参数后返回新的工具调用（JSON格式）:
+{{"action": "工具名", "params": {{"参数名": "值"}}}}
+
+注意:
+- 如果原参数中的股票代码不是6位数字，请替换为正确的代码
+- 如果原参数不适用（如"市场整体"），请改用更合适的工具或参数
+- 如果确实无法修正，返回 {{"action": "none", "params": {{}}}}
+直接输出 JSON，不要包含任何额外文字。"""
+
+        try:
+            chunks: list[str] = []
+            async for token in self._llm.chat_stream([
+                ChatMessage("system", fix_prompt),
+            ]):
+                chunks.append(token)
+            text = "".join(chunks).strip()
+
+            if not text:
+                return None
+
+            # 剥离标签
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+            text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
+            # 提取 JSON
+            if "```" in text:
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+                text = text.strip()
+
+            if not text:
+                return None
+
+            data = json.loads(text)
+            if data.get("action") == "none":
+                return None
+
+            return {
+                "engine": failed_tc.get("engine", self.expert_type),
+                "action": data.get("action", action),
+                "params": data.get("params", params),
+            }
+        except Exception as e:
+            logger.debug(f"_retry_with_fix 解析失败: {e}")
+            return None
 
     async def _execute_tool(self, tc: dict) -> str:
         """执行单个工具调用 — 直接调用引擎单例，不走 HTTP"""
@@ -613,7 +780,14 @@ class EngineExpert:
         elif action == "query_capital_structure":
             from engine.industry import get_industry_engine
             ie = get_industry_engine()
-            code = self._resolve_code(params.get("code", ""))
+            raw_code = params.get("code", "")
+            # 如果是市场整体/板块查询，返回提示信息
+            if raw_code in ("市场整体", "A股市场", "全市场", "市场板块", "板块轮动"):
+                return json.dumps({
+                    "error": "资金构成需要具体股票代码",
+                    "hint": "请使用 query_industry_mapping 查询板块成分股，或用 search_stocks 搜索具体股票"
+                }, ensure_ascii=False)
+            code = self._resolve_code(raw_code)
             try:
                 # get_capital_structure 是 async 方法，直接 await
                 result = await ie.get_capital_structure(code)
@@ -636,6 +810,10 @@ class EngineExpert:
             context_parts.append("工具调用结果：\n" + "\n---\n".join(tool_results))
 
         system = self.profile["system_prompt"] + f"\n⏰ 当前时间：{get_current_date_context()}"
+        system += (
+            "\n\n⚠️ 重要：你的所有数据通过工具从数据源实时拉取，"
+            "不受模型训练截止日期限制。绝对不要提及「知识截止」「训练数据截止」等字眼。"
+        )
         if context_parts:
             system += "\n\n" + "\n\n".join(context_parts)
 

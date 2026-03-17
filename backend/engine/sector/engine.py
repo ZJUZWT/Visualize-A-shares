@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from loguru import logger
+import pandas as pd
 
 # 用于去重：去掉板块名末尾的罗马数字后缀（Ⅰ Ⅱ Ⅲ Ⅳ 等）
 _ROMAN_SUFFIX = re.compile(r"[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+$")
@@ -96,20 +97,60 @@ class SectorEngine:
     async def _fetch_boards(
         self, board_type: str, date: str, cache_key: str,
     ) -> SectorBoardsResponse:
-        """实际拉取板块数据（带缓存写入 + 自动持久化到 DuckDB）"""
+        """实际拉取板块数据（带缓存写入 + 自动持久化到 DuckDB）
+        
+        降级策略：远程 API → DuckDB 本地缓存
+        """
         t0 = time.monotonic()
 
-        # 并行获取板块列表和资金流排行
+        # 串行获取板块列表和资金流排行（减少东财并发压力，避免 RemoteDisconnected）
         sector_type = "行业资金流" if board_type == "industry" else "概念资金流"
-        board_list_df, fund_flow_df = await asyncio.gather(
-            asyncio.to_thread(self._data.get_sector_board_list, board_type),
-            asyncio.to_thread(
-                self._data.get_sector_fund_flow_rank, "今日", sector_type
-            ),
+        board_list_df = await asyncio.to_thread(
+            self._data.get_sector_board_list, board_type
         )
+        fund_flow_df = pd.DataFrame()
+        if not board_list_df.empty:
+            # 板块列表成功才去拉资金流（节省一次请求）
+            fund_flow_df = await asyncio.to_thread(
+                self._data.get_sector_fund_flow_rank, "今日", sector_type
+            )
 
-        # ── 自动持久化到 DuckDB（后台执行，不阻塞响应）──
-        self._auto_persist(board_list_df, fund_flow_df, board_type)
+        # ── 远程 API 全部失败 → 降级到 DuckDB 本地数据 ──
+        if board_list_df.empty:
+            logger.warning(
+                f"[SectorEngine] 远程 API 全部失败，降级到 DuckDB 本地数据 ({board_type})"
+            )
+            try:
+                board_list_df = self._data.store.get_sector_board_daily(
+                    board_type=board_type
+                )
+                if not board_list_df.empty:
+                    # DuckDB 中的数据可能有多天，只取最近一天
+                    if "date" in board_list_df.columns:
+                        latest_date = board_list_df["date"].max()
+                        board_list_df = board_list_df[
+                            board_list_df["date"] == latest_date
+                        ]
+                    logger.info(
+                        f"[SectorEngine] DuckDB 降级成功: {len(board_list_df)} 个板块 "
+                        f"(date={board_list_df['date'].iloc[0] if 'date' in board_list_df.columns and len(board_list_df) > 0 else '?'})"
+                    )
+                    # 也尝试从 DuckDB 读资金流
+                    fund_flow_df = self._data.store.get_sector_fund_flow(
+                        board_type=board_type
+                    )
+                    if not fund_flow_df.empty and "date" in fund_flow_df.columns:
+                        latest_date = fund_flow_df["date"].max()
+                        fund_flow_df = fund_flow_df[
+                            fund_flow_df["date"] == latest_date
+                        ]
+            except Exception as e:
+                logger.warning(f"[SectorEngine] DuckDB 降级也失败: {e}")
+
+        # ── 自动持久化到 DuckDB（仅远程数据成功时）──
+        if not board_list_df.empty and "date" not in board_list_df.columns:
+            # 远程数据没有 date 字段 → 说明是新鲜数据，需要持久化
+            self._auto_persist(board_list_df, fund_flow_df, board_type)
 
         # 合并资金流数据
         items: list[SectorBoardItem] = []
@@ -175,7 +216,10 @@ class SectorEngine:
             board_type=board_type,
             total=len(items),
         )
-        self._set_cache(cache_key, result)
+        # 如果是 DuckDB 降级数据，缓存更久（10 分钟）避免反复打不可用的东财
+        is_from_duckdb = not board_list_df.empty and "date" in board_list_df.columns
+        cache_ttl = 600 if is_from_duckdb else CACHE_TTL
+        self._set_cache(cache_key, result, ttl=cache_ttl)
         return result
 
     async def get_history(
@@ -191,19 +235,17 @@ class SectorEngine:
         if not end_date:
             end_date = datetime.now().strftime("%Y-%m-%d")
 
-        # 并行拉取 K 线和资金流历史
-        hist_df, flow_df = await asyncio.gather(
-            asyncio.to_thread(
-                self._data.get_sector_board_history,
-                board_name=board_name, board_code=board_code,
-                board_type=board_type,
-                start_date=start_date, end_date=end_date,
-            ),
-            asyncio.to_thread(
-                self._data.store.get_sector_fund_flow_history,
-                board_code=board_code,
-                start_date=start_date, end_date=end_date,
-            ),
+        # 串行拉取 K 线和资金流历史（减少东财并发压力）
+        hist_df = await asyncio.to_thread(
+            self._data.get_sector_board_history,
+            board_name=board_name, board_code=board_code,
+            board_type=board_type,
+            start_date=start_date, end_date=end_date,
+        )
+        flow_df = await asyncio.to_thread(
+            self._data.store.get_sector_fund_flow_history,
+            board_code=board_code,
+            start_date=start_date, end_date=end_date,
         )
 
         history = []
@@ -404,11 +446,11 @@ class SectorEngine:
         t0 = time.monotonic()
 
         sector_type = "行业资金流" if board_type == "industry" else "概念资金流"
-        board_df, flow_df = await asyncio.gather(
-            asyncio.to_thread(self._data.get_sector_board_list, board_type),
-            asyncio.to_thread(
-                self._data.get_sector_fund_flow_rank, "今日", sector_type
-            ),
+        board_df = await asyncio.to_thread(
+            self._data.get_sector_board_list, board_type
+        )
+        flow_df = await asyncio.to_thread(
+            self._data.get_sector_fund_flow_rank, "今日", sector_type
         )
 
         today = datetime.now().strftime("%Y-%m-%d")
@@ -495,39 +537,51 @@ class SectorEngine:
     ) -> StockSectorsResponse:
         """快速反查——利用东财个股所属板块接口（比遍历成分股快得多）
 
-        先尝试 AKShare 个股所属板块接口，如果无法获取则降级到遍历已加载的 boards 缓存。
+        先尝试通过数据源获取个股所属板块，如果无法获取则降级到遍历已加载的 boards 缓存。
         """
         t0 = time.monotonic()
         sectors: list[StockSectorInfo] = []
 
-        # 方案 1：尝试从东财直接获取个股概念/行业板块
+        # 方案 1：通过全局并发限流的数据源调用东财接口
         try:
+            from engine.data.sources.eastmoney_direct import _EASTMONEY_SEMAPHORE
             import akshare as ak
-            # 个股所属行业
+
+            # 个股所属行业（受并发限流保护）
             try:
-                df = ak.stock_board_industry_name_em(symbol=stock_code)
-                if df is not None and not df.empty:
-                    for _, row in df.iterrows():
-                        sectors.append(StockSectorInfo(
-                            board_code=str(row.get("板块代码", "")),
-                            board_name=str(row.get("板块名称", "")),
-                            board_type="industry",
-                            pct_chg=self._safe_float(row.get("板块涨跌幅")),
-                        ))
+                acquired = _EASTMONEY_SEMAPHORE.acquire(timeout=15)
+                if acquired:
+                    try:
+                        df = ak.stock_board_industry_name_em(symbol=stock_code)
+                        if df is not None and not df.empty:
+                            for _, row in df.iterrows():
+                                sectors.append(StockSectorInfo(
+                                    board_code=str(row.get("板块代码", "")),
+                                    board_name=str(row.get("板块名称", "")),
+                                    board_type="industry",
+                                    pct_chg=self._safe_float(row.get("板块涨跌幅")),
+                                ))
+                    finally:
+                        _EASTMONEY_SEMAPHORE.release()
             except Exception:
                 pass
 
-            # 个股所属概念
+            # 个股所属概念（受并发限流保护）
             try:
-                df = ak.stock_board_concept_name_em(symbol=stock_code)
-                if df is not None and not df.empty:
-                    for _, row in df.iterrows():
-                        sectors.append(StockSectorInfo(
-                            board_code=str(row.get("板块代码", "")),
-                            board_name=str(row.get("板块名称", "")),
-                            board_type="concept",
-                            pct_chg=self._safe_float(row.get("板块涨跌幅")),
-                        ))
+                acquired = _EASTMONEY_SEMAPHORE.acquire(timeout=15)
+                if acquired:
+                    try:
+                        df = ak.stock_board_concept_name_em(symbol=stock_code)
+                        if df is not None and not df.empty:
+                            for _, row in df.iterrows():
+                                sectors.append(StockSectorInfo(
+                                    board_code=str(row.get("板块代码", "")),
+                                    board_name=str(row.get("板块名称", "")),
+                                    board_type="concept",
+                                    pct_chg=self._safe_float(row.get("板块涨跌幅")),
+                                ))
+                    finally:
+                        _EASTMONEY_SEMAPHORE.release()
             except Exception:
                 pass
         except ImportError:

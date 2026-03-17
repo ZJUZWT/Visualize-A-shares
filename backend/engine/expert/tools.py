@@ -57,7 +57,7 @@ class ExpertTools:
     # ── 引擎专家聚合 ────────────────────────────────────
 
     async def _ask_expert(self, action: str, params: dict) -> str:
-        """调用引擎专家，消费 SSE 流，返回完整回复文本
+        """调用引擎专家 — 进程内直接调用 EngineExpert.chat()，不走 HTTP
 
         action 就是 expert_type: data / quant / info / industry
         params: {"question": "..."}
@@ -67,64 +67,38 @@ class ExpertTools:
         if not question:
             return "缺少 question 参数"
 
-        url = f"{self.api_base}/api/v1/expert/chat/{expert_type}"
         full_text = ""
         tool_summaries: list[str] = []
 
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
-            ) as client:
-                async with client.stream(
-                    "POST", url,
-                    json={"message": question},
-                    headers={"Content-Type": "application/json"},
-                ) as response:
-                    if response.status_code != 200:
-                        return f"专家 {expert_type} 请求失败: HTTP {response.status_code}"
+            from engine.expert.engine_experts import EngineExpert
+            expert = EngineExpert(expert_type, llm_provider=self.llm_engine)
 
-                    event_type = ""
-                    async for line in response.aiter_lines():
-                        if line.startswith("event:"):
-                            event_type = line[6:].strip()
-                        elif line.startswith("data:"):
-                            data_str = line[5:].strip()
-                            if not data_str:
-                                continue
-                            try:
-                                data = json.loads(data_str)
-                            except json.JSONDecodeError:
-                                continue
+            async for event in expert.chat(question):
+                evt = event.get("event", "")
+                data = event.get("data", {})
 
-                            if event_type == "reply_token":
-                                full_text += data.get("token", "")
-                            elif event_type == "reply_complete":
-                                full_text = data.get("full_text", full_text)
-                            elif event_type == "tool_call":
-                                tool_summaries.append(
-                                    f"调用了 {data.get('engine','')}.{data.get('action','')}"
-                                )
-                            elif event_type == "tool_result":
-                                tool_summaries.append(
-                                    f"结果: {data.get('summary', '')[:100]}"
-                                )
-                            elif event_type == "error":
-                                return f"专家 {expert_type} 错误: {data.get('message', '')}"
+                if evt == "reply_token":
+                    full_text += data.get("token", "")
+                elif evt == "reply_complete":
+                    full_text = data.get("full_text", full_text)
+                elif evt == "tool_call":
+                    tool_summaries.append(
+                        f"调用了 {data.get('engine', '')}.{data.get('action', '')}"
+                    )
+                elif evt == "tool_result":
+                    tool_summaries.append(
+                        f"结果: {data.get('summary', '')[:100]}"
+                    )
+                elif evt == "error":
+                    return f"专家 {expert_type} 错误: {data.get('message', '')}"
 
         except asyncio.TimeoutError:
-            return f"专家 {expert_type} 连接超时，已获取部分: {full_text[:300]}"
-        except httpx.RemoteProtocolError as e:
-            logger.error(f"ask_expert({expert_type}) 远端协议错误: {e!r}")
-            if full_text:
-                return full_text
-            return f"调用专家 {expert_type} 连接中断: {e!r}"
-        except httpx.ReadError as e:
-            logger.error(f"ask_expert({expert_type}) 读取错误: {e!r}")
-            if full_text:
-                return full_text
-            return f"调用专家 {expert_type} 读取失败: {e!r}"
+            return f"专家 {expert_type} 执行超时，已获取部分: {full_text[:300]}"
         except Exception as e:
             logger.error(f"ask_expert({expert_type}) 失败: {e!r}")
+            if full_text:
+                return full_text
             return f"调用专家 {expert_type} 失败: {e!r}"
 
         if not full_text:

@@ -1,18 +1,22 @@
 """
-东方财富直连数据源 — Level 1.5 全功能备选
+东方财富直连数据源 — Level 0.5 板块首选
 数据来源：东方财富 push2 / push2his / datacenter-web HTTP API
-特点：纯 requests 无第三方库依赖、完整板块支持、可精确控制请求频率
+特点：纯 httpx 持久连接池、板块完整支持、全局并发限流防封
+
+v2: 从 requests.Session → httpx.Client 持久连接池
+    + 全局并发信号量（同一时刻最多 N 个请求），彻底解决 RemoteDisconnected
 """
 
 import json
 import math
 import random
 import re
+import threading
 import time
 from typing import Optional
 
 import pandas as pd
-import requests
+import httpx
 from loguru import logger
 
 from .base import BaseDataSource
@@ -26,12 +30,56 @@ _USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 ]
 
+# ─── 全局并发信号量：限制对东财服务器的同时请求数 ────────
+_EASTMONEY_SEMAPHORE = threading.Semaphore(3)  # 最多 3 个并发请求
+_LAST_REQUEST_TIME = 0.0
+_REQUEST_LOCK = threading.Lock()
+_MIN_INTERVAL = 0.3  # 两次请求间最小间隔（秒）
+
+# ─── 断路器：连续失败后快速跳过，避免反复打不可用的东财 ──
+_CIRCUIT_BREAKER_LOCK = threading.Lock()
+_CONSECUTIVE_FAILURES = 0
+_CIRCUIT_OPEN_UNTIL = 0.0  # monotonic 时间戳
+_CIRCUIT_FAILURE_THRESHOLD = 3  # 连续失败 N 次后触发断路
+_CIRCUIT_COOLDOWN = 120  # 断路冷却时间（秒），冷却后自动恢复半开状态
+
+
+def _circuit_is_open() -> bool:
+    """检查断路器是否打开（东财不可用）"""
+    with _CIRCUIT_BREAKER_LOCK:
+        if _CONSECUTIVE_FAILURES >= _CIRCUIT_FAILURE_THRESHOLD:
+            if time.monotonic() < _CIRCUIT_OPEN_UNTIL:
+                return True
+            # 冷却期过了 → 进入半开状态，允许一次试探
+    return False
+
+
+def _circuit_record_success():
+    """记录成功 → 关闭断路器"""
+    global _CONSECUTIVE_FAILURES, _CIRCUIT_OPEN_UNTIL
+    with _CIRCUIT_BREAKER_LOCK:
+        _CONSECUTIVE_FAILURES = 0
+        _CIRCUIT_OPEN_UNTIL = 0.0
+
+
+def _circuit_record_failure():
+    """记录失败 → 累计达到阈值时打开断路器"""
+    global _CONSECUTIVE_FAILURES, _CIRCUIT_OPEN_UNTIL
+    with _CIRCUIT_BREAKER_LOCK:
+        _CONSECUTIVE_FAILURES += 1
+        if _CONSECUTIVE_FAILURES >= _CIRCUIT_FAILURE_THRESHOLD:
+            _CIRCUIT_OPEN_UNTIL = time.monotonic() + _CIRCUIT_COOLDOWN
+            logger.warning(
+                f"🔌 东财断路器打开: 连续 {_CONSECUTIVE_FAILURES} 次失败，"
+                f"冷却 {_CIRCUIT_COOLDOWN}s 后重试"
+            )
+
 
 class EastMoneyDirectSource(BaseDataSource):
     """东方财富直连数据源 — 完全不依赖 akshare"""
 
     name = "eastmoney_direct"
-    priority = 1.5  # AKShare(1) 和 BaoStock(2) 之间
+    priority = 0.5  # 板块数据首选（比 AKShare 优先）
 
     # API 端点
     _REALTIME_URL = "https://push2.eastmoney.com/api/qt/clist/get"
@@ -39,18 +87,28 @@ class EastMoneyDirectSource(BaseDataSource):
     _FINANCE_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
     # 请求配置
-    TIMEOUT = 15
-    MAX_RETRIES = 3
-    RETRY_BASE_DELAY = 2
+    TIMEOUT = 20
+    MAX_RETRIES = 4
+    RETRY_BASE_DELAY = 1.5
 
     def __init__(self):
-        self._session = requests.Session()
-        self._session.headers.update({
-            "Referer": "https://quote.eastmoney.com/",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        })
-        logger.info("[EastMoneyDirect] 数据源初始化成功")
+        # httpx.Client 内建连接池 + HTTP/2 + keep-alive
+        self._client = httpx.Client(
+            headers={
+                "Referer": "https://quote.eastmoney.com/",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            },
+            timeout=httpx.Timeout(self.TIMEOUT, connect=10),
+            limits=httpx.Limits(
+                max_connections=10,       # 连接池最大连接数
+                max_keepalive_connections=5,  # keep-alive 连接数
+                keepalive_expiry=30,      # keep-alive 过期时间（秒）
+            ),
+            follow_redirects=True,
+            http2=False,  # 东财不支持 HTTP/2
+        )
+        logger.info("[EastMoneyDirect] 数据源初始化成功 (httpx 持久连接池)")
 
     # ─── 通用工具 ──────────────────────────────────────
 
@@ -58,16 +116,33 @@ class EastMoneyDirectSource(BaseDataSource):
         return random.choice(_USER_AGENTS)
 
     def _throttle(self):
-        """请求间随机延迟，降低被封概率"""
-        time.sleep(random.uniform(0.05, 0.2))
+        """全局节流：确保请求间有最小间隔"""
+        global _LAST_REQUEST_TIME
+        with _REQUEST_LOCK:
+            now = time.monotonic()
+            elapsed = now - _LAST_REQUEST_TIME
+            if elapsed < _MIN_INTERVAL:
+                time.sleep(_MIN_INTERVAL - elapsed + random.uniform(0, 0.1))
+            _LAST_REQUEST_TIME = time.monotonic()
 
     def _get_json(self, url: str, params: dict, desc: str = "") -> Optional[dict]:
-        """带重试的 JSON 请求"""
+        """带重试 + 全局并发限流 + 断路器的 JSON 请求"""
+        # 断路器：东财不可用时快速返回 None
+        if _circuit_is_open():
+            logger.debug(f"[EastMoneyDirect] {desc} 断路器打开，跳过请求")
+            return None
+
         last_err = None
         for attempt in range(1, self.MAX_RETRIES + 1):
+            # 全局并发限流
+            acquired = _EASTMONEY_SEMAPHORE.acquire(timeout=30)
+            if not acquired:
+                logger.warning(f"[EastMoneyDirect] {desc} 并发限流等待超时")
+                continue
             try:
-                self._session.headers["User-Agent"] = self._rand_ua()
-                resp = self._session.get(url, params=params, timeout=self.TIMEOUT)
+                self._throttle()
+                headers = {"User-Agent": self._rand_ua()}
+                resp = self._client.get(url, params=params, headers=headers)
                 resp.raise_for_status()
 
                 text = resp.text.strip()
@@ -78,8 +153,48 @@ class EastMoneyDirectSource(BaseDataSource):
                         text = match.group(1)
 
                 data = json.loads(text)
-                self._throttle()
+                _circuit_record_success()
                 return data
+            except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError) as e:
+                # 连接级错误 → 记录断路器失败 + 重建连接池
+                last_err = e
+                _circuit_record_failure()
+                if attempt < self.MAX_RETRIES:
+                    wait = self.RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0.5, 1.5)
+                    logger.warning(
+                        f"[EastMoneyDirect] {desc} 第 {attempt} 次连接断开: "
+                        f"{type(e).__name__}，{wait:.1f}s 后重试..."
+                    )
+                    time.sleep(wait)
+                    # 重建连接池（清理断开的连接）
+                    try:
+                        self._client.close()
+                        self._client = httpx.Client(
+                            headers={
+                                "Referer": "https://quote.eastmoney.com/",
+                                "Accept": "application/json, text/plain, */*",
+                                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                            },
+                            timeout=httpx.Timeout(self.TIMEOUT, connect=10),
+                            limits=httpx.Limits(
+                                max_connections=10,
+                                max_keepalive_connections=5,
+                                keepalive_expiry=30,
+                            ),
+                            follow_redirects=True,
+                        )
+                    except Exception:
+                        pass
+                    # 如果断路器已打开，直接退出重试循环
+                    if _circuit_is_open():
+                        logger.info(
+                            f"[EastMoneyDirect] {desc} 断路器已打开，停止重试"
+                        )
+                        break
+                else:
+                    logger.error(
+                        f"[EastMoneyDirect] {desc} {self.MAX_RETRIES} 次重试全部失败: {e}"
+                    )
             except Exception as e:
                 last_err = e
                 if attempt < self.MAX_RETRIES:
@@ -93,6 +208,8 @@ class EastMoneyDirectSource(BaseDataSource):
                     logger.error(
                         f"[EastMoneyDirect] {desc} {self.MAX_RETRIES} 次重试全部失败: {e}"
                     )
+            finally:
+                _EASTMONEY_SEMAPHORE.release()
         return None
 
     @staticmethod
@@ -536,3 +653,10 @@ class EastMoneyDirectSource(BaseDataSource):
         except Exception as e:
             logger.warning(f"[EastMoneyDirect] health check failed: {e}")
             return False
+
+    def __del__(self):
+        """清理连接池"""
+        try:
+            self._client.close()
+        except Exception:
+            pass
