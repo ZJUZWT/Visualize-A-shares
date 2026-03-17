@@ -16,6 +16,7 @@ from engine.expert.engine_experts import EngineExpert, ExpertType, get_expert_pr
 from engine.expert.schemas import ExpertChatRequest, SessionCreateRequest
 from engine.expert.tools import ExpertTools
 from engine.expert.tool_tracker import ToolOutcomeTracker
+from engine.expert.user_profile import UserProfileTracker
 from llm.config import llm_settings
 from llm.providers import LLMProviderFactory
 
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/api/v1/expert", tags=["expert"])
 _expert_agent: ExpertAgent | None = None
 _engine_experts: dict[str, EngineExpert] = {}
 _tool_tracker: ToolOutcomeTracker | None = None
+_user_profile_tracker: UserProfileTracker | None = None
 
 # 专家对话历史使用独立数据库，避免与 stockterrain.duckdb 的 WAL 冲突
 EXPERT_DB_PATH = DATA_DIR / "expert_chat.duckdb"
@@ -131,6 +133,11 @@ async def _init_db():
     _tool_tracker = ToolOutcomeTracker(str(EXPERT_DB_PATH))
     logger.info("ToolOutcomeTracker 已初始化")
 
+    # 初始化用户偏好追踪器
+    global _user_profile_tracker
+    _user_profile_tracker = UserProfileTracker(str(EXPERT_DB_PATH))
+    logger.info("UserProfileTracker 已初始化")
+
 
 def get_expert_agent() -> ExpertAgent:
     """获取 RAG Agent 实例"""
@@ -142,6 +149,11 @@ def get_expert_agent() -> ExpertAgent:
 def get_tool_tracker() -> ToolOutcomeTracker | None:
     """获取工具使用追踪器"""
     return _tool_tracker
+
+
+def get_user_profile_tracker() -> UserProfileTracker | None:
+    """获取用户偏好追踪器"""
+    return _user_profile_tracker
 
 
 # ══════════════════════════════════════════════════════════
