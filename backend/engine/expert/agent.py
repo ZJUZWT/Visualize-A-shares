@@ -956,12 +956,30 @@ class ExpertAgent:
                 f"- {r['engine']}.{r['action']}: {r['result']}" for r in data_results
             ))
 
+        # ── 构建数据就绪声明（防止 LLM 幻觉式调用工具）──
+        expert_count = len([r for r in tool_results if r.get("is_expert")])
+        data_ready_notice = ""
+        if expert_count > 0:
+            data_ready_notice = (
+                f"\n\n## ⚠️ 重要：所有数据已就绪\n"
+                f"你的 {expert_count} 位专家已经全部返回了分析结果，数据就在上面。\n"
+                f"**请直接基于上面的专家分析报告进行综合研判，不要说「我在等数据」「让我查一下」之类的话。**\n"
+                f"**禁止输出任何工具调用格式（如 [tool:...]、<tool_call>、```tool 等），你不需要也不能调用任何工具。**\n"
+                f"**你的唯一任务是：阅读专家报告 → 综合分析 → 给出你的判断和建议。**\n"
+            )
+        elif not tool_results:
+            data_ready_notice = (
+                "\n\n## 提示\n"
+                "本次没有调用专家团队（可能是闲聊或简单问题），请直接回复用户。\n"
+                "**禁止输出任何工具调用格式。**\n"
+            )
+
         # 根据 persona 选择 system prompt
         if persona == "short_term":
             from engine.expert.personas import SHORT_TERM_REPLY_SYSTEM
             system = SHORT_TERM_REPLY_SYSTEM.format(
                 current_date=get_current_date_context(),
-            ) + "\n\n".join(context_parts)
+            ) + "\n\n".join(context_parts) + data_ready_notice
         else:
             system = (
                 "你是「总师爷」，A股投资专家总顾问，在市场摸爬滚打25年的老江湖。\n"
@@ -981,6 +999,7 @@ class ExpertAgent:
                 "5. 使用 Markdown 格式，善用表格展示数据\n"
                 "6. ⚠️ 末尾附一句简短风险提示即可\n\n"
                 + "\n\n".join(context_parts)
+                + data_ready_notice
             )
 
         # 注入用户偏好（借鉴 OpenClaw USER 层）
@@ -1019,7 +1038,10 @@ class ExpertAgent:
             "<minimax:search_result>": "</minimax:search_result>",
             "<tool_call>": "</tool_call>",
             "<tool_code>": "</tool_code>",
+            "[TOOL_CALL]": "[/TOOL_CALL]",
         }
+        # 正则过滤：LLM 可能幻觉出 [tool:xxx]...[/tool] 格式
+        HALLUCINATED_TOOL_RE = re.compile(r'\[tool:[^\]]*\].*?\[/tool\]', re.DOTALL)
 
         try:
             skip_bytes = 0  # skip 区域累积字节数
@@ -1071,13 +1093,18 @@ class ExpertAgent:
                     continue
 
                 if raw_buffer:
-                    accumulated += raw_buffer
-                    yield raw_buffer, accumulated
+                    # 清洗幻觉工具调用 [tool:xxx]...[/tool]
+                    cleaned = HALLUCINATED_TOOL_RE.sub("", raw_buffer)
+                    if cleaned:
+                        accumulated += cleaned
+                        yield cleaned, accumulated
                     raw_buffer = ""
 
             if raw_buffer and not in_skip:
-                accumulated += raw_buffer
-                yield raw_buffer, accumulated
+                cleaned = HALLUCINATED_TOOL_RE.sub("", raw_buffer)
+                if cleaned:
+                    accumulated += cleaned
+                    yield cleaned, accumulated
 
         except Exception as e:
             logger.error(f"reply_stream 失败: {e}")
