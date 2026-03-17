@@ -321,6 +321,19 @@ class ExpertAgent:
             except Exception as e:
                 logger.debug(f"工具反馈记录失败: {e}")
 
+        # 10. 用户偏好提取（借鉴 OpenClaw USER 层）
+        try:
+            from engine.expert.user_profile import extract_preferences
+            from engine.expert.routes import get_user_profile_tracker
+            upt = get_user_profile_tracker()
+            if upt:
+                prefs = extract_preferences(message)
+                if prefs:
+                    upt.update("global", prefs)
+                    logger.info(f"用户偏好更新: {prefs}")
+        except Exception as e:
+            logger.debug(f"用户偏好提取失败: {e}")
+
         chat_elapsed = time.monotonic() - t0_chat
         logger.info(f"⏱️ ExpertAgent.chat 总耗时 {chat_elapsed:.1f}s")
 
@@ -921,6 +934,17 @@ class ExpertAgent:
                 "4. 使用 Markdown 格式，善用表格展示数据\n\n"
                 + "\n\n".join(context_parts)
             )
+
+        # 注入用户偏好（借鉴 OpenClaw USER 层）
+        try:
+            from engine.expert.routes import get_user_profile_tracker
+            upt = get_user_profile_tracker()
+            if upt:
+                profile_prompt = upt.format_profile_prompt("global")
+                if profile_prompt:
+                    system += "\n\n" + profile_prompt
+        except Exception:
+            pass
 
         # 构建消息列表（含对话历史）
         messages = [ChatMessage("system", system)]
