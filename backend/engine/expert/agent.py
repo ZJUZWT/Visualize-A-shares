@@ -304,6 +304,23 @@ class ExpertAgent:
             except Exception as e:
                 logger.warning(f"记忆存储失败: {e}")
 
+        # 9. 工具使用反馈记录（借鉴 OpenClaw TOOLS 层）
+        if tool_calls:
+            try:
+                from engine.expert.tool_tracker import classify_query
+                from engine.expert.routes import get_tool_tracker
+                tracker = get_tool_tracker()
+                if tracker:
+                    query_type = classify_query(message)
+                    tools_used = [tc.action for tc in tool_calls]
+                    has_error = any(
+                        any(kw in r.get("result", "")[:200] for kw in ["失败", "error", "超时"])
+                        for r in tool_results
+                    )
+                    tracker.record(query_type, tools_used, success=not has_error)
+            except Exception as e:
+                logger.debug(f"工具反馈记录失败: {e}")
+
         chat_elapsed = time.monotonic() - t0_chat
         logger.info(f"⏱️ ExpertAgent.chat 总耗时 {chat_elapsed:.1f}s")
 
@@ -418,6 +435,18 @@ class ExpertAgent:
                 graph_context=format_graph_context(nodes),
                 memory_context=format_memory_context(memories),
             )
+
+        # 注入工具使用经验（借鉴 OpenClaw TOOLS 层）
+        try:
+            from engine.expert.routes import get_tool_tracker
+            tracker = get_tool_tracker()
+            if tracker:
+                experience = tracker.format_experience_prompt()
+                if experience:
+                    prompt += "\n\n" + experience
+        except Exception:
+            pass
+
         try:
             # 构建消息列表（含对话历史）
             messages = [ChatMessage("system", prompt)]
