@@ -38,9 +38,9 @@ const STYLES = `
 
   /* ─── 页面布局 ─── */
   .page-wrap {
-    max-width: 800px;
+    max-width: 100%;
     margin: 0 auto;
-    padding: 24px 20px;
+    padding: 24px 48px;
   }
 
   /* ─── 顶栏：复刻 page.tsx 中的专家信息栏 ─── */

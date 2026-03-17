@@ -147,12 +147,15 @@ class ExpertTools:
                 import datetime
                 code = params.get("code", "")
                 days = params.get("days", 60)
+                # days 是交易日数，乘以 1.8 换算日历天（含周末/节假日冗余）
+                calendar_days = max(int(days), 10) * 1.8 + 10
                 end = datetime.date.today().strftime("%Y-%m-%d")
-                start = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+                start = (datetime.date.today() - datetime.timedelta(days=int(calendar_days))).strftime("%Y-%m-%d")
                 df = self.data_engine.get_daily_history(code, start, end)
                 if df.empty:
                     return {"error": f"No history for {code}"}
-                records = df.tail(10).to_dict("records")
+                return_rows = max(int(days), 10)
+                records = df.tail(return_rows).to_dict("records")
                 return {"code": code, "history": records, "total_days": len(df)}
 
             elif action == "get_company_profile":
