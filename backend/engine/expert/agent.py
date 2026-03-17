@@ -224,12 +224,12 @@ class ExpertAgent:
         tool_calls: list[ToolCall] = think_output.tool_calls if think_output.needs_data else []
 
         # 4. 工具调用（并行执行所有专家）
-        # 先容错 + 发送 tool_call 事件
+        # 容错：确保每个 expert 调用的 question 非空（但不覆盖 LLM 精心拆解的问题）
         for tc in tool_calls:
             if tc.engine == "expert":
                 q = (tc.params.get("question") or "").strip()
                 if not q or len(q) < 4:
-                    tc.params["question"] = message
+                    tc.params["question"] = message  # 仅在 question 确实为空时兜底
             is_expert_call = tc.engine == "expert"
             expert_label = EXPERT_NAMES.get(tc.action, tc.action) if is_expert_call else ""
             yield {"event": "tool_call", "data": {
@@ -546,11 +546,48 @@ class ExpertAgent:
         """容错解析：从 LLM 输出 + 用户消息中提取工具调用意图
 
         当 JSON 解析失败时，同时扫描 LLM 输出和用户消息的关键词，
-        决定需要咨询哪些专家。
+        决定需要咨询哪些专家，并为每个专家生成精准的子问题。
         """
         tool_calls: list[dict] = []
         # 拼合所有可用上下文：LLM 输出 + 用户原始消息
         combined = text + "\n" + user_message
+
+        # ── 提取股票信息用于生成精准问题 ──
+        code_match = re.search(r'\b(\d{6})\b', combined)
+        detected_code = code_match.group(1) if code_match else ""
+        # 尝试从名称映射中找到股票名
+        stock_hint = ""
+        if detected_code:
+            stock_hint = f"({detected_code})"
+        else:
+            # 尝试从消息中提取股票名
+            name_map = self._get_stock_name_map()
+            for name in name_map:
+                if len(name) >= 2 and name in user_message:
+                    stock_hint = f"{name}({name_map[name]})"
+                    detected_code = name_map[name]
+                    break
+
+        # ── 为不同专家生成精准问题的辅助函数 ──
+        def make_question(expert_type: str) -> str:
+            base = user_message
+            if expert_type == "data":
+                if stock_hint:
+                    return f"查询{stock_hint}最近30天行情走势、成交量变化和涨跌幅"
+                return base
+            elif expert_type == "quant":
+                if stock_hint:
+                    return f"分析{stock_hint}的技术指标(RSI/MACD/KDJ)，给出支撑位和阻力位"
+                return base
+            elif expert_type == "info":
+                if stock_hint:
+                    return f"查询{stock_hint}最近的新闻和公告，评估消息面利好利空"
+                return base
+            elif expert_type == "industry":
+                if stock_hint:
+                    return f"分析{stock_hint}所在行业的产业链位置和行业周期阶段"
+                return base
+            return base
 
         # ── 先检测是否是"综合分析"型问题 → 直接调全部 4 个专家 ──
         comprehensive_patterns = [
@@ -567,9 +604,9 @@ class ExpertAgent:
                 tool_calls.append({
                     "engine": "expert",
                     "action": expert_type,
-                    "params": {"question": user_message},
+                    "params": {"question": make_question(expert_type)},
                 })
-            logger.info("think 容错解析: 综合分析问题，调用全部4个专家")
+            logger.info("think 容错解析: 综合分析问题，调用全部4个专家（精准子问题）")
             return ThinkOutput(
                 needs_data=True,
                 tool_calls=[ToolCall(**tc) for tc in tool_calls],
@@ -601,10 +638,10 @@ class ExpertAgent:
                 tool_calls.append({
                     "engine": "expert",
                     "action": expert_type,
-                    "params": {"question": user_message},
+                    "params": {"question": make_question(expert_type)},
                 })
 
-            logger.info(f"think 容错解析: 检测到需要咨询 {list(detected_experts)}")
+            logger.info(f"think 容错解析: 检测到需要咨询 {list(detected_experts)}（精准子问题）")
             return ThinkOutput(
                 needs_data=True,
                 tool_calls=[ToolCall(**tc) for tc in tool_calls],
@@ -612,9 +649,6 @@ class ExpertAgent:
             )
 
         # ── 检测直接数据查询（仅用于非常简单的请求）──
-        code_match = re.search(r'\b(\d{6})\b', combined)
-        detected_code = code_match.group(1) if code_match else ""
-
         data_patterns = [
             (r"get_daily_history", "data", "get_daily_history",
              {"code": detected_code, "days": 30}),
@@ -978,15 +1012,14 @@ class ExpertAgent:
         skip_end_tag = ""        # 当前跳过区域的结束标签
         raw_buffer = ""
 
-        # 内容被丢弃的标签（对用户无意义的工具调用）
+        # 内容被丢弃的标签（对用户无意义的工具调用 + LLM 思考过程）
         SKIP_TAGS = {
+            "<think>": "</think>",
             "<minimax:tool_call>": "</minimax:tool_call>",
             "<minimax:search_result>": "</minimax:search_result>",
             "<tool_call>": "</tool_call>",
             "<tool_code>": "</tool_code>",
         }
-        # 只剥标签壳、保留内容的标签（LLM 经常把完整回复放在 think 里）
-        STRIP_TAGS = {"<think>": "</think>"}
 
         try:
             skip_bytes = 0  # skip 区域累积字节数
@@ -1009,17 +1042,6 @@ class ExpertAgent:
                             break
                     if in_skip:
                         continue
-
-                # 剥离 <think> 标签壳但保留内容
-                if not in_skip:
-                    for start_tag, end_tag in STRIP_TAGS.items():
-                        if start_tag in raw_buffer:
-                            # 输出标签前的内容，然后去掉标签本身
-                            parts = raw_buffer.split(start_tag, 1)
-                            raw_buffer = parts[0] + parts[1]
-                        if end_tag in raw_buffer:
-                            parts = raw_buffer.split(end_tag, 1)
-                            raw_buffer = parts[0] + parts[1]
 
                 # 检测离开跳过区域
                 if in_skip and skip_end_tag in raw_buffer:

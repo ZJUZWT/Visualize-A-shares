@@ -103,46 +103,49 @@ class KnowledgeGraph:
         Args:
             message: 用户消息
             persona: 人格类型，信念召回按此过滤（股票/行业等节点共享）
+
+        v2: 修复过于宽松的匹配 — 只做精确子串匹配，信念仅在命中关键词时召回，
+            1-hop 扩展只针对实体节点（stock/sector/material）不扩展 belief。
         """
         matched_ids: set[str] = set()
 
         # Step 1: 正则提取6位股票代码，匹配 stock 节点的 code 字段
-        codes = re.findall(r"\d{6}", message)
+        codes = set(re.findall(r"\d{6}", message))
         for node_id in self.graph.nodes():
             data = self.graph.nodes[node_id]
             if data.get("type") == "stock" and data.get("code") in codes:
                 matched_ids.add(node_id)
 
-        # Step 2: 子串匹配 stock.name / sector.name / event.name / material.name / region.name
+        # Step 2: 精确子串匹配（名称 ≥2字 且 完整出现在消息中）
         for node_id in self.graph.nodes():
             data = self.graph.nodes[node_id]
             node_type = data.get("type")
             if node_type in ("stock", "sector", "event", "material", "region"):
                 name = data.get("name", "")
-                if name and len(name) >= 2:
-                    # 双向匹配：名称在消息中 或 消息中的词在名称中
-                    if name in message or (len(name) >= 3 and any(
-                        name[i:i+2] in message for i in range(len(name) - 1)
-                    )):
-                        matched_ids.add(node_id)
+                if name and len(name) >= 2 and name in message:
+                    matched_ids.add(node_id)
 
-        # Step 3: 信念召回 — 只返回当前 persona 的信念（top 2~3）
-        #   如果消息包含关键词则返回 top 3，否则返回 top 2
+        # Step 3: 信念召回 — 仅当消息包含信念关键词时才召回（避免无关信念污染上下文）
         has_belief_keyword = any(kw in message for kw in BELIEF_KEYWORDS)
-        belief_limit = 3 if has_belief_keyword else 2
-        belief_nodes = [
-            (node_id, self.graph.nodes[node_id])
-            for node_id in self.graph.nodes()
-            if self.graph.nodes[node_id].get("type") == "belief"
-            and self.graph.nodes[node_id].get("persona", "rag") == persona
-        ]
-        belief_nodes.sort(key=lambda x: x[1].get("confidence", 0), reverse=True)
-        for node_id, _ in belief_nodes[:belief_limit]:
-            matched_ids.add(node_id)
+        if has_belief_keyword:
+            belief_nodes = [
+                (node_id, self.graph.nodes[node_id])
+                for node_id in self.graph.nodes()
+                if self.graph.nodes[node_id].get("type") == "belief"
+                and self.graph.nodes[node_id].get("persona", "rag") == persona
+            ]
+            belief_nodes.sort(key=lambda x: x[1].get("confidence", 0), reverse=True)
+            for node_id, _ in belief_nodes[:3]:
+                matched_ids.add(node_id)
 
-        # Step 4: 1-hop 扩展 — 加入所有匹配节点的直接邻居（successors + predecessors）
+        # Step 4: 1-hop 扩展 — 仅扩展实体节点（stock/sector/material/region）的邻居
+        #   不扩展 belief/stance/event，避免召回大量无关节点
+        EXPANDABLE_TYPES = {"stock", "sector", "material", "region"}
         hop_ids: set[str] = set()
         for node_id in list(matched_ids):
+            node_type = self.graph.nodes[node_id].get("type", "")
+            if node_type not in EXPANDABLE_TYPES:
+                continue
             for neighbor in self.graph.successors(node_id):
                 hop_ids.add(neighbor)
             for neighbor in self.graph.predecessors(node_id):
