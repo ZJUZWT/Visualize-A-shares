@@ -438,7 +438,28 @@ class EngineExpert:
                     logger.info("工具规划: 从原始文本兜底提取到 JSON")
                 else:
                     return {"tool_calls": []}
-            return json.loads(text)
+
+            # 先尝试直接解析
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError as je:
+                # "Extra data" 说明 LLM 返回了多个连续 JSON 对象，提取第一个含 tool_calls 的
+                if "Extra data" in str(je) or "Expecting value" in str(je):
+                    logger.info(f"工具规划: JSON 解析遇到 '{je}'，尝试正则提取")
+                    # 用贪婪匹配提取完整的 tool_calls JSON（支持嵌套大括号）
+                    tc_match = re.search(
+                        r'\{\s*"tool_calls"\s*:\s*\[.*?\]\s*(?:,\s*"[^"]*"\s*:\s*(?:"[^"]*"|[^,}]*))*\s*\}',
+                        text, re.DOTALL
+                    )
+                    if tc_match:
+                        extracted = tc_match.group(0)
+                        logger.info(f"工具规划: 正则提取成功，长度={len(extracted)}")
+                        return json.loads(extracted)
+                    # 再试一种更宽松的匹配
+                    tc_match2 = re.search(r'\{[^{}]*"tool_calls"\s*:\s*\[.*?\]\s*\}', text, re.DOTALL)
+                    if tc_match2:
+                        return json.loads(tc_match2.group(0))
+                raise
         except Exception as e:
             logger.warning(f"工具规划失败，跳过工具调用: {e}")
             return {"tool_calls": []}
@@ -621,36 +642,42 @@ class EngineExpert:
             if df is None or df.empty:
                 return json.dumps({"error": f"无 {code} 日线数据"}, ensure_ascii=False)
 
-            # ── 用实时快照补充当天数据 ──
+            # ── 用实时快照补充当天数据（仅交易时段：工作日 9:15~15:30） ──
             try:
-                snap = de.get_snapshot()
-                if snap is not None and not snap.empty:
-                    row = snap[snap["code"].astype(str) == code]
-                    if not row.empty:
-                        r = row.iloc[0]
-                        realtime_price = float(r.get("price", 0))
-                        today_str = today.strftime("%Y-%m-%d")
-                        date_col = "date" if "date" in df.columns else ("trade_date" if "trade_date" in df.columns else None)
-                        last_date = str(df[date_col].iloc[-1])[:10] if date_col else ""
-                        if realtime_price > 0 and last_date != today_str:
-                            # 计算涨跌幅（基于上一交易日收盘价）
-                            prev_close = float(df["close"].iloc[-1]) if "close" in df.columns and len(df) > 0 else 0
-                            pct_chg = round((realtime_price - prev_close) / prev_close * 100, 2) if prev_close > 0 else 0
-                            new_row = {
-                                "close": realtime_price,
-                                "open": float(r.get("open", realtime_price)),
-                                "high": float(r.get("high", realtime_price)),
-                                "low": float(r.get("low", realtime_price)),
-                                "volume": float(r.get("volume", 0)),
-                                "amount": float(r.get("amount", 0)),
-                                "pct_chg": pct_chg,
-                                "turnover_rate": float(r.get("turnover_rate", 0)),
-                            }
-                            if date_col:
-                                new_row[date_col] = today_str
-                            if "code" in df.columns:
-                                new_row["code"] = code
-                            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                now = datetime.datetime.now()
+                is_trading_hours = (
+                    now.weekday() < 5
+                    and datetime.time(9, 15) <= now.time() <= datetime.time(15, 30)
+                )
+                if is_trading_hours:
+                    snap = de.get_snapshot()
+                    if snap is not None and not snap.empty:
+                        row = snap[snap["code"].astype(str) == code]
+                        if not row.empty:
+                            r = row.iloc[0]
+                            realtime_price = float(r.get("price", 0))
+                            today_str = today.strftime("%Y-%m-%d")
+                            date_col = "date" if "date" in df.columns else ("trade_date" if "trade_date" in df.columns else None)
+                            last_date = str(df[date_col].iloc[-1])[:10] if date_col else ""
+                            if realtime_price > 0 and last_date != today_str:
+                                # 计算涨跌幅（基于上一交易日收盘价）
+                                prev_close = float(df["close"].iloc[-1]) if "close" in df.columns and len(df) > 0 else 0
+                                pct_chg = round((realtime_price - prev_close) / prev_close * 100, 2) if prev_close > 0 else 0
+                                new_row = {
+                                    "close": realtime_price,
+                                    "open": float(r.get("open", realtime_price)),
+                                    "high": float(r.get("high", realtime_price)),
+                                    "low": float(r.get("low", realtime_price)),
+                                    "volume": float(r.get("volume", 0)),
+                                    "amount": float(r.get("amount", 0)),
+                                    "pct_chg": pct_chg,
+                                    "turnover_rate": float(r.get("turnover_rate", 0)),
+                                }
+                                if date_col:
+                                    new_row[date_col] = today_str
+                                if "code" in df.columns:
+                                    new_row["code"] = code
+                                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
             except Exception:
                 pass
 
