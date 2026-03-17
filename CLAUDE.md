@@ -36,6 +36,30 @@
 - `backend/main.py` 会将 backend/ 加入 sys.path
 - MCP 包命名 `mcpserver` 而非 `mcp`，避免与 mcp SDK 冲突
 
+## 🚫 禁止截断原始数据（铁律）
+
+**所有 LLM 调用和 API 接口的原始数据（请求体 / 返回体）绝对不允许做字符串截断处理。**
+
+- ❌ `data[:500]`、`text[:1000]`、`content[:MAX_LEN]` — 任何形式的硬截断都不允许
+- ❌ `if len(text) > N: text = text[:N] + "..."` — 这种"摘要式截断"同样禁止
+- ✅ 原始数据必须完整传递给 LLM / 完整返回给前端
+- ✅ 如果数据量过大导致性能问题，应通过**分页、摘要提示词、流式传输**等架构手段解决，而不是粗暴截断
+- ✅ 日志中可以截断显示（仅用于可读性），但实际传递的数据必须完整
+
+这条规则适用于：LLM prompt 拼装、API 响应返回、SSE 事件推送、数据引擎查询结果传递等所有环节。
+
+## 📊 耗时统计（Performance Stats）
+
+所有关键调用必须有耗时统计，方便定位性能瓶颈：
+
+- **LLM 调用**：每次 `chat()` / `chat_stream()` 记录 `elapsed_ms`、`token_count`、`model`
+- **外部 API**：AKShare / BaoStock / 腾讯接口等数据源调用记录耗时
+- **引擎间调用**：DataFetcher.fetch_all、各 Engine 方法记录耗时
+- **路由层**：FastAPI 中间件记录每个请求的总耗时
+
+统计信息通过 loguru 输出到日志，格式：`⏱️ {操作名} 耗时 {elapsed:.1f}s`。
+关键链路（辩论、专家对话、分析）的耗时应在 SSE 事件中推送给前端，让用户可见。
+
 ## 环境安装
 ```bash
 # 一键安装（推荐）

@@ -96,7 +96,7 @@ def format_memory_context(memories: list[dict]) -> str:
     """格式化历史记忆用于提示词"""
     if not memories:
         return "（无相关历史对话）"
-    return "\n".join(f"- {m['content'][:200]}" for m in memories[:3])
+    return "\n".join(f"- {m['content']}" for m in memories[:5])
 
 
 def format_beliefs_context(beliefs: list[dict]) -> str:

@@ -13,6 +13,7 @@ LLM Provider 统一抽象层
 """
 
 from abc import ABC, abstractmethod
+import time
 from typing import AsyncGenerator
 
 import httpx
@@ -74,6 +75,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
     """
 
     async def chat(self, messages: list[ChatMessage]) -> str:
+        t0 = time.monotonic()
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",
@@ -91,9 +93,14 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            result = data["choices"][0]["message"]["content"]
+            elapsed = time.monotonic() - t0
+            logger.info(f"⏱️ LLM chat ({self.config.model}) 耗时 {elapsed:.1f}s, 响应长度 {len(result)} 字符")
+            return result
 
     async def chat_stream(self, messages: list[ChatMessage]) -> AsyncGenerator[str, None]:
+        t0 = time.monotonic()
+        token_count = 0
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",
@@ -107,24 +114,29 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             "stream": True,
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream("POST", url, json=payload, headers=headers) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:].strip()
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        import json
-                        chunk = json.loads(data_str)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            yield content
-                    except (json.JSONDecodeError, IndexError, KeyError):
-                        continue
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            import json
+                            chunk = json.loads(data_str)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                token_count += 1
+                                yield content
+                        except (json.JSONDecodeError, IndexError, KeyError):
+                            continue
+        finally:
+            elapsed = time.monotonic() - t0
+            logger.info(f"⏱️ LLM stream ({self.config.model}) 耗时 {elapsed:.1f}s, {token_count} chunks")
 
     async def health_check(self) -> bool:
         try:
@@ -150,6 +162,7 @@ class AnthropicProvider(BaseLLMProvider):
     ANTHROPIC_VERSION = "2023-06-01"
 
     async def chat(self, messages: list[ChatMessage]) -> str:
+        t0 = time.monotonic()
         url = f"{self.config.base_url.rstrip('/')}/v1/messages"
         headers = {
             "x-api-key": self.config.api_key,
@@ -180,9 +193,14 @@ class AnthropicProvider(BaseLLMProvider):
             resp.raise_for_status()
             data = resp.json()
             # Anthropic 返回格式: { content: [{ type: "text", text: "..." }] }
-            return data["content"][0]["text"]
+            result = data["content"][0]["text"]
+            elapsed = time.monotonic() - t0
+            logger.info(f"⏱️ LLM chat ({self.config.model}) 耗时 {elapsed:.1f}s, 响应长度 {len(result)} 字符")
+            return result
 
     async def chat_stream(self, messages: list[ChatMessage]) -> AsyncGenerator[str, None]:
+        t0 = time.monotonic()
+        token_count = 0
         url = f"{self.config.base_url.rstrip('/')}/v1/messages"
         headers = {
             "x-api-key": self.config.api_key,
@@ -208,25 +226,30 @@ class AnthropicProvider(BaseLLMProvider):
         if system_text:
             payload["system"] = system_text
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            async with client.stream("POST", url, json=payload, headers=headers) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:].strip()
-                    if not data_str:
-                        continue
-                    try:
-                        import json
-                        event = json.loads(data_str)
-                        # Anthropic SSE: content_block_delta 事件
-                        if event.get("type") == "content_block_delta":
-                            text = event.get("delta", {}).get("text", "")
-                            if text:
-                                yield text
-                    except (json.JSONDecodeError, KeyError):
-                        continue
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:].strip()
+                        if not data_str:
+                            continue
+                        try:
+                            import json
+                            event = json.loads(data_str)
+                            # Anthropic SSE: content_block_delta 事件
+                            if event.get("type") == "content_block_delta":
+                                text = event.get("delta", {}).get("text", "")
+                                if text:
+                                    token_count += 1
+                                    yield text
+                        except (json.JSONDecodeError, KeyError):
+                            continue
+        finally:
+            elapsed = time.monotonic() - t0
+            logger.info(f"⏱️ LLM stream ({self.config.model}) 耗时 {elapsed:.1f}s, {token_count} chunks")
 
     async def health_check(self) -> bool:
         """Anthropic 没有 /models 端点，发一个极短请求测试"""

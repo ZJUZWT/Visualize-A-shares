@@ -8,6 +8,7 @@
 import asyncio
 import datetime
 import json
+import time
 
 import pandas as pd
 from loguru import logger
@@ -32,8 +33,11 @@ class InfoEngine:
 
     async def get_news(self, code: str, limit: int = 50) -> list[NewsArticle]:
         """获取个股新闻 + 情感分析（并发）"""
+        t0 = time.monotonic()
         cached = self._get_cached_news(code, limit)
         if cached:
+            elapsed = time.monotonic() - t0
+            logger.info(f"⏱️ InfoEngine.get_news({code}) 缓存命中 耗时 {elapsed:.1f}s, {len(cached)} 条")
             return cached
 
         raw_df = self._data.get_news(code, limit)
@@ -73,14 +77,19 @@ class InfoEngine:
             ))
 
         self._cache_news(code, articles)
+        elapsed = time.monotonic() - t0
+        logger.info(f"⏱️ InfoEngine.get_news({code}) 耗时 {elapsed:.1f}s, {len(articles)} 条")
         return articles
 
     # ── 公告 ──
 
     async def get_announcements(self, code: str, limit: int = 20) -> list[Announcement]:
         """获取公司公告 + 情感分析（并发）"""
+        t0 = time.monotonic()
         cached = self._get_cached_announcements(code, limit)
         if cached:
+            elapsed = time.monotonic() - t0
+            logger.info(f"⏱️ InfoEngine.get_announcements({code}) 缓存命中 耗时 {elapsed:.1f}s, {len(cached)} 条")
             return cached
 
         raw_df = self._data.get_announcements(code, limit)
@@ -108,14 +117,19 @@ class InfoEngine:
             ))
 
         self._cache_announcements(code, announcements)
+        elapsed = time.monotonic() - t0
+        logger.info(f"⏱️ InfoEngine.get_announcements({code}) 耗时 {elapsed:.1f}s, {len(announcements)} 条")
         return announcements
 
     # ── 事件评估 ──
 
     async def assess_event_impact(self, code: str, event_desc: str) -> EventImpact:
         """评估事件对个股的影响"""
+        t0 = time.monotonic()
         cached = self._get_cached_event_impact(code, event_desc)
         if cached:
+            elapsed = time.monotonic() - t0
+            logger.info(f"⏱️ InfoEngine.assess_event_impact({code}) 缓存命中 耗时 {elapsed:.1f}s")
             return cached
 
         stock_context = None
@@ -131,6 +145,8 @@ class InfoEngine:
 
         result = await self._assessor.assess(code, event_desc, stock_context)
         self._cache_event_impact(code, result)
+        elapsed = time.monotonic() - t0
+        logger.info(f"⏱️ InfoEngine.assess_event_impact({code}) 耗时 {elapsed:.1f}s")
         return result
 
     # ── 健康检查 ──
