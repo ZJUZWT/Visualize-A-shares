@@ -14,6 +14,7 @@ export function ExpertSidebar() {
     chatHistories,
     sessions,
     activeSessions,
+    statusMap,
     fetchSessions,
     createSession,
     switchSession,
@@ -48,6 +49,7 @@ export function ExpertSidebar() {
             profile={profile}
             isActive={activeExpert === profile.type}
             hasMessages={(chatHistories[profile.type]?.length ?? 0) > 0}
+            isThinking={statusMap[profile.type] === "thinking"}
             onClick={() => setActiveExpert(profile.type)}
           />
         ))}
@@ -126,11 +128,13 @@ function ExpertCard({
   profile,
   isActive,
   hasMessages,
+  isThinking,
   onClick,
 }: {
   profile: ExpertProfile;
   isActive: boolean;
   hasMessages: boolean;
+  isThinking: boolean;
   onClick: () => void;
 }) {
   return (
@@ -169,12 +173,18 @@ function ExpertCard({
             >
               {profile.name}
             </span>
-            {hasMessages && (
+            {isThinking ? (
+              /* 思考中：脉冲动画圆点 */
+              <span
+                className="w-2 h-2 rounded-full shrink-0 animate-pulse"
+                style={{ backgroundColor: profile.color }}
+              />
+            ) : hasMessages ? (
               <span
                 className="w-1.5 h-1.5 rounded-full shrink-0"
                 style={{ backgroundColor: profile.color }}
               />
-            )}
+            ) : null}
           </div>
         </div>
       </div>
