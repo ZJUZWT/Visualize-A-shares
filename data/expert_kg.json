@@ -2,16 +2,10 @@
   "nodes": [
     {
       "type": "belief",
-      "content": "基本面是长期定价的锚，但短期价格由情绪和资金驱动",
-      "confidence": 0.7,
-      "created_at": "2026-03-15T16:30:24.854185",
-      "id": "543b127f-ef75-4058-8efc-8fcc2be282d9"
-    },
-    {
-      "type": "belief",
       "content": "分散投资优于集中押注，除非有极高确定性",
       "confidence": 0.65,
       "created_at": "2026-03-15T16:30:24.854250",
+      "persona": "rag",
       "id": "b685cdce-d062-4121-8971-ee2bb0422cfc"
     },
     {
@@ -19,14 +13,8 @@
       "content": "政策是A股不可忽视的系统性变量",
       "confidence": 0.75,
       "created_at": "2026-03-15T16:30:24.854277",
+      "persona": "rag",
       "id": "381142df-4138-424b-9dce-9eb2041f55a8"
-    },
-    {
-      "type": "belief",
-      "content": "散户情绪是反向指标，极度乐观时需警惕",
-      "confidence": 0.6,
-      "created_at": "2026-03-15T16:30:24.854302",
-      "id": "ab207cd4-153c-4c05-8cd2-fee3b16ac212"
     },
     {
       "type": "stock",
@@ -208,16 +196,10 @@
     },
     {
       "type": "belief",
-      "content": "基本面是长期定价的锚，但短期价格由情绪和资金驱动；判断股价高低不应看近期涨跌幅，而应看估值、行业周期、技术面、资金面在更大格局中的位置",
-      "confidence": 0.8,
-      "created_at": "2026-03-16T22:42:08.691093",
-      "id": "efdc2651-39e0-4e99-8896-11351cd0249f"
-    },
-    {
-      "type": "belief",
       "content": "散户与主力的资金流向背离是重要信号：主力进场散户出逃往往是底部启动特征，主力出逃散户接盘往往是高位分歧或见顶特征",
       "confidence": 0.72,
       "created_at": "2026-03-16T22:42:08.691926",
+      "persona": "rag",
       "id": "24593003-528e-4876-a00d-e34f4026af70"
     },
     {
@@ -225,52 +207,85 @@
       "content": "基本面是长期定价的锚，但短期价格由情绪和资金驱动；判断股价高低不应看近期涨跌幅，而应看估值、行业周期、技术面、资金面在更大格局中的位置；同一方向的价格变动在不同周期位置含义截然不同——底部反弹的涨和高位突破的涨、高位回调的跌和底部破位的跌，需要完全不同的应对策略",
       "confidence": 0.85,
       "created_at": "2026-03-16T22:46:12.801900",
+      "persona": "rag",
       "id": "03f4aa8c-59fc-4a44-8ea1-bd0505a08ae8"
     },
     {
-      "id": "1e32e332-aa80-4a72-b64c-7a21bf90a974",
-      "type": "stock",
-      "code": "689009",
-      "name": "--",
-      "industry": "交运设备",
-      "zjh_industry": "制造业-计算机、通信和其他电子设备制造业"
-    },
-    {
-      "id": "7f11854f-96e6-477c-afbe-bc823c620ee2",
       "type": "sector",
       "name": "交运设备",
-      "category": "industry"
+      "category": "industry",
+      "id": "7f11854f-96e6-477c-afbe-bc823c620ee2"
     },
     {
-      "id": "f5f94418-f967-4944-b909-98bb93015f82",
       "type": "material",
       "name": "新能源汽车",
-      "category": "product"
+      "category": "product",
+      "id": "f5f94418-f967-4944-b909-98bb93015f82"
     },
     {
-      "id": "69ea7554-1649-4b18-82cb-8bdca81cc66f",
       "type": "stock",
       "code": "300014",
       "name": "亿纬锂能",
       "industry": "电池",
-      "zjh_industry": "制造业-电气机械和器材制造业"
+      "zjh_industry": "制造业-电气机械和器材制造业",
+      "id": "69ea7554-1649-4b18-82cb-8bdca81cc66f"
+    },
+    {
+      "type": "belief",
+      "content": "短线交易的核心是情绪和资金，不是价值",
+      "confidence": 0.8,
+      "persona": "short_term",
+      "created_at": "2026-03-17T15:29:49.554813",
+      "id": "0c5e973a-8a66-4ce8-bdd6-ca2cdd0d8cce"
+    },
+    {
+      "type": "belief",
+      "content": "量价齐升是最可靠的短线信号，缩量上涨难持续",
+      "confidence": 0.75,
+      "persona": "short_term",
+      "created_at": "2026-03-17T15:29:49.554870",
+      "id": "9f62dbe4-5861-4ae6-af47-49412f1f07fa"
+    },
+    {
+      "type": "belief",
+      "content": "板块龙头享受溢价，跟风股风险远大于收益",
+      "confidence": 0.7,
+      "persona": "short_term",
+      "created_at": "2026-03-17T15:29:49.554877",
+      "id": "e51d2fbe-112a-44fe-8c18-aac16cf227cc"
+    },
+    {
+      "type": "belief",
+      "content": "止损是短线交易者最重要的纪律，不止损必死",
+      "confidence": 0.85,
+      "persona": "short_term",
+      "created_at": "2026-03-17T15:29:49.554882",
+      "id": "684766c4-6aa1-4a83-8441-b428dc6ee3b6"
+    },
+    {
+      "type": "belief",
+      "content": "情绪高潮（连板股数量、涨停占比）是判断市场阶段的关键指标",
+      "confidence": 0.7,
+      "persona": "short_term",
+      "created_at": "2026-03-17T15:29:49.554886",
+      "id": "600e92fd-6c41-4517-862b-10162c2acb4d"
+    },
+    {
+      "id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c",
+      "type": "stock",
+      "code": "600759",
+      "name": "洲际油气",
+      "industry": "石油行业",
+      "zjh_industry": "采矿业-石油和天然气开采业"
+    },
+    {
+      "id": "83f99713-cb7d-448a-ba61-64df686e26a4",
+      "type": "sector",
+      "name": "石油行业",
+      "category": "industry"
     }
   ],
   "edges": [
-    {
-      "relation": "updated_by",
-      "reason": "专家通过中泰化学（涨了但PB破净、行业刚触底、主力刚进场→仍是低位）和国电南瑞（跌了但PE近29、PB 4.68、主力出逃散户接盘→仍是中高位）两个具体案例，用估值/周期/技术/资金四维度交叉验证，充分论证了'高低不看涨跌方向，看周期位置'这一判断框架，是对原信念的具体化和深化",
-      "timestamp": "2026-03-16T22:42:08.691278",
-      "source_id": "543b127f-ef75-4058-8efc-8fcc2be282d9",
-      "target_id": "efdc2651-39e0-4e99-8896-11351cd0249f"
-    },
-    {
-      "relation": "updated_by",
-      "reason": "专家用两个实例具体展示了资金结构的反向指标意义：中泰化学主力+2507万散户在卖（底部早期特征），国电南瑞主力-2.17亿散户+3.03亿（高位兑现特征），将原来模糊的'散户情绪是反向指标'升级为更具操作性的'主力与散户资金流向背离'框架",
-      "timestamp": "2026-03-16T22:42:08.691948",
-      "source_id": "ab207cd4-153c-4c05-8cd2-fee3b16ac212",
-      "target_id": "24593003-528e-4876-a00d-e34f4026af70"
-    },
     {
       "relation": "belongs_to",
       "reason": "国电南瑞属于输配电气行业",
@@ -335,11 +350,11 @@
       "target_id": "3179130f-c22b-48f0-832b-28b2668e288a"
     },
     {
-      "source_id": "5e76c3a3-9b4c-4517-9cad-2aa9782a8391",
-      "target_id": "f5f94418-f967-4944-b909-98bb93015f82",
       "relation": "supplies",
       "reason": "比亚迪生产新能源汽车",
-      "timestamp": "2026-03-17T12:42:01.708760"
+      "timestamp": "2026-03-17T12:42:01.708760",
+      "source_id": "5e76c3a3-9b4c-4517-9cad-2aa9782a8391",
+      "target_id": "f5f94418-f967-4944-b909-98bb93015f82"
     },
     {
       "relation": "belongs_to",
@@ -461,18 +476,18 @@
       "target_id": "3179130f-c22b-48f0-832b-28b2668e288a"
     },
     {
-      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
-      "target_id": "69ea7554-1649-4b18-82cb-8bdca81cc66f",
       "relation": "competes_with",
       "reason": "同属电池行业",
-      "timestamp": "2026-03-17T12:42:01.709001"
+      "timestamp": "2026-03-17T12:42:01.709001",
+      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
+      "target_id": "69ea7554-1649-4b18-82cb-8bdca81cc66f"
     },
     {
-      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
-      "target_id": "6df1ebfc-e787-4fbb-b516-78fedf50d967",
       "relation": "competes_with",
       "reason": "同属电池行业",
-      "timestamp": "2026-03-17T12:42:01.709024"
+      "timestamp": "2026-03-17T12:42:01.709024",
+      "source_id": "87c47001-28f8-4d79-b802-8e086cc3ab50",
+      "target_id": "6df1ebfc-e787-4fbb-b516-78fedf50d967"
     },
     {
       "relation": "belongs_to",
@@ -503,53 +518,39 @@
       "target_id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5"
     },
     {
-      "relation": "updated_by",
-      "reason": "专家通过中泰化学（周期底部反弹，涨了仍在山脚）与国电南瑞（景气高位回调，跌了仍在山腰偏上）的详细对比，用估值分位、行业周期、技术指标矛盾、资金流向四个维度的具体数据，论证了同样是'跌'在不同周期位置含义完全不同，将原有信念从'看大格局位置'进一步具体化为'同方向价格变动在不同周期位置需不同应对策略'",
-      "timestamp": "2026-03-16T22:46:12.801982",
-      "source_id": "efdc2651-39e0-4e99-8896-11351cd0249f",
-      "target_id": "03f4aa8c-59fc-4a44-8ea1-bd0505a08ae8"
-    },
-    {
-      "source_id": "1e32e332-aa80-4a72-b64c-7a21bf90a974",
-      "target_id": "7f11854f-96e6-477c-afbe-bc823c620ee2",
-      "relation": "belongs_to",
-      "reason": "--属于交运设备行业",
-      "timestamp": "2026-03-17T12:42:01.708542"
-    },
-    {
-      "source_id": "1e32e332-aa80-4a72-b64c-7a21bf90a974",
-      "target_id": "951d6bbe-9130-435b-878b-a61faecc5e14",
-      "relation": "supplies",
-      "reason": "--生产电池",
-      "timestamp": "2026-03-17T12:42:01.708613"
-    },
-    {
-      "source_id": "1e32e332-aa80-4a72-b64c-7a21bf90a974",
-      "target_id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5",
-      "relation": "supplies",
-      "reason": "--生产机器人",
-      "timestamp": "2026-03-17T12:42:01.708646"
-    },
-    {
-      "source_id": "69ea7554-1649-4b18-82cb-8bdca81cc66f",
-      "target_id": "c5038974-b5a8-4a11-9351-845b173dd97b",
       "relation": "belongs_to",
       "reason": "亿纬锂能属于电池行业",
-      "timestamp": "2026-03-17T12:42:01.708868"
+      "timestamp": "2026-03-17T12:42:01.708868",
+      "source_id": "69ea7554-1649-4b18-82cb-8bdca81cc66f",
+      "target_id": "c5038974-b5a8-4a11-9351-845b173dd97b"
     },
     {
-      "source_id": "69ea7554-1649-4b18-82cb-8bdca81cc66f",
-      "target_id": "951d6bbe-9130-435b-878b-a61faecc5e14",
       "relation": "supplies",
       "reason": "亿纬锂能生产电池",
-      "timestamp": "2026-03-17T12:42:01.708911"
+      "timestamp": "2026-03-17T12:42:01.708911",
+      "source_id": "69ea7554-1649-4b18-82cb-8bdca81cc66f",
+      "target_id": "951d6bbe-9130-435b-878b-a61faecc5e14"
     },
     {
-      "source_id": "69ea7554-1649-4b18-82cb-8bdca81cc66f",
-      "target_id": "6df1ebfc-e787-4fbb-b516-78fedf50d967",
       "relation": "competes_with",
       "reason": "同属电池行业",
-      "timestamp": "2026-03-17T12:42:01.709046"
+      "timestamp": "2026-03-17T12:42:01.709046",
+      "source_id": "69ea7554-1649-4b18-82cb-8bdca81cc66f",
+      "target_id": "6df1ebfc-e787-4fbb-b516-78fedf50d967"
+    },
+    {
+      "source_id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c",
+      "target_id": "83f99713-cb7d-448a-ba61-64df686e26a4",
+      "relation": "belongs_to",
+      "reason": "洲际油气属于石油行业行业",
+      "timestamp": "2026-03-17T16:42:38.136664"
+    },
+    {
+      "source_id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
+      "relation": "consumes",
+      "reason": "洲际油气使用石油",
+      "timestamp": "2026-03-17T16:42:38.136773"
     }
   ]
 }

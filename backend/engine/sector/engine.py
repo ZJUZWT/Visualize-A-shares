@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 from loguru import logger
 
@@ -17,12 +19,42 @@ from engine.sector.schemas import (
 )
 
 
+# ─── 内存缓存（避免短时间并发重复请求 AKShare 被封）────────
+CACHE_TTL = 60  # 秒
+
+
+@dataclass
+class _CacheEntry:
+    data: Any
+    ts: float = field(default_factory=time.monotonic)
+
+    def expired(self) -> bool:
+        return (time.monotonic() - self.ts) > CACHE_TTL
+
+
 class SectorEngine:
     """板块研究引擎"""
 
     def __init__(self):
         self._data = get_data_engine()
         self._predictor = None  # 延迟初始化
+        self._cache: dict[str, _CacheEntry] = {}
+        self._locks: dict[str, asyncio.Lock] = {}  # 防并发击穿
+
+    def _get_cache(self, key: str) -> Any | None:
+        entry = self._cache.get(key)
+        if entry and not entry.expired():
+            logger.debug(f"[SectorEngine] 缓存命中: {key}")
+            return entry.data
+        return None
+
+    def _set_cache(self, key: str, data: Any):
+        self._cache[key] = _CacheEntry(data=data)
+
+    def _get_lock(self, key: str) -> asyncio.Lock:
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
 
     def _get_predictor(self):
         if self._predictor is None:
@@ -34,6 +66,24 @@ class SectorEngine:
         self, board_type: str = "industry", date: str = "",
     ) -> SectorBoardsResponse:
         """获取板块列表 + 实时行情 + 资金流 + 预测信号"""
+        cache_key = f"boards:{board_type}:{date}"
+        cached = self._get_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        # 并发锁：防止多个请求同时击穿缓存
+        lock = self._get_lock(cache_key)
+        async with lock:
+            # double-check
+            cached = self._get_cache(cache_key)
+            if cached is not None:
+                return cached
+            return await self._fetch_boards(board_type, date, cache_key)
+
+    async def _fetch_boards(
+        self, board_type: str, date: str, cache_key: str,
+    ) -> SectorBoardsResponse:
+        """实际拉取板块数据（带缓存写入 + 自动持久化到 DuckDB）"""
         t0 = time.monotonic()
 
         # 并行获取板块列表和资金流排行
@@ -44,6 +94,9 @@ class SectorEngine:
                 self._data.get_sector_fund_flow_rank, "今日", sector_type
             ),
         )
+
+        # ── 自动持久化到 DuckDB（后台执行，不阻塞响应）──
+        self._auto_persist(board_list_df, fund_flow_df, board_type)
 
         # 合并资金流数据
         items: list[SectorBoardItem] = []
@@ -97,12 +150,14 @@ class SectorEngine:
             f"{len(items)} 个板块"
         )
 
-        return SectorBoardsResponse(
+        result = SectorBoardsResponse(
             boards=items,
             date=date or datetime.now().strftime("%Y-%m-%d"),
             board_type=board_type,
             total=len(items),
         )
+        self._set_cache(cache_key, result)
+        return result
 
     async def get_history(
         self, board_code: str, board_name: str,
@@ -176,7 +231,7 @@ class SectorEngine:
     async def get_heatmap(
         self, board_type: str = "industry", date: str = "",
     ) -> SectorHeatmapResponse:
-        """获取热力图数据"""
+        """获取热力图数据（复用 boards 缓存，不会额外请求 AKShare）"""
         t0 = time.monotonic()
         resp = await self.get_boards(board_type=board_type, date=date)
         cells = [
@@ -322,6 +377,41 @@ class SectorEngine:
             "saved_flows": saved_flows,
             "elapsed_s": round(elapsed, 1),
         }
+
+    def _auto_persist(self, board_df, fund_flow_df, board_type: str):
+        """自动将板块数据持久化到 DuckDB（同步执行，不影响响应速度因在锁内）"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        try:
+            saved_boards = 0
+            saved_flows = 0
+
+            if not board_df.empty:
+                df = board_df.copy()
+                df["date"] = today
+                df["board_type"] = board_type
+                self._data.save_sector_board_daily(df)
+                saved_boards = len(df)
+
+            if not fund_flow_df.empty:
+                df = fund_flow_df.copy()
+                df["date"] = today
+                df["board_type"] = board_type
+                if "board_code" not in df.columns:
+                    if not board_df.empty and "board_name" in board_df.columns:
+                        name_to_code = dict(zip(board_df["board_name"], board_df["board_code"]))
+                        df["board_code"] = df["board_name"].map(name_to_code).fillna("")
+                    else:
+                        df["board_code"] = df["board_name"]
+                self._data.save_sector_fund_flow(df)
+                saved_flows = len(df)
+
+            if saved_boards or saved_flows:
+                logger.info(
+                    f"📦 自动持久化({board_type}): 板块行情 {saved_boards} 条, "
+                    f"资金流向 {saved_flows} 条"
+                )
+        except Exception as e:
+            logger.warning(f"自动持久化失败（不影响数据展示）: {e}")
 
     @staticmethod
     def _safe_float(val, default: float = 0.0) -> float:

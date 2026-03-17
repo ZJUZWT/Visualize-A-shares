@@ -18,6 +18,7 @@ from .sources.base import BaseDataSource
 from .sources.tencent_source import TencentSource
 from .sources.akshare_source import AKShareSource
 from .sources.baostock_source import BaoStockSource
+from .sources.eastmoney_direct import EastMoneyDirectSource
 
 
 class DataCollector:
@@ -47,6 +48,12 @@ class DataCollector:
             self._sources.append(AKShareSource())
         except Exception as e:
             logger.warning(f"AKShare 初始化失败: {e}")
+
+        # Level 1.5: EastMoney Direct（东财直连，AKShare 的完整备选）
+        try:
+            self._sources.append(EastMoneyDirectSource())
+        except Exception as e:
+            logger.warning(f"EastMoneyDirect 初始化失败: {e}")
 
         # Level 2: BaoStock
         try:

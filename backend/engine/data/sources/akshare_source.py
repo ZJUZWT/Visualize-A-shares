@@ -5,6 +5,7 @@ AKShare 数据源 — Level 1 主力
 """
 
 import time
+import random
 from typing import Optional
 
 import pandas as pd
@@ -19,7 +20,7 @@ class AKShareSource(BaseDataSource):
 
     # 重试配置
     MAX_RETRIES = 3
-    RETRY_DELAY = 2  # 秒
+    RETRY_BASE_DELAY = 3  # 秒，首次重试基础延迟
 
     def __init__(self):
         try:
@@ -31,7 +32,7 @@ class AKShareSource(BaseDataSource):
             raise
 
     def _fetch_with_retry(self, func, func_name: str, **kwargs):
-        """带重试的数据拉取"""
+        """带重试的数据拉取（指数退避 + 随机抖动）"""
         last_err = None
         for attempt in range(1, self.MAX_RETRIES + 1):
             try:
@@ -40,10 +41,11 @@ class AKShareSource(BaseDataSource):
             except Exception as e:
                 last_err = e
                 if attempt < self.MAX_RETRIES:
-                    wait = self.RETRY_DELAY * attempt
+                    # 指数退避 + 随机抖动 0~2s
+                    wait = self.RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 2)
                     logger.warning(
                         f"[AKShare] {func_name} 第 {attempt} 次失败: {e}，"
-                        f"{wait}s 后重试..."
+                        f"{wait:.1f}s 后重试..."
                     )
                     time.sleep(wait)
                 else:

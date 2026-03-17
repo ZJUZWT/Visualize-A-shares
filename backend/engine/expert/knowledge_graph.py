@@ -97,8 +97,13 @@ class KnowledgeGraph:
                 neighbors.append(target)
         return neighbors
 
-    def recall(self, message: str) -> list[dict]:
-        """5步图谱召回算法，返回最多10个相关节点（含 id 字段）"""
+    def recall(self, message: str, persona: str = "rag") -> list[dict]:
+        """5步图谱召回算法，返回最多10个相关节点（含 id 字段）
+
+        Args:
+            message: 用户消息
+            persona: 人格类型，信念召回按此过滤（股票/行业等节点共享）
+        """
         matched_ids: set[str] = set()
 
         # Step 1: 正则提取6位股票代码，匹配 stock 节点的 code 字段
@@ -121,7 +126,7 @@ class KnowledgeGraph:
                     )):
                         matched_ids.add(node_id)
 
-        # Step 3: 信念召回 — 始终返回 top 3 belief（投资分析总需要信念锚定）
+        # Step 3: 信念召回 — 只返回当前 persona 的信念（top 2~3）
         #   如果消息包含关键词则返回 top 3，否则返回 top 2
         has_belief_keyword = any(kw in message for kw in BELIEF_KEYWORDS)
         belief_limit = 3 if has_belief_keyword else 2
@@ -129,6 +134,7 @@ class KnowledgeGraph:
             (node_id, self.graph.nodes[node_id])
             for node_id in self.graph.nodes()
             if self.graph.nodes[node_id].get("type") == "belief"
+            and self.graph.nodes[node_id].get("persona", "rag") == persona
         ]
         belief_nodes.sort(key=lambda x: x[1].get("confidence", 0), reverse=True)
         for node_id, _ in belief_nodes[:belief_limit]:
@@ -157,12 +163,18 @@ class KnowledgeGraph:
             result.append(data)
         return result
 
-    def get_all_beliefs(self) -> list[dict]:
-        """获取所有 belief 节点（含 id 字段）"""
+    def get_all_beliefs(self, persona: str | None = None) -> list[dict]:
+        """获取 belief 节点（含 id 字段）
+
+        Args:
+            persona: 若指定则只返回该 persona 的信念，None 返回全部
+        """
         beliefs = []
         for node_id in self.graph.nodes():
             data = self.graph.nodes[node_id]
             if data.get("type") == "belief":
+                if persona and data.get("persona", "rag") != persona:
+                    continue
                 d = dict(data)
                 d["id"] = node_id
                 beliefs.append(d)
@@ -175,11 +187,20 @@ class KnowledgeGraph:
         new_confidence: float,
         reason: str,
     ) -> str:
-        """创建新信念节点并加 updated_by 边，返回新节点 id（加锁）"""
+        """创建新信念节点并加 updated_by 边，返回新节点 id（加锁）
+
+        新信念继承旧信念的 persona 字段。
+        """
         async with self._lock:
+            # 继承旧信念的 persona
+            old_persona = "rag"
+            if old_belief_id in self.graph:
+                old_persona = self.graph.nodes[old_belief_id].get("persona", "rag")
+
             new_node = BeliefNode(
                 content=new_content,
                 confidence=new_confidence,
+                persona=old_persona,
             )
             node_data = new_node.model_dump()
             self.graph.add_node(new_node.id, **node_data)

@@ -57,7 +57,6 @@ export const useSectorStore = create<SectorStore>((set, get) => ({
   setBoardType: (type) => {
     set({ boardType: type, selectedBoard: null, history: [], constituents: [] });
     get().loadBoards();
-    get().loadHeatmap();
   },
 
   setDate: (date) => {
@@ -84,7 +83,16 @@ export const useSectorStore = create<SectorStore>((set, get) => ({
     set({ loading: true });
     try {
       const data = await fetchSectorBoards(boardType, date);
-      set({ boards: data.boards || [], loading: false });
+      const boards = data.boards || [];
+      // 直接从 boards 数据生成 heatmap cells，避免重复请求 AKShare
+      const heatmapCells: HeatmapCell[] = boards.map((b) => ({
+        board_code: b.board_code,
+        board_name: b.board_name,
+        pct_chg: b.pct_chg ?? 0,
+        main_force_net_inflow: b.main_force_net_inflow ?? 0,
+        main_force_net_ratio: b.main_force_net_ratio ?? 0,
+      }));
+      set({ boards, heatmapCells, loading: false });
     } catch (e) {
       console.error("加载板块列表失败", e);
       set({ loading: false });
@@ -140,7 +148,6 @@ export const useSectorStore = create<SectorStore>((set, get) => ({
     try {
       await triggerSectorFetch(boardType);
       await get().loadBoards();
-      await get().loadHeatmap();
     } catch (e) {
       console.error("数据采集失败", e);
       set({ loading: false });
