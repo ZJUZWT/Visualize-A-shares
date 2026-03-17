@@ -325,3 +325,69 @@ class DataCollector:
             f"成功 {success} 只, 失败 {failed} 只, 耗时 {elapsed:.1f}s"
         )
         return result
+
+    # ── 板块数据方法 ──
+
+    def get_sector_board_list(self, board_type: str = "industry") -> pd.DataFrame:
+        """获取板块列表 + 实时行情（降级链）"""
+        for source in self._sources:
+            try:
+                df = source.get_sector_board_list(board_type=board_type)
+                if df is not None and len(df) > 5:
+                    logger.info(f"[{source.name}] 获取{board_type}板块列表: {len(df)} 个板块")
+                    return df
+            except (NotImplementedError, AttributeError):
+                continue
+            except Exception as e:
+                logger.warning(f"[{source.name}] 获取板块列表失败: {e}")
+        logger.error("所有数据源获取板块列表均失败")
+        return pd.DataFrame()
+
+    def get_sector_board_history(
+        self, board_name: str, board_type: str = "industry",
+        start_date: str = "", end_date: str = "",
+    ) -> pd.DataFrame:
+        """获取单个板块历史 K 线（降级链）"""
+        for source in self._sources:
+            try:
+                df = source.get_sector_board_history(
+                    board_name=board_name, board_type=board_type,
+                    start_date=start_date, end_date=end_date,
+                )
+                if df is not None and len(df) > 0:
+                    return df
+            except (NotImplementedError, AttributeError):
+                continue
+            except Exception as e:
+                logger.warning(f"[{source.name}] 获取板块 {board_name} 历史失败: {e}")
+        return pd.DataFrame()
+
+    def get_sector_fund_flow_rank(
+        self, indicator: str = "今日", sector_type: str = "行业资金流"
+    ) -> pd.DataFrame:
+        """获取板块资金流排行（降级链）"""
+        for source in self._sources:
+            try:
+                df = source.get_sector_fund_flow_rank(
+                    indicator=indicator, sector_type=sector_type,
+                )
+                if df is not None and len(df) > 5:
+                    return df
+            except (NotImplementedError, AttributeError):
+                continue
+            except Exception as e:
+                logger.warning(f"[{source.name}] 获取板块资金流排行失败: {e}")
+        return pd.DataFrame()
+
+    def get_sector_constituents(self, board_name: str) -> pd.DataFrame:
+        """获取板块成分股（降级链）"""
+        for source in self._sources:
+            try:
+                df = source.get_sector_constituents(board_name=board_name)
+                if df is not None and len(df) > 0:
+                    return df
+            except (NotImplementedError, AttributeError):
+                continue
+            except Exception as e:
+                logger.warning(f"[{source.name}] 获取板块 {board_name} 成分股失败: {e}")
+        return pd.DataFrame()
