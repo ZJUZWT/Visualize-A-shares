@@ -54,4 +54,7 @@ logs/
 .worktrees/
 .worktrees/
 *.wal.bak
-web/tsconfig.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
+
+# Docker
+docker-compose.override.yml

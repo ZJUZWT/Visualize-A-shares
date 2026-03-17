@@ -1,48 +1,64 @@
 # StockTerrain — A股多维聚类3D地形可视化平台
 
 ## 项目结构
-- `engine/` — Python 后端 (FastAPI + DuckDB + HDBSCAN/UMAP 算法流水线)
-- `web/` — Next.js 前端 (Three.js 3D 地形渲染)
+- `backend/` — Python 后端 (FastAPI + DuckDB + HDBSCAN/UMAP 算法流水线)
+- `frontend/` — Next.js 前端 (Three.js 3D 地形渲染)
 - `data/precomputed/` — BGE 嵌入向量、公司概况 JSON
+- `tests/unit/` — 单元测试
+- `tests/integration/` — 集成测试
+- `scripts/` — 跨平台一键配置和启动脚本
 
 ## 后端核心模块
-- `engine/data_engine/` — 数据引擎 (行情拉取、DuckDB 持久化、公司概况)
+- `backend/engine/data/` — 数据引擎 (行情拉取、DuckDB 持久化、公司概况)
   - `engine.py` DataEngine 门面类
   - `collector.py` 数据采集器 (Tencent/AKShare/BaoStock 三级降级)
   - `store.py` DuckDB 持久化
   - `routes.py` REST API `/api/v1/data/*`
-- `engine/cluster_engine/` — 聚类引擎 (特征提取、聚类、降维、插值、预测)
+- `backend/engine/cluster/` — 聚类引擎 (特征提取、聚类、降维、插值、预测)
   - `engine.py` ClusterEngine 门面类
   - `algorithm/pipeline.py` 算法流水线 (特征→聚类→降维→插值)
   - `algorithm/predictor_v2.py` 13因子预测器
   - `algorithm/factor_backtest.py` 因子 IC 回测
   - `routes.py` REST API `/api/v1/terrain/*`
-- `engine/mcpserver/` — MCP Server (10 tools, stdio transport)
-- `engine/llm/` — LLM 模块 (AI 聊天)
+- `backend/engine/quant/` — 量化引擎 (因子计算、技术指标)
+- `backend/engine/info/` — 信息引擎 (新闻、公告、情感分析)
+- `backend/engine/industry/` — 行业引擎 (行业认知、资本结构)
+- `backend/engine/expert/` — 专家引擎 (多专家并行分析)
+- `backend/engine/arena/` — 辩论引擎 (多角色辩论 + 黑板架构)
+  - `arena/rag/` — RAG 检索增强
+- `backend/mcpserver/` — MCP Server (10 tools, stdio transport)
+- `backend/llm/` — LLM 模块 (AI 聊天)
 
 ## 开发约定
 - 中文注释和日志
 - Loguru 日志框架
 - DuckDB 单文件数据库，路径: `data/stockterrain.duckdb`
-- `engine/main.py` 会将 engine/ 加入 sys.path
+- `backend/main.py` 会将 backend/ 加入 sys.path
 - MCP 包命名 `mcpserver` 而非 `mcp`，避免与 mcp SDK 冲突
 
 ## 环境安装
 ```bash
-cd engine
+# 一键安装（推荐）
+scripts/setup.sh          # macOS / Linux
+scripts\setup.bat         # Windows
+
+# 手动安装
+cd backend
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]" -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 > torch + sentence-transformers 较大（~2GB），仅重建嵌入时需要，日常开发可考虑移至 optional dependencies。
 
 ## 运行
-- 后端: `cd engine && .venv/bin/python main.py` (端口 8000)
-- 前端: `cd web && npm run dev` (端口 3000)
-- MCP: `cd engine && .venv/bin/python -m mcpserver` (stdio, 配置见 `.mcp.json`)
-- 重建嵌入: `cd engine && .venv/bin/python -m cluster_engine.preprocess.rebuild_bge`
+- 一键启动: `scripts/start.sh` (macOS/Linux) 或 `scripts\start.bat` (Windows)
+- 后端: `cd backend && .venv/bin/python main.py` (端口 8000)
+- 前端: `cd frontend && npm run dev` (端口 3000)
+- MCP: `cd backend && .venv/bin/python -m mcpserver` (stdio, 配置见 `.mcp.json`)
+- 重建嵌入: `cd backend && .venv/bin/python -m engine.cluster.preprocess.rebuild_bge`
+- Docker: `docker compose up`
 
 ## MCP 使用须知
-- 使用 MCP 工具前必须先启动后端 (`cd engine && python main.py`)
+- 使用 MCP 工具前必须先启动后端 (`cd backend && python main.py`)
 - MCP Server 通过 REST API 与后端通信，后端未启动时会降级为 DuckDB 离线快照（数据非实时）
 - `.mcp.json` 使用相对路径，clone 后可直接使用
 
@@ -76,9 +92,21 @@ async for token in llm.chat_stream(messages):
 - 辅助性的极短 LLM 调用（如提取 JSON 字段），且失败有 fallback 兜底
 - 即便如此，也应记录清晰的日志区分超时 vs 其他错误
 
+## 测试
+```bash
+# 从项目根目录运行全部测试
+backend/.venv/bin/python -m pytest tests/ -v
+
+# 仅运行单元测试
+backend/.venv/bin/python -m pytest tests/unit/ -v
+
+# 仅运行集成测试
+backend/.venv/bin/python -m pytest tests/integration/ -v
+```
+
 ## 自验证闭环
 Claude 具备通过 MCP 工具完成开发→验证闭环的能力，修改代码后应主动验证：
-1. 启动后端: `cd engine && python3 main.py` (后台运行)
+1. 启动后端: `cd backend && python3 main.py` (后台运行)
 2. 通过 MCP 工具调用 API 验证功能（如 `get_terrain_data`、`search_stock`）
 3. 检查返回数据结构、聚类质量指标、字段完整性等
 4. 不需要等用户手动测试，能自主完成端到端验证

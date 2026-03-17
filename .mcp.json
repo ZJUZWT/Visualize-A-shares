@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "stockterrain": {
-      "command": "./engine/.venv/bin/python",
+      "command": "./backend/.venv/bin/python",
       "args": ["-m", "mcpserver"],
-      "cwd": "./engine"
+      "cwd": "./backend"
     },
     "memory": {
       "command": "npx",

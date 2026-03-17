@@ -15,7 +15,43 @@
 
 ---
 
-### 场景二：完整部署（前端 + 后端）
+### 场景二：一键部署（推荐）
+
+```bash
+git clone <repo-url>
+cd stockterrain
+
+# 一键配置环境
+scripts/setup.sh          # macOS / Linux
+# scripts\setup.bat       # Windows
+
+# 编辑 .env 填入 LLM API Key（辩论/分析功能必填）
+
+# 一键启动
+scripts/start.sh           # macOS / Linux
+# scripts\start.bat        # Windows
+```
+
+---
+
+### 场景三：Docker 部署
+
+```bash
+git clone <repo-url>
+cd stockterrain
+
+cp .env.example .env
+# 编辑 .env 填入 LLM API Key
+
+docker compose up
+```
+
+- 后端: http://localhost:8000
+- 前端: http://localhost:3000
+
+---
+
+### 场景四：手动部署（前端 + 后端）
 
 #### 环境要求
 
@@ -60,7 +96,7 @@ LLM_MODEL=gpt-4o-mini
 #### 3. 启动后端
 
 ```bash
-cd engine
+cd backend
 
 # 创建虚拟环境
 python3 -m venv .venv
@@ -82,7 +118,7 @@ python main.py
 #### 4. 启动前端
 
 ```bash
-cd web
+cd frontend
 
 npm install
 
@@ -107,12 +143,12 @@ curl http://localhost:8000/api/v1/health
 
 ---
 
-### 场景三：仅部署前端（只看 3D 地形，不用 AI 功能）
+### 场景五：仅部署前端（只看 3D 地形，不用 AI 功能）
 
 前端可以独立运行，但 3D 地形数据、辩论等功能需要后端。如果只想静态部署前端页面：
 
 ```bash
-cd web
+cd frontend
 GITHUB_PAGES=true npm run build   # 生成静态文件到 out/
 ```
 
@@ -133,7 +169,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
 # 或用 systemd / supervisor 管理进程
 ```
 
-修改 `engine/config.py` 中的 CORS 配置，将前端域名加入白名单：
+修改 `backend/config.py` 中的 CORS 配置，将前端域名加入白名单：
 
 ```python
 cors_origins: list[str] = ["https://your-frontend-domain.com"]
@@ -153,17 +189,21 @@ npm run build && npm start
 
 ```
 stockterrain/
-├── engine/                # Python 后端 (FastAPI + Uvicorn)
-│   ├── data_engine/       #   行情数据 (AKShare + BaoStock)
-│   ├── cluster_engine/    #   聚类算法 (HDBSCAN + UMAP + RBF)
-│   ├── quant_engine/      #   量化因子 (13因子 + 技术指标)
-│   ├── info_engine/       #   信息引擎 (新闻 + 公告 + 情感)
-│   ├── agent/             #   辩论 Agent (多角色 + 黑板)
+├── backend/               # Python 后端 (FastAPI + Uvicorn)
+│   ├── engine/
+│   │   ├── data/          #   行情数据 (AKShare + BaoStock)
+│   │   ├── cluster/       #   聚类算法 (HDBSCAN + UMAP + RBF)
+│   │   ├── quant/         #   量化因子 (13因子 + 技术指标)
+│   │   ├── info/          #   信息引擎 (新闻 + 公告 + 情感)
+│   │   ├── industry/      #   行业引擎 (行业认知 + 资本结构)
+│   │   ├── expert/        #   专家引擎 (多专家并行分析)
+│   │   └── arena/         #   辩论引擎 (多角色 + 黑板)
+│   │       └── rag/       #   RAG 检索增强
 │   ├── llm/               #   LLM 接入层
 │   ├── mcpserver/         #   MCP Server (stdio)
 │   └── main.py            #   应用入口
 │
-├── web/                   # Next.js 15 前端
+├── frontend/              # Next.js 15 前端
 │   ├── components/        #   UI 组件 (3D 地形 + 辩论页)
 │   ├── stores/            #   Zustand 状态管理
 │   └── lib/               #   工具函数 (含导出 HTML)
@@ -171,6 +211,15 @@ stockterrain/
 ├── data/                  # 本地数据
 │   └── stockterrain.duckdb  # DuckDB 单文件数据库
 │
+├── tests/                 # 测试
+│   ├── unit/              #   单元测试
+│   └── integration/       #   集成测试
+│
+├── scripts/               # 一键脚本
+│   ├── setup.sh / .bat    #   环境配置
+│   └── start.sh / .bat    #   服务启动
+│
+├── docker-compose.yml     # Docker 编排
 └── .env                   # LLM 配置（从 .env.example 复制）
 ```
 
@@ -186,6 +235,7 @@ stockterrain/
 | 3D 渲染 | React Three Fiber + drei + GLSL |
 | 状态 | Zustand |
 | 样式 | Tailwind CSS v4 |
+| 部署 | Docker Compose / 一键脚本 |
 
 ## License
 

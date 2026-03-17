@@ -18,19 +18,19 @@
 - Rename: `engine/` → `backend/`
 - Rename: `web/` → `frontend/`
 
-- [ ] **Step 1: 重命名 engine → backend**
+- [x] **Step 1: 重命名 engine → backend**
 
 ```bash
 git mv engine backend
 ```
 
-- [ ] **Step 2: 重命名 web → frontend**
+- [x] **Step 2: 重命名 web → frontend**
 
 ```bash
 git mv web frontend
 ```
 
-- [ ] **Step 3: 更新 .mcp.json**
+- [x] **Step 3: 更新 .mcp.json**
 
 将 `.mcp.json` 中的路径从 `engine` 改为 `backend`：
 
@@ -46,25 +46,25 @@ git mv web frontend
 }
 ```
 
-- [ ] **Step 4: 更新 .gitignore 中的路径引用**
+- [x] **Step 4: 更新 .gitignore 中的路径引用**
 
 将所有 `engine/` 引用改为 `backend/`，`web/` 改为 `frontend/`。
 
-- [ ] **Step 5: 验证目录结构**
+- [x] **Step 5: 验证目录结构**
 
 ```bash
 ls -d backend/ frontend/ data/
 ```
 Expected: 三个目录都存在
 
-- [ ] **Step 6: 验证后端可启动**
+- [x] **Step 6: 验证后端可启动**
 
 ```bash
 cd backend && .venv/bin/python -c "import main; print('OK')"
 ```
 Expected: OK（此时 import 路径还没改，但 main.py 用的是相对 sys.path）
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -88,14 +88,14 @@ git commit -m "refactor: 顶层目录重命名 engine→backend, web→frontend"
 
 PLACEHOLDER_TASK2_STEPS
 
-- [ ] **Step 1: 创建 backend/engine/ 包目录**
+- [x] **Step 1: 创建 backend/engine/ 包目录**
 
 ```bash
 mkdir -p backend/engine
 touch backend/engine/__init__.py
 ```
 
-- [ ] **Step 2: 移动领域模块**
+- [x] **Step 2: 移动领域模块**
 
 ```bash
 cd backend
@@ -107,14 +107,14 @@ git mv industry_engine engine/industry
 git mv expert engine/expert
 ```
 
-- [ ] **Step 3: 验证目录结构**
+- [x] **Step 3: 验证目录结构**
 
 ```bash
 ls backend/engine/
 ```
 Expected: `__init__.py data cluster quant info industry expert`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
@@ -127,28 +127,28 @@ git commit -m "refactor: 后端领域模块移入 backend/engine/ 子目录"
 - Rename: `backend/agent/` → `backend/engine/arena/`
 - Rename: `backend/rag/` → `backend/engine/arena/rag/`
 
-- [ ] **Step 1: 移动 agent → arena**
+- [x] **Step 1: 移动 agent → arena**
 
 ```bash
 cd backend
 git mv agent engine/arena
 ```
 
-- [ ] **Step 2: 移动 rag 到 arena 内部**
+- [x] **Step 2: 移动 rag 到 arena 内部**
 
 ```bash
 cd backend
 git mv rag engine/arena/rag
 ```
 
-- [ ] **Step 3: 验证目录结构**
+- [x] **Step 3: 验证目录结构**
 
 ```bash
 ls backend/engine/arena/
 ```
 Expected: `__init__.py debate.py orchestrator.py judge.py personas.py runner.py memory.py aggregator.py data_fetcher.py schemas.py rag/`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
@@ -162,7 +162,7 @@ git commit -m "refactor: agent+rag 合并为 backend/engine/arena/"
 - Delete: `backend/preprocess/` (如果存在且为空的遗留目录)
 - Delete: `backend/storage/` (如果为空)
 
-- [ ] **Step 1: 检查并清理空目录**
+- [x] **Step 1: 检查并清理空目录**
 
 ```bash
 # 检查是否有遗留空目录
@@ -171,7 +171,7 @@ find backend/ -maxdepth 1 -type d -empty
 # rmdir backend/data backend/preprocess backend/storage 2>/dev/null || true
 ```
 
-- [ ] **Step 2: Commit（如有改动）**
+- [x] **Step 2: Commit（如有改动）**
 
 ```bash
 git add -A
@@ -187,7 +187,7 @@ git commit -m "chore: 清理遗留空目录" --allow-empty
 **Files:**
 - Modify: `backend/config.py`
 
-- [ ] **Step 1: 重写 config.py**
+- [x] **Step 1: 重写 config.py**
 
 将 `backend/config.py` 重写为统一路径入口。保留原有的非路径配置（如 Pydantic Settings 类），只替换路径计算部分：
 
@@ -216,14 +216,14 @@ CHROMADB_RAG_DIR = DATA_DIR / "chromadb_rag"
 
 注意：保留 config.py 中原有的其他配置类和变量，只替换路径相关的部分。
 
-- [ ] **Step 2: 验证 config.py 可导入**
+- [x] **Step 2: 验证 config.py 可导入**
 
 ```bash
 cd backend && .venv/bin/python -c "from config import PROJECT_ROOT, DATA_DIR, DB_PATH, PRECOMPUTED_DIR, ENV_FILE; print('OK')"
 ```
 Expected: OK
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/config.py
@@ -244,11 +244,11 @@ git commit -m "refactor: config.py 重写为统一路径入口"
 - Modify: `backend/api/routes/chat.py`
 - Modify: `backend/main.py`
 
-- [ ] **Step 1: 更新 backend/main.py**
+- [x] **Step 1: 更新 backend/main.py**
 
 保留 `sys.path.insert(0, str(Path(__file__).resolve().parent))` — 这是启动入口，需要将 backend/ 加入 sys.path。不需要改。
 
-- [ ] **Step 2: 更新 backend/llm/config.py**
+- [x] **Step 2: 更新 backend/llm/config.py**
 
 替换：
 ```python
@@ -260,7 +260,7 @@ from config import ENV_FILE
 _env_file = ENV_FILE
 ```
 
-- [ ] **Step 3: 更新 backend/engine/data/precomputed.py**
+- [x] **Step 3: 更新 backend/engine/data/precomputed.py**
 
 替换：
 ```python
@@ -272,7 +272,7 @@ from config import PRECOMPUTED_DIR, DATA_DIR
 ```
 并将所有 `PROJECT_ROOT / "data" / "precomputed"` 替换为 `PRECOMPUTED_DIR`。
 
-- [ ] **Step 4: 更新 backend/engine/cluster/algorithm/features.py**
+- [x] **Step 4: 更新 backend/engine/cluster/algorithm/features.py**
 
 替换：
 ```python
@@ -284,7 +284,7 @@ from config import PRECOMPUTED_DIR
 ```
 并更新所有引用。
 
-- [ ] **Step 5: 更新 backend/engine/cluster/preprocess/build_embeddings.py**
+- [x] **Step 5: 更新 backend/engine/cluster/preprocess/build_embeddings.py**
 
 替换：
 ```python
@@ -295,7 +295,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 from config import PROJECT_ROOT, DATA_DIR, PRECOMPUTED_DIR
 ```
 
-- [ ] **Step 6: 更新 backend/engine/cluster/preprocess/rebuild_bge.py**
+- [x] **Step 6: 更新 backend/engine/cluster/preprocess/rebuild_bge.py**
 
 替换：
 ```python
@@ -306,7 +306,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 from config import PROJECT_ROOT, PRECOMPUTED_DIR
 ```
 
-- [ ] **Step 7: 更新 backend/engine/cluster/preprocess/export_snapshot.py**
+- [x] **Step 7: 更新 backend/engine/cluster/preprocess/export_snapshot.py**
 
 替换：
 ```python
@@ -317,7 +317,7 @@ ENGINE_DIR = Path(__file__).resolve().parent.parent.parent
 from config import BACKEND_DIR, DATA_DIR
 ```
 
-- [ ] **Step 8: 更新 backend/mcpserver/tools.py**
+- [x] **Step 8: 更新 backend/mcpserver/tools.py**
 
 替换：
 ```python
@@ -329,7 +329,7 @@ from config import PRECOMPUTED_DIR
 emb_path = PRECOMPUTED_DIR / "stock_embeddings.npz"
 ```
 
-- [ ] **Step 9: 更新 backend/mcpserver/server.py**
+- [x] **Step 9: 更新 backend/mcpserver/server.py**
 
 替换：
 ```python
@@ -344,7 +344,7 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 ```
 
-- [ ] **Step 10: 更新 backend/api/routes/chat.py**
+- [x] **Step 10: 更新 backend/api/routes/chat.py**
 
 替换：
 ```python
@@ -356,7 +356,7 @@ from config import ENV_FILE
 env_path = ENV_FILE
 ```
 
-- [ ] **Step 11: 验证所有修改后的文件可导入**
+- [x] **Step 11: 验证所有修改后的文件可导入**
 
 ```bash
 cd backend && .venv/bin/python -c "
@@ -367,7 +367,7 @@ print('config OK')
 ```
 Expected: config OK
 
-- [ ] **Step 12: Commit**
+- [x] **Step 12: Commit**
 
 ```bash
 git add -A
@@ -393,27 +393,27 @@ git commit -m "refactor: 消除所有 Path(__file__).parent 路径计算，统�
 - Modify: `backend/engine/arena/rag/__init__.py`
 - Modify: `backend/engine/expert/__init__.py`
 
-- [ ] **Step 1: 更新 engine/data/__init__.py**
+- [x] **Step 1: 更新 engine/data/__init__.py**
 
 将 `from data_engine import ...` 改为相对导入 `from .engine import ...`（如果原来用的是绝对导入）。确保 `get_data_engine` 可从 `engine.data` 导入。
 
-- [ ] **Step 2: 更新 engine/cluster/__init__.py**
+- [x] **Step 2: 更新 engine/cluster/__init__.py**
 
 将 `from data_engine import get_data_engine` 改为 `from engine.data import get_data_engine`。
 
-- [ ] **Step 3: 更新 engine/quant/__init__.py**
+- [x] **Step 3: 更新 engine/quant/__init__.py**
 
 将 `from data_engine import get_data_engine` 改为 `from engine.data import get_data_engine`。
 
-- [ ] **Step 4: 更新 engine/info/__init__.py**
+- [x] **Step 4: 更新 engine/info/__init__.py**
 
 将 `from data_engine import get_data_engine` 改为 `from engine.data import get_data_engine`。
 
-- [ ] **Step 5: 更新 engine/industry/__init__.py**
+- [x] **Step 5: 更新 engine/industry/__init__.py**
 
 将 `from data_engine import get_data_engine` 改为 `from engine.data import get_data_engine`。
 
-- [ ] **Step 6: 更新 engine/arena/__init__.py**
+- [x] **Step 6: 更新 engine/arena/__init__.py**
 
 将：
 ```python
@@ -426,15 +426,15 @@ from engine.data import get_data_engine
 from engine.arena.rag import get_rag_store
 ```
 
-- [ ] **Step 7: 更新 engine/arena/rag/__init__.py**
+- [x] **Step 7: 更新 engine/arena/rag/__init__.py**
 
 检查是否有绝对导入需要更新。`get_rag_store` 应该用相对导入 `from .store import ...`。
 
-- [ ] **Step 8: 更新 engine/expert/__init__.py**
+- [x] **Step 8: 更新 engine/expert/__init__.py**
 
 检查并更新任何绝对导入。
 
-- [ ] **Step 9: 验证所有 __init__.py**
+- [x] **Step 9: 验证所有 __init__.py**
 
 ```bash
 cd backend && .venv/bin/python -c "
@@ -448,7 +448,7 @@ print('All __init__.py OK')
 ```
 Expected: All __init__.py OK
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add -A
@@ -468,7 +468,7 @@ git commit -m "refactor: 更新所有 __init__.py 导出路径"
 - Modify: `backend/engine/quant/routes.py`
 - Modify: `backend/engine/quant/predictor.py`
 
-- [ ] **Step 1: 更新 engine/cluster/routes.py**
+- [x] **Step 1: 更新 engine/cluster/routes.py**
 
 替换所有 import：
 ```
@@ -479,44 +479,44 @@ from quant_engine.factor_backtest import ...     → from engine.quant.factor_ba
 from quant_engine.predictor import FACTOR_DEFS   → from engine.quant.predictor import FACTOR_DEFS
 ```
 
-- [ ] **Step 2: 更新 engine/cluster/engine.py**
+- [x] **Step 2: 更新 engine/cluster/engine.py**
 
 ```
 from quant_engine import get_quant_engine → from engine.quant import get_quant_engine
 ```
 
-- [ ] **Step 3: 更新 engine/cluster/algorithm/pipeline.py**
+- [x] **Step 3: 更新 engine/cluster/algorithm/pipeline.py**
 
 ```
 from quant_engine.predictor import StockPredictorV2 → from engine.quant.predictor import StockPredictorV2
 ```
 
-- [ ] **Step 4: 更新 engine/cluster/algorithm/predictor_v2.py**
+- [x] **Step 4: 更新 engine/cluster/algorithm/predictor_v2.py**
 
 ```
 from quant_engine.predictor import ... → from engine.quant.predictor import ...
 ```
 
-- [ ] **Step 5: 更新 engine/cluster/algorithm/factor_backtest.py**
+- [x] **Step 5: 更新 engine/cluster/algorithm/factor_backtest.py**
 
 ```
 from quant_engine.factor_backtest import ... → from engine.quant.factor_backtest import ...
 ```
 
-- [ ] **Step 6: 更新 engine/cluster/preprocess/export_snapshot.py**
+- [x] **Step 6: 更新 engine/cluster/preprocess/export_snapshot.py**
 
 ```
 from data_engine import get_data_engine                    → from engine.data import get_data_engine
 from cluster_engine.algorithm.pipeline import ...          → from engine.cluster.algorithm.pipeline import ...
 ```
 
-- [ ] **Step 7: 更新 engine/cluster/preprocess/build_embeddings.py**
+- [x] **Step 7: 更新 engine/cluster/preprocess/build_embeddings.py**
 
 ```
 from cluster_engine.preprocess.rebuild_bge import ... → from engine.cluster.preprocess.rebuild_bge import ...
 ```
 
-- [ ] **Step 8: 更新 engine/quant/routes.py**
+- [x] **Step 8: 更新 engine/quant/routes.py**
 
 ```
 from quant_engine import get_quant_engine    → from engine.quant import get_quant_engine
@@ -524,13 +524,13 @@ from data_engine import get_data_engine      → from engine.data import get_dat
 from cluster_engine import get_cluster_engine → from engine.cluster import get_cluster_engine
 ```
 
-- [ ] **Step 9: 更新 engine/quant/predictor.py**
+- [x] **Step 9: 更新 engine/quant/predictor.py**
 
 ```
 from cluster_engine.algorithm.features import FeatureEngineer → from engine.cluster.algorithm.features import FeatureEngineer
 ```
 
-- [ ] **Step 10: 验证数据层 import**
+- [x] **Step 10: 验证数据层 import**
 
 ```bash
 cd backend && .venv/bin/python -c "
@@ -541,7 +541,7 @@ print('数据层 OK')
 ```
 Expected: 数据层 OK
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add -A
@@ -561,32 +561,32 @@ git commit -m "refactor: 更新数据层 import 路径（data/cluster/quant）"
 - Modify: `backend/engine/expert/tools.py`
 - Modify: `backend/engine/expert/engine_experts.py`
 
-- [ ] **Step 1: 更新 engine/info/routes.py**
+- [x] **Step 1: 更新 engine/info/routes.py**
 
 ```
 from info_engine import get_info_engine → from engine.info import get_info_engine
 ```
 
-- [ ] **Step 2: 更新 engine/industry/routes.py**
+- [x] **Step 2: 更新 engine/industry/routes.py**
 
 ```
 from industry_engine import get_industry_engine → from engine.industry import get_industry_engine
 ```
 （注意：此文件有 6 处相同 import，全部替换）
 
-- [ ] **Step 3: 更新 engine/industry/engine.py**
+- [x] **Step 3: 更新 engine/industry/engine.py**
 
 ```
 from agent.data_fetcher import DataFetcher → from engine.arena.data_fetcher import DataFetcher
 ```
 
-- [ ] **Step 4: 更新 engine/industry/agent.py**
+- [x] **Step 4: 更新 engine/industry/agent.py**
 
 ```
 from data_engine import get_data_engine → from engine.data import get_data_engine
 ```
 
-- [ ] **Step 5: 更新 engine/expert/routes.py**
+- [x] **Step 5: 更新 engine/expert/routes.py**
 
 ```
 from expert.agent import ExpertAgent                    → from engine.expert.agent import ExpertAgent
@@ -597,7 +597,7 @@ from data_engine import get_data_engine                 → from engine.data imp
 from cluster_engine import get_cluster_engine           → from engine.cluster import get_cluster_engine
 ```
 
-- [ ] **Step 6: 更新 engine/expert/agent.py**
+- [x] **Step 6: 更新 engine/expert/agent.py**
 
 ```
 from expert.knowledge_graph import KnowledgeGraph → from engine.expert.knowledge_graph import KnowledgeGraph
@@ -608,19 +608,19 @@ from data_engine import get_data_engine           → from engine.data import ge
 from agent.memory import AgentMemory              → from engine.arena.memory import AgentMemory
 ```
 
-- [ ] **Step 7: 更新 engine/expert/knowledge_graph.py**
+- [x] **Step 7: 更新 engine/expert/knowledge_graph.py**
 
 ```
 from expert.schemas import ... → from engine.expert.schemas import ...
 ```
 
-- [ ] **Step 8: 更新 engine/expert/tools.py**
+- [x] **Step 8: 更新 engine/expert/tools.py**
 
 ```
 from expert.schemas import ToolCall → from engine.expert.schemas import ToolCall
 ```
 
-- [ ] **Step 9: 更新 engine/expert/engine_experts.py**
+- [x] **Step 9: 更新 engine/expert/engine_experts.py**
 
 ```
 from data_engine import get_data_engine           → from engine.data import get_data_engine
@@ -630,7 +630,7 @@ from industry_engine import get_industry_engine   → from engine.industry impor
 ```
 （注意：此文件有多处延迟 import，全部替换）
 
-- [ ] **Step 10: 验证智能层 import**
+- [x] **Step 10: 验证智能层 import**
 
 ```bash
 cd backend && .venv/bin/python -c "
@@ -642,7 +642,7 @@ print('智能层 OK')
 ```
 Expected: 智能层 OK
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add -A
@@ -660,7 +660,7 @@ git commit -m "refactor: 更新智能层 import 路径（info/industry/expert）
 - Modify: `backend/engine/arena/runner.py`
 - Modify: `backend/engine/arena/memory.py`
 
-- [ ] **Step 1: 更新 engine/arena/debate.py**
+- [x] **Step 1: 更新 engine/arena/debate.py**
 
 替换所有 import（此文件 import 最多，约 15 处）：
 ```
@@ -673,7 +673,7 @@ from industry_engine import ...                → from engine.industry import .
 from data_engine import get_data_engine        → from engine.data import get_data_engine
 ```
 
-- [ ] **Step 2: 更新 engine/arena/judge.py**
+- [x] **Step 2: 更新 engine/arena/judge.py**
 
 ```
 from agent.schemas import ...                  → from engine.arena.schemas import ...
@@ -683,7 +683,7 @@ from agent.debate import ...                   → from engine.arena.debate impo
 from agent.memory import AgentMemory           → from engine.arena.memory import AgentMemory
 ```
 
-- [ ] **Step 3: 更新 engine/arena/data_fetcher.py**
+- [x] **Step 3: 更新 engine/arena/data_fetcher.py**
 
 替换所有 import（约 12 处延迟 import）：
 ```
@@ -692,17 +692,17 @@ from quant_engine import get_quant_engine      → from engine.quant import get_
 from info_engine import get_info_engine        → from engine.info import get_info_engine
 ```
 
-- [ ] **Step 4: 更新 engine/arena/schemas.py**
+- [x] **Step 4: 更新 engine/arena/schemas.py**
 
 ```
 from industry_engine.schemas import IndustryCognition → from engine.industry.schemas import IndustryCognition
 ```
 
-- [ ] **Step 5: 更新 engine/arena/orchestrator.py, runner.py, memory.py**
+- [x] **Step 5: 更新 engine/arena/orchestrator.py, runner.py, memory.py**
 
 检查并替换所有 `from agent.` 和 `from data_engine` 等 import。
 
-- [ ] **Step 6: 验证 arena 层 import**
+- [x] **Step 6: 验证 arena 层 import**
 
 ```bash
 cd backend && .venv/bin/python -c "
@@ -713,7 +713,7 @@ print('Arena OK')
 ```
 Expected: Arena OK
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -730,7 +730,7 @@ git commit -m "refactor: 更新 arena 层 import 路径（debate/judge/data_fetc
 - Modify: `backend/mcpserver/tools.py`
 - Modify: `backend/mcpserver/server.py`
 
-- [ ] **Step 1: 更新 backend/main.py**
+- [x] **Step 1: 更新 backend/main.py**
 
 替换所有路由 import：
 ```
@@ -745,7 +745,7 @@ from cluster_engine import get_cluster_engine              → from engine.clust
 from data_engine import get_data_engine                    → from engine.data import get_data_engine
 ```
 
-- [ ] **Step 2: 更新 backend/api/routes/debate.py**
+- [x] **Step 2: 更新 backend/api/routes/debate.py**
 
 ```
 from agent.schemas import Blackboard           → from engine.arena.schemas import Blackboard
@@ -756,14 +756,14 @@ from agent.judge import JudgeRAG               → from engine.arena.judge impor
 from data_engine import get_data_engine        → from engine.data import get_data_engine
 ```
 
-- [ ] **Step 3: 更新 backend/api/routes/analysis.py**
+- [x] **Step 3: 更新 backend/api/routes/analysis.py**
 
 ```
 from agent.schemas import AnalysisRequest      → from engine.arena.schemas import AnalysisRequest
 from agent import get_orchestrator             → from engine.arena import get_orchestrator
 ```
 
-- [ ] **Step 4: 更新 backend/mcpserver/tools.py**
+- [x] **Step 4: 更新 backend/mcpserver/tools.py**
 
 ```
 from data_engine.precomputed import load_profiles → from engine.data.precomputed import load_profiles
@@ -773,13 +773,13 @@ from quant_engine import get_quant_engine         → from engine.quant import g
 from info_engine import get_info_engine           → from engine.info import get_info_engine
 ```
 
-- [ ] **Step 5: 更新 backend/mcpserver/server.py**
+- [x] **Step 5: 更新 backend/mcpserver/server.py**
 
 ```
 from expert.engine_experts import get_expert_profiles → from engine.expert.engine_experts import get_expert_profiles
 ```
 
-- [ ] **Step 6: 全量验证 — 启动后端**
+- [x] **Step 6: 全量验证 — 启动后端**
 
 ```bash
 cd backend && .venv/bin/python -c "
@@ -789,7 +789,7 @@ print('main.py import OK')
 ```
 Expected: main.py import OK
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A
@@ -813,20 +813,20 @@ git commit -m "refactor: 更新接口层 import 路径（main/api/mcpserver）"
 - Move: 根目录 `tests/*.py` → `tests/integration/`
 - Modify: `tests/conftest.py`
 
-- [ ] **Step 1: 创建目标目录**
+- [x] **Step 1: 创建目标目录**
 
 ```bash
 mkdir -p tests/unit tests/integration
 ```
 
-- [ ] **Step 2: 移动根目录集成测试到 tests/integration/**
+- [x] **Step 2: 移动根目录集成测试到 tests/integration/**
 
 ```bash
 git mv tests/test_*.py tests/integration/
 git mv tests/conftest.py tests/conftest.py.bak  # 暂存，后面重写
 ```
 
-- [ ] **Step 3: 移动 backend/tests/ 内容到 tests/unit/**
+- [x] **Step 3: 移动 backend/tests/ 内容到 tests/unit/**
 
 ```bash
 # 移动子目录
@@ -840,13 +840,13 @@ git mv backend/tests/test_*.py tests/unit/
 git mv backend/tests/conftest.py tests/unit/conftest.py.old  # 暂存
 ```
 
-- [ ] **Step 4: 清理 backend/tests/ 空目录**
+- [x] **Step 4: 清理 backend/tests/ 空目录**
 
 ```bash
 rm -rf backend/tests/
 ```
 
-- [ ] **Step 5: 重写 tests/conftest.py（统一入口）**
+- [x] **Step 5: 重写 tests/conftest.py（统一入口）**
 
 ```python
 import sys
@@ -856,7 +856,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 ```
 
-- [ ] **Step 6: 创建 tests/unit/conftest.py**
+- [x] **Step 6: 创建 tests/unit/conftest.py**
 
 ```python
 # 单元测试的 conftest — 继承根 conftest 的 sys.path 注入
@@ -865,7 +865,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 检查 `tests/unit/conftest.py.old` 中是否有需要保留的 fixture，如有则迁移到新 conftest.py 中，然后删除 `.old` 文件。
 
-- [ ] **Step 7: 创建 tests/integration/conftest.py**
+- [x] **Step 7: 创建 tests/integration/conftest.py**
 
 ```python
 # 集成测试的 conftest — 继承根 conftest 的 sys.path 注入
@@ -874,7 +874,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 检查 `tests/conftest.py.bak` 中是否有需要保留的 fixture，如有则迁移，然后删除 `.bak` 文件。
 
-- [ ] **Step 8: 更新所有测试文件的 import 路径**
+- [x] **Step 8: 更新所有测试文件的 import 路径**
 
 测试文件中的 import 需要按照 Chunk 4 的映射表更新：
 
@@ -909,7 +909,7 @@ from mcpserver.server import ...        → from mcpserver.server import ...（�
 
 同时删除测试文件中所有 `sys.path.insert(0, ...)` 行 — 现在由根 conftest.py 统一处理。
 
-- [ ] **Step 9: 验证测试可运行**
+- [x] **Step 9: 验证测试可运行**
 
 ```bash
 cd /Users/swannzhang/Workspace/AIProjects/A_Claude
@@ -917,7 +917,7 @@ backend/.venv/bin/python -m pytest tests/ --collect-only 2>&1 | tail -5
 ```
 Expected: 能收集到测试用例，无 import 错误
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add -A
@@ -936,13 +936,13 @@ git commit -m "refactor: 合并测试目录到 tests/unit + tests/integration"
 - Create: `scripts/start.sh`
 - Create: `scripts/start.bat`
 
-- [ ] **Step 1: 创建 scripts/ 目录**
+- [x] **Step 1: 创建 scripts/ 目录**
 
 ```bash
 mkdir -p scripts
 ```
 
-- [ ] **Step 2: 创建 scripts/setup.sh**
+- [x] **Step 2: 创建 scripts/setup.sh**
 
 ```bash
 #!/usr/bin/env bash
@@ -1007,7 +1007,7 @@ echo "=== 配置完成 ==="
 echo "运行 scripts/start.sh 启动服务"
 ```
 
-- [ ] **Step 3: 创建 scripts/setup.bat**
+- [x] **Step 3: 创建 scripts/setup.bat**
 
 ```bat
 @echo off
@@ -1065,7 +1065,7 @@ echo === 配置完成 ===
 echo 运行 scripts\start.bat 启动服务
 ```
 
-- [ ] **Step 4: 创建 scripts/start.sh**
+- [x] **Step 4: 创建 scripts/start.sh**
 
 ```bash
 #!/usr/bin/env bash
@@ -1119,7 +1119,7 @@ trap cleanup INT TERM
 wait
 ```
 
-- [ ] **Step 5: 创建 scripts/start.bat**
+- [x] **Step 5: 创建 scripts/start.bat**
 
 ```bat
 @echo off
@@ -1158,13 +1158,13 @@ echo 关闭此窗口或按 Ctrl+C 停止
 pause
 ```
 
-- [ ] **Step 6: 设置执行权限**
+- [x] **Step 6: 设置执行权限**
 
 ```bash
 chmod +x scripts/setup.sh scripts/start.sh
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add scripts/
@@ -1178,7 +1178,7 @@ git commit -m "feat: 新增跨平台一键配置和启动脚本"
 - Create: `frontend/Dockerfile`
 - Create: `docker-compose.yml`
 
-- [ ] **Step 1: 创建 backend/Dockerfile**
+- [x] **Step 1: 创建 backend/Dockerfile**
 
 ```dockerfile
 FROM python:3.11-slim
@@ -1199,7 +1199,7 @@ EXPOSE 8000
 CMD ["python", "main.py"]
 ```
 
-- [ ] **Step 2: 创建 frontend/Dockerfile**
+- [x] **Step 2: 创建 frontend/Dockerfile**
 
 ```dockerfile
 FROM node:20-slim
@@ -1215,7 +1215,7 @@ EXPOSE 3000
 CMD ["npm", "run", "dev"]
 ```
 
-- [ ] **Step 3: 创建 docker-compose.yml**
+- [x] **Step 3: 创建 docker-compose.yml**
 
 ```yaml
 services:
@@ -1245,7 +1245,7 @@ services:
       - NEXT_PUBLIC_API_BASE=http://localhost:8000
 ```
 
-- [ ] **Step 4: 更新 .gitignore 添加 Docker 相关忽略**
+- [x] **Step 4: 更新 .gitignore 添加 Docker 相关忽略**
 
 在 `.gitignore` 中添加：
 ```
@@ -1253,7 +1253,7 @@ services:
 docker-compose.override.yml
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/Dockerfile frontend/Dockerfile docker-compose.yml .gitignore
@@ -1268,7 +1268,7 @@ git commit -m "feat: 新增 Docker Compose 配置"
 - Modify: `DEPLOYMENT.md`
 - Modify: `.github/workflows/deploy-pages.yml`
 
-- [ ] **Step 1: 更新 CLAUDE.md**
+- [x] **Step 1: 更新 CLAUDE.md**
 
 全文替换：
 - `engine/` → `backend/`（目录引用）
@@ -1280,26 +1280,26 @@ git commit -m "feat: 新增 Docker Compose 配置"
 - 更新模块路径描述，反映新的 `backend/engine/` 结构
 - 更新 MCP 使用须知中的路径
 
-- [ ] **Step 2: 更新 README.md**
+- [x] **Step 2: 更新 README.md**
 
 - 更新项目结构描述
 - 更新安装和运行命令（新增 `scripts/setup.sh` 和 `scripts/start.sh`）
 - 新增 Docker 部署说明
 - 替换所有 `cd engine` → `cd backend`，`cd web` → `cd frontend`
 
-- [ ] **Step 3: 更新 DEPLOYMENT.md**
+- [x] **Step 3: 更新 DEPLOYMENT.md**
 
 - 更新所有路径引用
 - 新增 Docker Compose 部署章节
 
-- [ ] **Step 4: 更新 .github/workflows/deploy-pages.yml**
+- [x] **Step 4: 更新 .github/workflows/deploy-pages.yml**
 
 ```
 working-directory: web → working-directory: frontend
 cache-dependency-path: web/package-lock.json → frontend/package-lock.json
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add CLAUDE.md README.md DEPLOYMENT.md .github/
@@ -1308,7 +1308,7 @@ git commit -m "docs: 更新所有文档路径引用，新增 Docker 部署说明
 
 ### Task 16: 端到端验证
 
-- [ ] **Step 1: 验证后端启动**
+- [x] **Step 1: 验证后端启动**
 
 ```bash
 cd backend && .venv/bin/python main.py &
@@ -1317,7 +1317,7 @@ curl -s http://localhost:8000/api/v1/health | head -20
 ```
 Expected: `{"status":"ok",...}`
 
-- [ ] **Step 2: 验证 MCP Server**
+- [x] **Step 2: 验证 MCP Server**
 
 重启 MCP（`/mcp`），然后调用一个工具验证：
 ```
@@ -1325,7 +1325,7 @@ mcp__stockterrain__query_market_overview
 ```
 Expected: 返回市场概览数据
 
-- [ ] **Step 3: 验证前端启动**
+- [x] **Step 3: 验证前端启动**
 
 ```bash
 cd frontend && npm run dev &
@@ -1334,7 +1334,7 @@ curl -s http://localhost:3000 | head -5
 ```
 Expected: 返回 HTML
 
-- [ ] **Step 4: 运行全量测试**
+- [x] **Step 4: 运行全量测试**
 
 ```bash
 cd /Users/swannzhang/Workspace/AIProjects/A_Claude
@@ -1342,7 +1342,7 @@ backend/.venv/bin/python -m pytest tests/ -v --tb=short 2>&1 | tail -20
 ```
 Expected: 测试通过（允许部分需要 LLM 的测试 skip）
 
-- [ ] **Step 5: 停止服务，最终 Commit**
+- [x] **Step 5: 停止服务，最终 Commit**
 
 ```bash
 # 停止后台服务

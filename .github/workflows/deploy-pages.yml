@@ -26,14 +26,14 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        working-directory: web
+        working-directory: frontend
         run: npm ci
 
       - name: Build static site
-        working-directory: web
+        working-directory: frontend
         env:
           GITHUB_PAGES: "true"
           NEXT_PUBLIC_STATIC_MODE: "true"
@@ -43,7 +43,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: web/out
+          path: frontend/out
 
   deploy:
     environment:
