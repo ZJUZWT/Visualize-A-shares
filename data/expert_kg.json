@@ -333,18 +333,40 @@
       "id": "45c20b80-fcc9-482d-ab8b-fc3e1d6558b3"
     },
     {
-      "id": "c254d1b1-ca89-43ef-bed6-f4bb20d8d064",
       "type": "stock",
       "code": "601233",
       "name": "601233",
       "industry": "化纤行业",
-      "zjh_industry": "制造业-化学纤维制造业"
+      "zjh_industry": "制造业-化学纤维制造业",
+      "id": "c254d1b1-ca89-43ef-bed6-f4bb20d8d064"
     },
     {
-      "id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb",
       "type": "sector",
       "name": "化纤行业",
-      "category": "industry"
+      "category": "industry",
+      "id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb"
+    },
+    {
+      "type": "stock",
+      "code": "002064",
+      "name": "002064",
+      "industry": "化纤行业",
+      "zjh_industry": "制造业-化学纤维制造业",
+      "id": "3d2e8043-42e6-4ae9-bc78-d12313250c4b"
+    },
+    {
+      "id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "type": "stock",
+      "code": "000533",
+      "name": "顺钠股份",
+      "industry": "输配电气",
+      "zjh_industry": "制造业-电气机械和器材制造业"
+    },
+    {
+      "id": "65f7f099-69b1-4dac-9cb2-fc70eb5b9afb",
+      "type": "material",
+      "name": "医疗器械",
+      "category": "product"
     }
   ],
   "edges": [
@@ -650,11 +672,53 @@
       "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
-      "source_id": "c254d1b1-ca89-43ef-bed6-f4bb20d8d064",
-      "target_id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb",
       "relation": "belongs_to",
       "reason": "601233属于化纤行业行业",
-      "timestamp": "2026-03-18T00:39:05.910856"
+      "timestamp": "2026-03-18T00:39:05.910856",
+      "source_id": "c254d1b1-ca89-43ef-bed6-f4bb20d8d064",
+      "target_id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb"
+    },
+    {
+      "relation": "belongs_to",
+      "reason": "002064属于化纤行业行业",
+      "timestamp": "2026-03-18T02:56:55.185384",
+      "source_id": "3d2e8043-42e6-4ae9-bc78-d12313250c4b",
+      "target_id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb"
+    },
+    {
+      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "target_id": "a820950c-d51e-4ccf-aa00-784f0751233c",
+      "relation": "belongs_to",
+      "reason": "顺钠股份属于输配电气行业",
+      "timestamp": "2026-03-18T03:06:10.710763"
+    },
+    {
+      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
+      "relation": "consumes",
+      "reason": "顺钠股份使用石油",
+      "timestamp": "2026-03-18T03:06:10.710965"
+    },
+    {
+      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "target_id": "845b4dfd-f9b3-4422-a476-686f9809322b",
+      "relation": "consumes",
+      "reason": "顺钠股份使用煤炭",
+      "timestamp": "2026-03-18T03:06:10.711054"
+    },
+    {
+      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "target_id": "65f7f099-69b1-4dac-9cb2-fc70eb5b9afb",
+      "relation": "supplies",
+      "reason": "顺钠股份生产医疗器械",
+      "timestamp": "2026-03-18T03:06:10.711218"
+    },
+    {
+      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "target_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
+      "relation": "competes_with",
+      "reason": "同属输配电气行业",
+      "timestamp": "2026-03-18T03:06:10.711381"
     }
   ]
 }
