@@ -65,9 +65,9 @@ class LLMConfig(BaseModel):
         description="生成温度（创造性）"
     )
     max_tokens: int = Field(
-        default=2048,
+        default=8192,
         ge=64, le=32768,
-        description="最大输出 token 数"
+        description="最大输出 token 数（产业链推演等复杂任务需要 4096+）"
     )
 
     # 系统提示词

@@ -74,6 +74,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
     - Together:   https://api.together.xyz/v1
     """
 
+    # 长任务（产业链推演等）需要更长超时，思考型模型首 token 可能延迟 30s+
+    _TIMEOUT = httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
+
     async def chat(self, messages: list[ChatMessage]) -> str:
         t0 = time.monotonic()
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
@@ -89,7 +92,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             "stream": False,
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=self._TIMEOUT) as client:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
@@ -115,7 +118,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=self._TIMEOUT) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
@@ -160,6 +163,7 @@ class AnthropicProvider(BaseLLMProvider):
     """
 
     ANTHROPIC_VERSION = "2023-06-01"
+    _TIMEOUT = httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
 
     async def chat(self, messages: list[ChatMessage]) -> str:
         t0 = time.monotonic()
@@ -188,7 +192,7 @@ class AnthropicProvider(BaseLLMProvider):
         if system_text:
             payload["system"] = system_text
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=self._TIMEOUT) as client:
             resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             data = resp.json()
@@ -227,7 +231,7 @@ class AnthropicProvider(BaseLLMProvider):
             payload["system"] = system_text
 
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=self._TIMEOUT) as client:
                 async with client.stream("POST", url, json=payload, headers=headers) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
