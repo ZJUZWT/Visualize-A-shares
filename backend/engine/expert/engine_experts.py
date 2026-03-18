@@ -6,10 +6,23 @@
 
 import asyncio
 import json
+import os
 from typing import AsyncGenerator, Literal
 
 import pandas as pd
 from loguru import logger
+
+# ─── LLM 原始输出调试开关 ───────────────────────────────
+# 设置环境变量 LLM_DEBUG_RAW=true 可打印 LLM 的完整原始输出（含 <think> 等被过滤的内容）
+# 注意：使用函数延迟读取，确保 .env 已加载
+def _is_llm_debug_raw() -> bool:
+    return os.environ.get("LLM_DEBUG_RAW", "").lower() in ("true", "1", "yes")
+
+
+# 兼容：模块级常量（首次 import 时的快照），但关键路径用函数实时读取
+LLM_DEBUG_RAW = _is_llm_debug_raw()
+if LLM_DEBUG_RAW:
+    logger.info("🔬 LLM_DEBUG_RAW 已开启 — 将打印 LLM 完整原始输出日志")
 
 ExpertType = Literal["data", "quant", "info", "industry", "rag", "short_term"]
 
@@ -260,7 +273,13 @@ class EngineExpert:
 
     @classmethod
     async def _ensure_snapshot(cls, de) -> "pd.DataFrame":
-        """确保快照数据可用 — 如果 DuckDB 快照为空，自动拉取全市场行情并保存
+        """确保快照数据可用且不过期 — 如果为空或过期，自动拉取全市场行情并保存
+
+        过期判断（交易时段 9:15~15:35）：
+        - 快照为空 → 刷新
+        - 快照 updated_at 早于今天 9:15（隔夜数据）→ 刷新
+        - 快照 updated_at 距今超过 snapshot_refresh_minutes（默认30分钟）→ 刷新
+        - 非交易时段（收盘后、周末）不刷新，使用上次快照即可
 
         使用类级别锁避免多个专家并发触发重复拉取。
 
@@ -268,19 +287,64 @@ class EngineExpert:
             快照 DataFrame（可能为空，表示拉取也失败了）
         """
         import asyncio
+        import datetime
+        from config import settings
+
+        refresh_minutes = settings.datasource.snapshot_refresh_minutes
+
         snap = de.get_snapshot()
-        if snap is not None and not snap.empty:
+
+        # 判断快照是否过期
+        need_refresh = False
+        if snap is None or snap.empty:
+            need_refresh = True
+        elif "updated_at" in snap.columns:
+            now = datetime.datetime.now()
+            # 交易日（周一~周五）且在 9:15~15:35 之间，检查快照新鲜度
+            if now.weekday() < 5 and datetime.time(9, 15) <= now.time() <= datetime.time(15, 35):
+                try:
+                    latest_update = pd.to_datetime(snap["updated_at"]).max()
+                    today_start = datetime.datetime.combine(now.date(), datetime.time(9, 15))
+                    if latest_update < today_start:
+                        # 隔夜数据，必须刷新
+                        need_refresh = True
+                        logger.info(
+                            f"📡 快照已过期(隔夜): updated_at={latest_update}, "
+                            f"today_start={today_start}, 需要刷新"
+                        )
+                    else:
+                        # 盘中 TTL 检查：超过 refresh_minutes 分钟则刷新
+                        age_minutes = (now - latest_update).total_seconds() / 60
+                        if age_minutes > refresh_minutes:
+                            need_refresh = True
+                            logger.info(
+                                f"📡 快照盘中过期: 已过 {age_minutes:.0f} 分钟 "
+                                f"(TTL={refresh_minutes}min), 自动刷新"
+                            )
+                except Exception as e:
+                    logger.warning(f"📡 快照时间检测异常(忽略): {e}")
+
+        if not need_refresh:
             return snap
-        # 快照为空，用锁保护只拉取一次
+
+        # 需要刷新 — 用锁保护只拉取一次
         if cls._snapshot_lock is None:
             cls._snapshot_lock = asyncio.Lock()
         async with cls._snapshot_lock:
             # double-check：拿到锁后再检查一次（另一个协程可能已完成拉取）
             snap = de.get_snapshot()
-            if snap is not None and not snap.empty:
-                return snap
+            if snap is not None and not snap.empty and "updated_at" in snap.columns:
+                now = datetime.datetime.now()
+                try:
+                    latest_update = pd.to_datetime(snap["updated_at"]).max()
+                    age_minutes = (now - latest_update).total_seconds() / 60
+                    if age_minutes <= refresh_minutes:
+                        return snap  # 另一个协程已完成刷新，数据足够新
+                except Exception:
+                    if not snap.empty:
+                        return snap
             try:
-                logger.info("📡 快照为空，自动拉取全市场行情...")
+                logger.info("📡 快照为空或已过期，自动拉取全市场行情...")
                 fresh = await asyncio.to_thread(de.get_realtime_quotes)
                 if fresh is not None and not fresh.empty:
                     await asyncio.to_thread(de.save_snapshot, fresh)
@@ -288,137 +352,242 @@ class EngineExpert:
                     return fresh
             except Exception as e:
                 logger.warning(f"📡 自动拉取快照失败: {e}")
+        # 拉取失败，退回旧快照（有总比没有好）
         return snap if snap is not None else __import__("pandas").DataFrame()
 
-    async def chat(self, message: str, history: list[dict] | None = None) -> AsyncGenerator[dict, None]:
-        """流式对话，yield SSE 事件"""
+    async def chat(
+        self, message: str, history: list[dict] | None = None,
+        deep_think: bool = False, max_rounds: int = 3,
+    ) -> AsyncGenerator[dict, None]:
+        """流式对话，yield SSE 事件
+
+        Args:
+            deep_think: 多轮渐进模式 — 每轮工具执行完后 LLM 可以决定是否继续补查
+            max_rounds: deep_think 模式下最大工具调用轮数（1~5）
+        """
         if not self._llm:
             yield {"event": "error", "data": {"message": "LLM 未配置"}}
             return
 
         yield {"event": "thinking_start", "data": {}}
 
-        # 1. 规划工具调用
-        tool_plan = await self._plan_tools(message)
-        tool_calls = tool_plan.get("tool_calls", [])
+        # ══════════════════════════════════════════════════════
+        # 多轮渐进工具调用循环
+        # deep_think=False 时等同于原来的单轮（max 1 轮）
+        # deep_think=True 时 LLM 看到上一轮数据后可以决定继续补查
+        # ══════════════════════════════════════════════════════
+        effective_max_rounds = max_rounds if deep_think else 1
+        all_tool_results: list[str] = []   # 所有轮次累积的工具结果
+        all_data_fetch_log: list[dict] = []
+        round_num = 0
 
-        # 2. 执行工具调用（含智能重试）
-        tool_results = []
-        data_fetch_log: list[dict] = []  # 数据获取可观测日志
-        for tc in tool_calls:
-            if not isinstance(tc, dict):
-                logger.warning(f"跳过非dict工具调用: {type(tc)}")
-                continue
-            action_name = tc.get("action", "unknown")
-            params = tc.get("params", {})
-            yield {"event": "tool_call", "data": {
-                "engine": tc.get("engine", self.expert_type),
-                "action": action_name,
-                "params": params,
-            }}
-            result = await self._execute_tool(tc)
+        while round_num < effective_max_rounds:
+            round_num += 1
 
-            # ── 智能重试：检测失败/空结果，让 LLM 修正参数后重试一次 ──
-            is_failure = self._is_tool_result_failure(result)
-            is_empty = self._is_tool_result_empty(result)
-            if is_failure:
-                data_fetch_log.append({
-                    "action": action_name, "params": params,
-                    "status": "FAIL", "reason": result[:200],
-                    "retried": True,
-                })
-                logger.warning(f"🔄 [{self.expert_type}] {action_name} 首次失败，尝试智能重试: {result[:150]}")
-                retried_tc = await self._retry_with_fix(tc, result, message)
-                if retried_tc and retried_tc != tc:
-                    retry_result = await self._execute_tool(retried_tc)
-                    retry_is_failure = self._is_tool_result_failure(retry_result)
-                    if not retry_is_failure:
-                        logger.info(f"✅ [{self.expert_type}] {action_name} 重试成功"
-                                    f" (原参数={params}, 新参数={retried_tc.get('params', {})})")
-                        data_fetch_log.append({
-                            "action": action_name,
-                            "params": retried_tc.get("params", {}),
-                            "status": "OK_RETRY", "reason": "",
-                            "retried": True,
-                        })
-                        result = retry_result
-                    else:
-                        logger.warning(f"❌ [{self.expert_type}] {action_name} 重试仍失败: {retry_result[:150]}")
-                        data_fetch_log.append({
-                            "action": action_name,
-                            "params": retried_tc.get("params", {}),
-                            "status": "FAIL_RETRY", "reason": retry_result[:200],
-                            "retried": True,
-                        })
-                else:
-                    logger.warning(f"❌ [{self.expert_type}] {action_name} LLM 无法修正参数，放弃重试")
-            elif is_empty:
-                # 数据为空但参数没错（正常现象），记录但不重试
-                data_fetch_log.append({
-                    "action": action_name, "params": params,
-                    "status": "EMPTY", "reason": result[:200],
-                    "retried": False,
-                })
-                logger.debug(f"📭 [{self.expert_type}] {action_name} 数据为空(正常): {result[:100]}")
+            # ── 通知前端当前轮次（deep_think 模式下） ──
+            if deep_think:
+                yield {"event": "thinking_round", "data": {
+                    "round": round_num,
+                    "max_rounds": effective_max_rounds,
+                }}
+
+            # 1. 规划工具调用
+            if round_num == 1:
+                # 首轮：正常规划
+                tool_plan = await self._plan_tools(message)
             else:
-                data_fetch_log.append({
-                    "action": action_name, "params": params,
-                    "status": "OK", "reason": "",
-                    "retried": False,
-                })
+                # 后续轮次：带上之前的工具结果，让 LLM 决定是否继续
+                tool_plan = await self._plan_tools_with_context(
+                    message, all_tool_results, round_num
+                )
+                if not tool_plan.get("tool_calls"):
+                    logger.info(
+                        f"🏁 [{self.expert_type}] deep_think 第{round_num}轮: "
+                        f"LLM 认为数据充足，停止补查"
+                    )
+                    break
 
-            tool_results.append(result)
-            tool_result_data = {
-                "engine": tc.get("engine", self.expert_type),
-                "action": action_name,
-                "summary": result[:200] if result else "无结果",
-            }
-            # K 线数据：query_history / query_hourly 返回 chartData
-            if action_name in ("query_history", "query_hourly") and result:
-                try:
-                    parsed = json.loads(result)
-                    if "records" in parsed:
-                        tool_result_data["chartData"] = {
-                            "code": parsed.get("code", ""),
-                            "records": parsed["records"],
-                        }
-                except (json.JSONDecodeError, KeyError):
-                    pass
-            yield {"event": "tool_result", "data": tool_result_data}
+            tool_calls = tool_plan.get("tool_calls", [])
+            if not tool_calls:
+                break  # 无工具调用，直接进入回复
+
+            # 2. 执行工具调用（含智能重试）
+            round_results: list[str] = []
+            for tc in tool_calls:
+                if not isinstance(tc, dict):
+                    logger.warning(f"跳过非dict工具调用: {type(tc)}")
+                    continue
+                action_name = tc.get("action", "unknown")
+                params = tc.get("params", {})
+                yield {"event": "tool_call", "data": {
+                    "engine": tc.get("engine", self.expert_type),
+                    "action": action_name,
+                    "params": params,
+                    "round": round_num if deep_think else None,
+                }}
+                result = await self._execute_tool(tc)
+
+                # ── 智能重试：检测失败/空结果，让 LLM 修正参数后重试一次 ──
+                is_failure = self._is_tool_result_failure(result)
+                is_empty = self._is_tool_result_empty(result)
+                if is_failure:
+                    all_data_fetch_log.append({
+                        "action": action_name, "params": params,
+                        "status": "FAIL", "reason": result[:200],
+                        "retried": True, "round": round_num,
+                    })
+                    logger.warning(f"🔄 [{self.expert_type}] R{round_num} {action_name} 首次失败，尝试智能重试: {result[:150]}")
+                    retried_tc = await self._retry_with_fix(tc, result, message)
+                    if retried_tc and retried_tc != tc:
+                        retry_result = await self._execute_tool(retried_tc)
+                        retry_is_failure = self._is_tool_result_failure(retry_result)
+                        if not retry_is_failure:
+                            logger.info(f"✅ [{self.expert_type}] R{round_num} {action_name} 重试成功"
+                                        f" (原参数={params}, 新参数={retried_tc.get('params', {})})")
+                            all_data_fetch_log.append({
+                                "action": action_name,
+                                "params": retried_tc.get("params", {}),
+                                "status": "OK_RETRY", "reason": "",
+                                "retried": True, "round": round_num,
+                            })
+                            result = retry_result
+                        else:
+                            logger.warning(f"❌ [{self.expert_type}] R{round_num} {action_name} 重试仍失败: {retry_result[:150]}")
+                            all_data_fetch_log.append({
+                                "action": action_name,
+                                "params": retried_tc.get("params", {}),
+                                "status": "FAIL_RETRY", "reason": retry_result[:200],
+                                "retried": True, "round": round_num,
+                            })
+                    else:
+                        logger.warning(f"❌ [{self.expert_type}] R{round_num} {action_name} LLM 无法修正参数，放弃重试")
+                elif is_empty:
+                    all_data_fetch_log.append({
+                        "action": action_name, "params": params,
+                        "status": "EMPTY", "reason": result[:200],
+                        "retried": False, "round": round_num,
+                    })
+                    logger.debug(f"📭 [{self.expert_type}] R{round_num} {action_name} 数据为空(正常): {result[:100]}")
+                else:
+                    all_data_fetch_log.append({
+                        "action": action_name, "params": params,
+                        "status": "OK", "reason": "",
+                        "retried": False, "round": round_num,
+                    })
+
+                round_results.append(result)
+                tool_result_data = {
+                    "engine": tc.get("engine", self.expert_type),
+                    "action": action_name,
+                    "summary": result[:200] if result else "无结果",
+                    "round": round_num if deep_think else None,
+                }
+                # K 线数据：query_history / query_hourly 返回 chartData
+                if action_name in ("query_history", "query_hourly") and result:
+                    try:
+                        parsed = json.loads(result)
+                        if "records" in parsed:
+                            tool_result_data["chartData"] = {
+                                "code": parsed.get("code", ""),
+                                "records": parsed["records"],
+                            }
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+                # 数据校验结果：附带到前端
+                if result and "_validation" in result:
+                    try:
+                        parsed_for_val = json.loads(result)
+                        if "_validation" in parsed_for_val:
+                            tool_result_data["validation"] = parsed_for_val["_validation"]
+                    except (json.JSONDecodeError, Exception):
+                        pass
+                yield {"event": "tool_result", "data": tool_result_data}
+
+            all_tool_results.extend(round_results)
+
+            # 单轮模式直接跳出
+            if not deep_think:
+                break
+
+            logger.info(
+                f"🔄 [{self.expert_type}] deep_think 第{round_num}轮完成, "
+                f"本轮获取 {len(round_results)} 条数据, 累计 {len(all_tool_results)} 条"
+            )
+
+        tool_results = all_tool_results
 
         # ── 数据获取可观测性日志 ──
-        if data_fetch_log:
-            ok_count = sum(1 for d in data_fetch_log if d["status"].startswith("OK"))
-            fail_count = sum(1 for d in data_fetch_log if d["status"].startswith("FAIL"))
-            empty_count = sum(1 for d in data_fetch_log if d["status"] == "EMPTY")
-            retry_count = sum(1 for d in data_fetch_log if d["retried"])
+        if all_data_fetch_log:
+            ok_count = sum(1 for d in all_data_fetch_log if d["status"].startswith("OK"))
+            fail_count = sum(1 for d in all_data_fetch_log if d["status"].startswith("FAIL"))
+            empty_count = sum(1 for d in all_data_fetch_log if d["status"] == "EMPTY")
+            retry_count = sum(1 for d in all_data_fetch_log if d["retried"])
+            rounds_used = max((d.get("round", 1) for d in all_data_fetch_log), default=1)
             logger.info(
                 f"📊 [{self.expert_type}] 数据获取统计: "
-                f"总计={len(data_fetch_log)}, 成功={ok_count}, 空数据={empty_count}, "
-                f"失败={fail_count}, 重试={retry_count}"
+                f"轮数={rounds_used}, 总计={len(all_data_fetch_log)}, 成功={ok_count}, "
+                f"空数据={empty_count}, 失败={fail_count}, 重试={retry_count}"
             )
-            for entry in data_fetch_log:
+            for entry in all_data_fetch_log:
                 if entry["status"].startswith("FAIL"):
                     logger.warning(
                         f"📊 [{self.expert_type}] 数据获取失败详情: "
-                        f"action={entry['action']}, params={entry['params']}, "
-                        f"reason={entry['reason']}"
+                        f"R{entry.get('round', '?')} action={entry['action']}, "
+                        f"params={entry['params']}, reason={entry['reason']}"
                     )
 
-        # 3. 流式生成回复
+        # 3. 提取数据校验摘要（_validation 字段由 DataValidator 注入）
+        validation_summary = self._extract_validation_summary(tool_results)
+
+        # 4. 流式生成回复
+        # ── DEBUG: 记录传给 LLM 的工具数据摘要 ──
+        if LLM_DEBUG_RAW and tool_results:
+            for i, tr in enumerate(tool_results):
+                logger.info(
+                    f"🔬 [{self.expert_type}] LLM输入 tool_result[{i}] "
+                    f"(长度={len(tr)}字): {tr[:500]}{'...(截断)' if len(tr) > 500 else ''}"
+                )
+
         full_text = ""
-        async for token, accumulated in self._reply_stream(message, tool_results, history=history):
+        async for token, accumulated in self._reply_stream(
+            message, tool_results, history=history, validation_summary=validation_summary
+        ):
             full_text = accumulated
             yield {"event": "reply_token", "data": {"token": token}}
 
-        # ── 回退机制：如果回复过短（<50字），说明 think 标签吞掉了大部分内容 ──
-        if len(full_text.strip()) < 50 and tool_results:
+        # ── 回退机制：回复过短 / 内容是垃圾（工具调用代码）/ 明显不完整 → 非流式重生成 ──
+        def _needs_retry(text: str) -> str | None:
+            """检测回复是否需要重生成，返回原因或 None"""
+            stripped = text.strip()
+            if not stripped and tool_results:
+                return "空回复"
+            if not stripped and not tool_results:
+                # 没有工具数据 + 回复为空 → LLM 可能输出了全是 [TOOL_CALL] 幻觉被过滤
+                return "空回复(无工具数据，可能是幻觉工具调用被过滤)"
+            if len(stripped) < 200 and tool_results:
+                return f"回复过短({len(stripped)}字)"
+            # 检测内容是否是工具调用垃圾（TOOL_CALL / tool_call 占比过高）
+            import re
+            clean = re.sub(r'\[TOOL_CALL\].*?\[/TOOL_CALL\]', '', stripped, flags=re.DOTALL)
+            clean = re.sub(r'<tool_call>.*?</tool_call>', '', clean, flags=re.DOTALL)
+            clean = re.sub(r'\{tool\s*=>', '', clean)
+            if len(clean.strip()) < 50 and len(stripped) > 50:
+                return f"内容主要是工具调用代码(有效内容仅{len(clean.strip())}字)"
+            # 检测以冒号/省略号结尾（明显不完整）
+            if stripped.endswith(("：", ":", "...", "…")) and len(stripped) < 300:
+                return f"回复明显不完整(以'{stripped[-1]}'结尾)"
+            return None
+
+        retry_reason = _needs_retry(full_text)
+        if retry_reason:
             logger.warning(
-                f"⚠️ [{self.expert_type}] 回复过短({len(full_text)}字)，"
+                f"⚠️ [{self.expert_type}] {retry_reason}，"
                 f"触发非流式重生成 (tool_results={len(tool_results)}条)"
             )
             try:
-                retry_text = await self._retry_reply_non_stream(message, tool_results, history=history)
+                retry_text = await self._retry_reply_non_stream(
+                    message, tool_results, history=history, validation_summary=validation_summary
+                )
                 if retry_text and len(retry_text.strip()) > len(full_text.strip()):
                     # 用新回复替换旧的
                     delta = retry_text[len(full_text):] if retry_text.startswith(full_text) else retry_text
@@ -429,6 +598,172 @@ class EngineExpert:
                 logger.error(f"非流式重生成失败: {e}")
 
         yield {"event": "reply_complete", "data": {"full_text": full_text}}
+
+    @staticmethod
+    def _parse_tool_call_tags(raw_text: str) -> dict:
+        """兜底解析 [TOOL_CALL] / <tool_call> 幻觉格式 → 标准 tool_calls
+
+        当 LLM 没有输出期望的 JSON 格式，而是输出了类似：
+          [TOOL_CALL] {tool => "run_screen", args => {...}} [/TOOL_CALL]
+        时，从中提取工具名和参数，转换为标准格式。
+        """
+        import re
+        tool_calls = []
+
+        # 匹配 [TOOL_CALL]...[/TOOL_CALL] 和 <tool_call>...</tool_call>
+        patterns = [
+            re.findall(r'\[TOOL_CALL\](.*?)\[/TOOL_CALL\]', raw_text, re.DOTALL),
+            re.findall(r'<tool_call>(.*?)</tool_call>', raw_text, re.DOTALL),
+        ]
+        blocks = [b for group in patterns for b in group]
+
+        # 也匹配未闭合的 [TOOL_CALL]（LLM 可能忘了闭合）
+        if not blocks:
+            unclosed = re.findall(r'\[TOOL_CALL\](.*?)(?:\[/TOOL_CALL\]|$)', raw_text, re.DOTALL)
+            blocks.extend(unclosed)
+
+        for block in blocks:
+            block = block.strip()
+            if not block:
+                continue
+
+            # 方式1: 尝试直接解析 JSON（有些 LLM 在标签内写的就是 JSON）
+            try:
+                data = json.loads(block)
+                if isinstance(data, dict):
+                    action = data.get("action") or data.get("tool") or data.get("name", "")
+                    params = data.get("params") or data.get("args") or data.get("arguments", {})
+                    if action:
+                        tool_calls.append({"action": action, "params": params if isinstance(params, dict) else {}})
+                        continue
+            except (json.JSONDecodeError, Exception):
+                pass
+
+            # 方式2: 解析 {tool => "xxx", args => {...}} 这种箭头格式
+            tool_match = re.search(r'(?:tool|name|action)\s*(?:=>|:)\s*["\']?(\w+)["\']?', block, re.IGNORECASE)
+            if not tool_match:
+                continue
+
+            action = tool_match.group(1)
+
+            # 提取 args/params 部分 — 尝试找到 JSON 对象
+            args_match = re.search(r'(?:args|params|arguments)\s*(?:=>|:)\s*(\{.*\})', block, re.DOTALL)
+            params = {}
+            if args_match:
+                try:
+                    params = json.loads(args_match.group(1))
+                except (json.JSONDecodeError, Exception):
+                    # 尝试修复常见的非标准 JSON（如 --key value 格式）
+                    pass
+
+            tool_calls.append({"action": action, "params": params if isinstance(params, dict) else {}})
+
+        if tool_calls:
+            logger.info(f"🔧 _parse_tool_call_tags 兜底解析成功: {len(tool_calls)} 个工具调用")
+        return {"tool_calls": tool_calls}
+
+    async def _plan_tools_with_context(
+        self, message: str, previous_results: list[str], round_num: int,
+    ) -> dict:
+        """多轮渐进模式：带上之前工具结果，让 LLM 决定是否需要继续补查
+
+        返回 {"tool_calls": [...]} 或 {"tool_calls": []}（表示数据充足）
+        """
+        import re
+        from llm.providers import ChatMessage
+        from engine.expert.personas import get_current_date_context
+
+        tools_desc = self._get_available_tools_desc()
+
+        # 将之前的工具结果摘要（每条截断到 500 字以防上下文爆炸）
+        results_summary = "\n---\n".join(
+            r[:500] + ("...(截断)" if len(r) > 500 else "")
+            for r in previous_results
+        )
+
+        plan_prompt = f"""你是{self.profile['name']}。用户的问题是：「{message}」
+
+⏰ 当前时间：{get_current_date_context()}
+
+你已经进行了 {round_num - 1} 轮数据查询，获得了以下数据：
+{results_summary}
+
+请判断：基于已有数据，你能否给出一个**全面、深入、有具体结论**的分析回复？
+
+- 如果已有数据足够回答用户问题，返回空列表：{{"tool_calls": []}}
+- 如果还需要补充数据才能给出深入分析（例如：看到筛选结果后想查某只票的详情、看到个股后想查K线确认趋势），返回需要补查的工具调用
+
+可用工具:
+{tools_desc}
+
+请以 JSON 格式回复:
+{{
+  "reasoning": "简述你为什么需要/不需要继续查数据",
+  "tool_calls": [
+    {{"action": "工具名", "params": {{"参数名": "值"}}}}
+  ]
+}}
+
+注意：
+- 不要重复查询已有的数据（避免死循环）
+- 最多再查 2-3 个工具，聚焦在最关键的补充信息上
+- 直接输出 JSON，不要包含 markdown 代码块。"""
+
+        try:
+            chunks: list[str] = []
+            async for token in self._llm.chat_stream([
+                ChatMessage("system", plan_prompt),
+                ChatMessage("user", f"第{round_num}轮工具规划（之前已查 {len(previous_results)} 条数据）"),
+            ]):
+                chunks.append(token)
+            text = "".join(chunks).strip()
+
+            if _is_llm_debug_raw():
+                logger.info(
+                    f"🔬 [{self.expert_type}] _plan_tools_with_context R{round_num} "
+                    f"原始输出(前500): {text[:500]}"
+                )
+
+            # 剥离 think 标签
+            raw_text = text  # 保存原始文本用于兜底
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+            text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
+
+            # 提取 JSON
+            md_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+            if md_match:
+                text = md_match.group(1).strip()
+
+            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                reasoning = data.get("reasoning", "")
+                tool_calls = data.get("tool_calls", [])
+                if reasoning:
+                    logger.info(f"🧠 [{self.expert_type}] R{round_num} 补查理由: {reasoning}")
+                # 注入 engine 字段
+                for tc in tool_calls:
+                    if "engine" not in tc:
+                        tc["engine"] = self.expert_type
+                return {"tool_calls": tool_calls}
+
+            # 兜底: 尝试从 [TOOL_CALL] / <tool_call> 幻觉格式中提取
+            if "[TOOL_CALL]" in raw_text or "<tool_call>" in raw_text:
+                fallback = self._parse_tool_call_tags(raw_text)
+                if fallback["tool_calls"]:
+                    logger.info(
+                        f"🔧 [{self.expert_type}] _plan_tools_with_context R{round_num}: "
+                        f"从 [TOOL_CALL] 标签兜底恢复 {len(fallback['tool_calls'])} 个工具调用"
+                    )
+                    for tc in fallback["tool_calls"]:
+                        if "engine" not in tc:
+                            tc["engine"] = self.expert_type
+                    return fallback
+
+        except Exception as e:
+            logger.warning(f"_plan_tools_with_context R{round_num} 异常: {e}")
+
+        return {"tool_calls": []}
 
     async def _plan_tools(self, message: str) -> dict:
         """让 LLM 规划需要调用的工具（流式收集 + think 标签剥离）"""
@@ -467,6 +802,13 @@ class EngineExpert:
             ]):
                 chunks.append(token)
             text = "".join(chunks).strip()
+
+            # ── DEBUG: 记录工具规划阶段的 LLM 原始输出 ──
+            if LLM_DEBUG_RAW:
+                logger.info(
+                    f"🔬 [{self.expert_type}] _plan_tools 原始输出 "
+                    f"(长度={len(text)}字):\n{text}"
+                )
 
             if not text:
                 logger.warning("工具规划 LLM 返回空内容，跳过工具调用")
@@ -507,6 +849,16 @@ class EngineExpert:
                     text = json_match.group(0)
                     logger.info("工具规划: 从原始文本兜底提取到 JSON")
                 else:
+                    # 兜底: 尝试从 [TOOL_CALL] / <tool_call> 幻觉格式中提取
+                    if "[TOOL_CALL]" in raw_text or "<tool_call>" in raw_text:
+                        fallback = self._parse_tool_call_tags(raw_text)
+                        if fallback["tool_calls"]:
+                            logger.info(
+                                f"🔧 [{self.expert_type}] _plan_tools: "
+                                f"JSON 提取全失败，从 [TOOL_CALL] 标签兜底恢复 "
+                                f"{len(fallback['tool_calls'])} 个工具调用"
+                            )
+                            return fallback
                     return {"tool_calls": []}
 
             # 先尝试直接解析
@@ -531,7 +883,17 @@ class EngineExpert:
                         return json.loads(tc_match2.group(0))
                 raise
         except Exception as e:
-            logger.warning(f"工具规划失败，跳过工具调用: {e}")
+            logger.warning(f"工具规划失败，尝试 [TOOL_CALL] 兜底: {e}")
+            # 最终兜底: 如果 JSON 解析全部失败，尝试从 [TOOL_CALL] 标签中恢复
+            if "[TOOL_CALL]" in raw_text or "<tool_call>" in raw_text:
+                fallback = self._parse_tool_call_tags(raw_text)
+                if fallback["tool_calls"]:
+                    logger.info(
+                        f"🔧 [{self.expert_type}] _plan_tools: "
+                        f"JSON 解析异常后从标签兜底恢复 "
+                        f"{len(fallback['tool_calls'])} 个工具调用"
+                    )
+                    return fallback
             return {"tool_calls": []}
 
     @staticmethod
@@ -655,402 +1017,83 @@ class EngineExpert:
             return None
 
     async def _execute_tool(self, tc: dict) -> str:
-        """执行单个工具调用 — 直接调用引擎单例，不走 HTTP"""
+        """执行单个工具调用 — 通过 SkillRegistry 统一分发
+
+        SkillRegistry 自动处理：参数校验、类型转换、错误捕获。
+        上下文（data_engine, ensure_snapshot, resolve_code）通过 context dict 注入。
+        """
+        from engine.expert.skill_registry import SkillRegistry
+
         action = tc["action"]
         params = tc.get("params", {})
 
+        # 构建执行上下文 — Skill handler 可按需取用
         try:
-            if self.expert_type == "data":
-                return await self._exec_data_tool(action, params)
-            elif self.expert_type == "quant":
-                return await self._exec_quant_tool(action, params)
-            elif self.expert_type == "info":
-                return await self._exec_info_tool(action, params)
-            elif self.expert_type == "industry":
-                return await self._exec_industry_tool(action, params)
+            from engine.data import get_data_engine
+            de = get_data_engine()
+        except Exception:
+            de = None
+
+        context = {
+            "de": de,
+            "ensure_snapshot": self._ensure_snapshot,
+            "resolve_code": self._resolve_code,
+        }
+
+        try:
+            return await SkillRegistry.execute(action, params, context=context)
         except Exception as e:
             logger.error(f"工具执行失败 [{action}]: {e}")
             return json.dumps({"error": f"工具调用失败: {e}"}, ensure_ascii=False)
 
-        return json.dumps({"error": "未知引擎类型"}, ensure_ascii=False)
+    # ── 旧的 _exec_*_tool 方法已迁移到 engine/expert/skills/ 目录 ──
+    # 现在所有工具通过 SkillRegistry 统一注册和执行
 
-    async def _exec_data_tool(self, action: str, params: dict) -> str:
-        """DataEngine 工具 — 直接调用引擎单例"""
-        import asyncio
-        import datetime
-        import json
-        from engine.data import get_data_engine
+    @staticmethod
+    def _extract_validation_summary(tool_results: list[str]) -> str:
+        """从工具结果中提取数据校验摘要
 
-        de = get_data_engine()
-
-        if action == "get_current_date":
-            now = datetime.datetime.now()
-            return json.dumps({
-                "date": now.strftime("%Y-%m-%d"),
-                "time": now.strftime("%H:%M:%S"),
-                "weekday": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()],
-                "is_trading_day": now.weekday() < 5,  # 简化判断：工作日
-            }, ensure_ascii=False)
-
-        elif action == "query_market_overview":
-            snap = await self._ensure_snapshot(de)
-            if snap is None or snap.empty:
-                return json.dumps({"error": "无快照数据，请先在主页刷新行情"}, ensure_ascii=False)
-            total = len(snap)
-            up = int((snap.get("pct_chg", pd.Series()) > 0).sum()) if "pct_chg" in snap.columns else 0
-            down = int((snap.get("pct_chg", pd.Series()) < 0).sum()) if "pct_chg" in snap.columns else 0
-            return json.dumps({"total_stocks": total, "up": up, "down": down, "flat": total - up - down}, ensure_ascii=False)
-
-        elif action == "search_stocks":
-            snap = await self._ensure_snapshot(de)
-            if snap is None or snap.empty:
-                return json.dumps({"error": "无快照数据，请先在主页刷新行情"}, ensure_ascii=False)
-            query = params.get("query", "").lower()
-            results = []
-            for _, row in snap.iterrows():
-                code = str(row.get("code", ""))
-                name = str(row.get("name", ""))
-                if query in code.lower() or query in name.lower():
-                    results.append({"code": code, "name": name,
-                                    "price": float(row.get("price", 0)),
-                                    "pct_chg": float(row.get("pct_chg", 0))})
-                if len(results) >= 20:
-                    break
-            return json.dumps({"results": results, "count": len(results)}, ensure_ascii=False, default=str)
-
-        elif action == "query_stock":
-            code = self._resolve_code(params.get("code", ""))
-            snap = await self._ensure_snapshot(de)
-            if snap is None or snap.empty:
-                return json.dumps({"error": "无快照数据，请先在主页刷新行情"}, ensure_ascii=False)
-            row = snap[snap["code"].astype(str) == code]
-            if row.empty:
-                return json.dumps({"error": f"未找到 {code}"}, ensure_ascii=False)
-            return row.iloc[0].to_json(force_ascii=False, default_handler=str)
-
-        elif action == "query_history":
-            code = self._resolve_code(params.get("code", ""))
-            days = int(params.get("days", 60))
-            # days 是交易日数，乘以 1.8 换算日历天（含周末/节假日冗余）
-            calendar_days = max(days, 10) * 1.8 + 10
-            today = datetime.date.today()
-            end = today.strftime("%Y-%m-%d")
-            start = (today - datetime.timedelta(days=int(calendar_days))).strftime("%Y-%m-%d")
-            df = await asyncio.to_thread(de.get_daily_history, code, start, end)
-            if df is None or df.empty:
-                return json.dumps({"empty": True, "note": f"无 {code} 日线数据"}, ensure_ascii=False)
-
-            # ── 用实时快照补充当天数据（仅交易时段：工作日 9:15~15:30） ──
+        扫描每个工具返回的 JSON 中的 _validation 字段，
+        汇总所有 warn/error 级别的问题，生成给 LLM 的提示文本。
+        """
+        issues = []
+        for result in tool_results:
+            if not result or "_validation" not in result:
+                continue
             try:
-                now = datetime.datetime.now()
-                is_trading_hours = (
-                    now.weekday() < 5
-                    and datetime.time(9, 15) <= now.time() <= datetime.time(15, 30)
-                )
-                if is_trading_hours:
-                    snap = de.get_snapshot()
-                    if snap is not None and not snap.empty:
-                        row = snap[snap["code"].astype(str) == code]
-                        if not row.empty:
-                            r = row.iloc[0]
-                            realtime_price = float(r.get("price", 0))
-                            today_str = today.strftime("%Y-%m-%d")
-                            date_col = "date" if "date" in df.columns else ("trade_date" if "trade_date" in df.columns else None)
-                            last_date = str(df[date_col].iloc[-1])[:10] if date_col else ""
-                            if realtime_price > 0 and last_date != today_str:
-                                # 计算涨跌幅（基于上一交易日收盘价）
-                                prev_close = float(df["close"].iloc[-1]) if "close" in df.columns and len(df) > 0 else 0
-                                pct_chg = round((realtime_price - prev_close) / prev_close * 100, 2) if prev_close > 0 else 0
-                                new_row = {
-                                    "close": realtime_price,
-                                    "open": float(r.get("open", realtime_price)),
-                                    "high": float(r.get("high", realtime_price)),
-                                    "low": float(r.get("low", realtime_price)),
-                                    "volume": float(r.get("volume", 0)),
-                                    "amount": float(r.get("amount", 0)),
-                                    "pct_chg": pct_chg,
-                                    "turnover_rate": float(r.get("turnover_rate", 0)),
-                                }
-                                if date_col:
-                                    new_row[date_col] = today_str
-                                if "code" in df.columns:
-                                    new_row["code"] = code
-                                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-            except Exception:
-                pass
+                data = json.loads(result)
+                validation = data.get("_validation", {})
+                if not validation or validation.get("status") == "ok":
+                    continue
+                for issue in validation.get("issues", []):
+                    level = issue.get("level", "info")
+                    if level in ("warn", "error"):
+                        issues.append(f"[{level.upper()}] {issue.get('msg', '')}")
+            except (json.JSONDecodeError, Exception):
+                continue
 
-            # 返回用户请求的天数（而非固定 20），确保数据完整
-            return_rows = max(days, 20)
-            records = df.tail(return_rows).to_dict("records")
-            return json.dumps({"code": code, "records": records, "total_days": len(df)},
-                              ensure_ascii=False, default=str)
+        if not issues:
+            return ""
 
-        elif action == "query_cluster":
-            from engine.cluster import get_cluster_engine
-            ce = get_cluster_engine()
-            cluster_id = params.get("cluster_id", 0)
-            result = ce.get_cluster_stocks(cluster_id)
-            return json.dumps(result, ensure_ascii=False, default=str) if result else json.dumps({"empty": True, "note": f"聚类 {cluster_id} 无数据"}, ensure_ascii=False)
-
-        elif action == "find_similar_stocks":
-            from engine.cluster import get_cluster_engine
-            ce = get_cluster_engine()
-            code = self._resolve_code(params.get("code", ""))
-            top_k = params.get("top_k", 10)
-            result = ce.find_similar(code, top_k)
-            return json.dumps(result, ensure_ascii=False, default=str) if result else json.dumps({"empty": True, "note": f"未找到 {code} 的相似股票"}, ensure_ascii=False)
-
-        elif action == "run_screen":
-            snap = await self._ensure_snapshot(de)
-            if snap is None or snap.empty:
-                return json.dumps({"error": "无快照数据，请先在主页刷新行情"}, ensure_ascii=False)
-            filters = params.get("filters", {})
-            result = snap.copy()
-            for col, cond in filters.items():
-                if col in result.columns:
-                    if isinstance(cond, dict):
-                        if "gt" in cond:
-                            result = result[pd.to_numeric(result[col], errors="coerce") > cond["gt"]]
-                        if "lt" in cond:
-                            result = result[pd.to_numeric(result[col], errors="coerce") < cond["lt"]]
-            records = result.head(30).to_dict("records")
-            return json.dumps({"count": len(result), "results": records}, ensure_ascii=False, default=str)
-
-        elif action == "query_hourly":
-            code = self._resolve_code(params.get("code", ""))
-            days = int(params.get("days", 5))
-            df = await asyncio.to_thread(de.get_kline, code, "60m", days)
-            if df is None or df.empty:
-                return json.dumps({"empty": True, "note": f"无 {code} 小时线数据"}, ensure_ascii=False)
-            records = df.tail(20).to_dict("records")
-            return json.dumps({"code": code, "frequency": "60m", "records": records,
-                                "total_bars": len(df)},
-                              ensure_ascii=False, default=str)
-
-        return json.dumps({"error": f"未知 data 工具: {action}"}, ensure_ascii=False)
-
-    async def _exec_quant_tool(self, action: str, params: dict) -> str:
-        """QuantEngine 工具 — 直接调用引擎单例"""
-        import asyncio
-        import datetime
-        import json
-        import pandas as pd
-        from engine.quant import get_quant_engine
-        from engine.data import get_data_engine
-
-        qe = get_quant_engine()
-        de = get_data_engine()
-
-        if action == "get_technical_indicators":
-            code = self._resolve_code(params.get("code", ""))
-            days = 120
-            today = datetime.date.today()
-            end = today.strftime("%Y-%m-%d")
-            start = (today - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
-            daily = await asyncio.to_thread(de.get_daily_history, code, start, end)
-            if daily is None or daily.empty:
-                return json.dumps({"error": f"无 {code} 日线数据，无法计算技术指标"}, ensure_ascii=False)
-
-            # ── 用实时快照补充当天数据，避免日线缺少当天行情 ──
-            realtime_price = None
-            realtime_pct = None
-            try:
-                snap = de.get_snapshot()
-                if snap is not None and not snap.empty:
-                    row = snap[snap["code"].astype(str) == code]
-                    if not row.empty:
-                        r = row.iloc[0]
-                        realtime_price = float(r.get("price", 0))
-                        realtime_pct = float(r.get("pct_chg", 0))
-                        today_str = today.strftime("%Y-%m-%d")
-                        # 检查日线最后一条的日期
-                        date_col = "date" if "date" in daily.columns else ("trade_date" if "trade_date" in daily.columns else None)
-                        last_date = ""
-                        if date_col:
-                            last_date = str(daily[date_col].iloc[-1])[:10]
-
-                        if realtime_price > 0 and last_date != today_str:
-                            # 日线缺少今天的数据，用实时快照补一行
-                            new_row = {
-                                "close": realtime_price,
-                                "volume": float(r.get("volume", 0)),
-                                "amount": float(r.get("amount", 0)),
-                                "turnover_rate": float(r.get("turnover_rate", 0)),
-                            }
-                            if date_col:
-                                new_row[date_col] = today_str
-                            if "code" in daily.columns:
-                                new_row["code"] = code
-                            # 推算 open/high/low（用实时价近似，有 high/low 就用）
-                            new_row["open"] = float(r.get("open", realtime_price))
-                            new_row["high"] = float(r.get("high", realtime_price))
-                            new_row["low"] = float(r.get("low", realtime_price))
-                            daily = pd.concat([daily, pd.DataFrame([new_row])], ignore_index=True)
-            except Exception:
-                pass  # 快照补充失败不影响主流程
-
-            indicators = qe.compute_indicators(daily)
-            result = {"code": code, "data_days": len(daily), "indicators": indicators}
-            # 附带实时价格，确保量化专家看到最新价
-            if realtime_price and realtime_price > 0:
-                result["realtime_price"] = realtime_price
-                result["realtime_pct_chg"] = realtime_pct
-            return json.dumps(result, ensure_ascii=False, default=str)
-
-        elif action == "get_factor_scores":
-            snap = await self._ensure_snapshot(de)
-            if snap is None or snap.empty:
-                return json.dumps({"error": "无快照数据，请先在主页刷新行情"}, ensure_ascii=False)
-            code = self._resolve_code(params.get("code", ""))
-            row = snap[snap["code"].astype(str) == code]
-            if row.empty:
-                return json.dumps({"error": f"快照中未找到 {code}"}, ensure_ascii=False)
-            weights, source = qe.get_factor_weights()
-            factor_defs = qe.get_factor_defs()
-            factors = {}
-            for fdef in factor_defs:
-                val = row.iloc[0].get(fdef.source_col)
-                factors[fdef.name] = {"value": float(val) if val is not None and str(val) != "nan" else None,
-                                       "weight": weights.get(fdef.name, 0), "direction": fdef.direction,
-                                       "desc": fdef.desc}
-            return json.dumps({"code": code, "factors": factors, "weight_source": source},
-                              ensure_ascii=False, default=str)
-
-        elif action == "query_factor_analysis":
-            factor_name = params.get("factor_name")
-            factor_defs = qe.get_factor_defs()
-            weights, source = qe.get_factor_weights()
-            if factor_name:
-                matched = [f for f in factor_defs if f.name == factor_name]
-                if not matched:
-                    return json.dumps({"error": f"未找到因子: {factor_name}"}, ensure_ascii=False)
-                f = matched[0]
-                return json.dumps({"name": f.name, "source_col": f.source_col, "direction": f.direction,
-                                   "group": f.group, "weight": weights.get(f.name, 0), "desc": f.desc},
-                                  ensure_ascii=False)
-            # 全景
-            all_factors = [{"name": f.name, "group": f.group, "direction": f.direction,
-                            "weight": weights.get(f.name, 0), "desc": f.desc} for f in factor_defs]
-            return json.dumps({"weight_source": source, "factors": all_factors}, ensure_ascii=False)
-
-        elif action == "run_backtest":
-            result = await asyncio.to_thread(qe.run_backtest, rolling_window=params.get("rolling_window", 20))
-            return json.dumps({"backtest_days": result.backtest_days, "icir_weights": result.icir_weights},
-                              ensure_ascii=False, default=str)
-
-        elif action == "run_screen":
-            return await self._exec_data_tool("run_screen", params)
-
-        elif action == "query_hourly":
-            code = self._resolve_code(params.get("code", ""))
-            days = int(params.get("days", 5))
-            df = await asyncio.to_thread(de.get_kline, code, "60m", days)
-            if df is None or df.empty:
-                return json.dumps({"empty": True, "note": f"无 {code} 小时线数据"}, ensure_ascii=False)
-            records = df.tail(20).to_dict("records")
-            return json.dumps({"code": code, "frequency": "60m", "records": records,
-                                "total_bars": len(df)},
-                              ensure_ascii=False, default=str)
-
-        return json.dumps({"error": f"未知 quant 工具: {action}"}, ensure_ascii=False)
-
-    async def _exec_info_tool(self, action: str, params: dict) -> str:
-        """InfoEngine 工具 — 直接调用引擎单例"""
-        import asyncio
-        import json
-        from engine.data import get_data_engine
-
-        de = get_data_engine()
-
-        if action == "get_news":
-            code = self._resolve_code(params.get("code", ""))
-            limit = params.get("limit", 20)
-            news_df = await asyncio.to_thread(de.get_news, code, limit)
-            if news_df is None or (hasattr(news_df, 'empty') and news_df.empty):
-                return json.dumps({"empty": True, "note": f"{code} 近期无新闻数据"}, ensure_ascii=False)
-            # DataFrame → list[dict]
-            if hasattr(news_df, 'to_dict'):
-                records = news_df.to_dict("records")
-            else:
-                records = news_df
-            return json.dumps({"code": code, "news": records}, ensure_ascii=False, default=str)
-
-        elif action == "get_announcements":
-            code = self._resolve_code(params.get("code", ""))
-            limit = params.get("limit", 10)
-            try:
-                ann_df = await asyncio.to_thread(de.get_announcements, code, limit)
-                if ann_df is None or (hasattr(ann_df, 'empty') and ann_df.empty):
-                    return json.dumps({"empty": True, "note": f"{code} 近7天无公告"}, ensure_ascii=False)
-                if hasattr(ann_df, 'to_dict'):
-                    records = ann_df.to_dict("records")
-                else:
-                    records = ann_df
-                return json.dumps({"code": code, "announcements": records}, ensure_ascii=False, default=str)
-            except AttributeError:
-                return json.dumps({"error": "公告功能暂未实现"}, ensure_ascii=False)
-
-        elif action == "assess_event_impact":
-            # 事件影响评估需要 LLM
-            code = self._resolve_code(params.get("code", ""))
-            event_desc = params.get("event_desc", "")
-            return json.dumps({"code": code, "event": event_desc,
-                              "note": "事件影响评估需结合新闻和技术面综合分析"}, ensure_ascii=False)
-
-        return f"未知 info 工具: {action}"
-
-    async def _exec_industry_tool(self, action: str, params: dict) -> str:
-        """IndustryEngine 工具 — 直接调用引擎单例"""
-        import asyncio
-        import json
-
-        if action == "query_industry_cognition":
-            from engine.industry import get_industry_engine
-            ie = get_industry_engine()
-            target = params.get("target", "")
-            try:
-                # analyze() 是 async 方法，直接 await（不能用 asyncio.to_thread）
-                result = await ie.analyze(target=target)
-                if result:
-                    return json.dumps(result, ensure_ascii=False, default=str)
-                return f"⚠️ 需要后端在线且配置 LLM 才能获取产业链认知"
-            except Exception as e:
-                return f"产业链认知查询失败: {e}"
-
-        elif action == "query_industry_mapping":
-            from engine.industry import get_industry_engine
-            ie = get_industry_engine()
-            try:
-                result = await asyncio.to_thread(ie.get_industry_mapping)
-                return json.dumps(result, ensure_ascii=False, default=str) if result else json.dumps({"empty": True, "note": "无映射数据"}, ensure_ascii=False)
-            except Exception as e:
-                return json.dumps({"error": f"行业映射查询失败: {e}"}, ensure_ascii=False)
-
-        elif action == "query_capital_structure":
-            from engine.industry import get_industry_engine
-            ie = get_industry_engine()
-            raw_code = params.get("code", "")
-            # 如果是市场整体/板块查询，返回提示信息
-            if raw_code in ("市场整体", "A股市场", "全市场", "市场板块", "板块轮动"):
-                return json.dumps({
-                    "error": "资金构成需要具体股票代码",
-                    "hint": "请使用 query_industry_mapping 查询板块成分股，或用 search_stocks 搜索具体股票"
-                }, ensure_ascii=False)
-            code = self._resolve_code(raw_code)
-            try:
-                # get_capital_structure 是 async 方法，直接 await
-                result = await ie.get_capital_structure(code)
-                return json.dumps(result, ensure_ascii=False, default=str) if result else f"无 {code} 资金构成数据"
-            except Exception as e:
-                return f"资金构成查询失败: {e}"
-
-        return f"未知 industry 工具: {action}"
+        return (
+            "\n\n⚠️ 数据质量警告（DataValidator 自动检测到以下问题）:\n"
+            + "\n".join(f"  - {i}" for i in issues)
+            + "\n请在回复中告知用户这些数据异常，避免基于可能有问题的数据做出错误分析。"
+            "如果某个指标数据明显异常，建议用户谨慎参考或换用其他数据源。"
+        )
 
     async def _retry_reply_non_stream(
         self, message: str, tool_results: list[str],
         history: list[dict] | None = None,
+        validation_summary: str = "",
     ) -> str:
-        """非流式重新生成回复（当流式回复被 think 标签吞掉时的回退方案）"""
+        """非流式重新生成回复（当流式回复被 think 标签吞掉时的回退方案）
+
+        策略：
+        1. 第一次调用 LLM，剥离 think/tool_call 后检查有效内容
+        2. 如果有效内容仍然过短（< 200 字），提取 think 中的推理草稿
+           + 工具数据，用更强硬的 prompt 做第二次调用
+        """
         import re
         from llm.providers import ChatMessage
         from engine.expert.personas import get_current_date_context
@@ -1063,9 +1106,24 @@ class EngineExpert:
         system += (
             "\n\n⚠️ 重要：你的所有数据通过工具从数据源实时拉取，"
             "不受模型训练截止日期限制。绝对不要提及「知识截止」「训练数据截止」等字眼。"
-            "\n\n🚫 绝对不要使用 <think> 标签！直接输出你的完整专业分析。"
-            "不要输出任何思考过程标签或 XML 标签。请直接用 Markdown 格式给出详细分析。"
+            "\n\n🚫🚫🚫 以下规则最高优先级 🚫🚫🚫"
+            "\n1. 绝对不要输出任何工具调用！不要输出 [TOOL_CALL]、<tool_call>、function_call、"
+            "struct Tool 或任何格式的工具调用代码。"
+            "你的工具已在前一步全部执行完毕，数据已在下方提供。"
+            "\n2. 直接用 Markdown 格式基于下方已有数据给出详细分析。如果数据不够，就基于已有数据分析，"
+            "不要试图调用新的工具或说「正在筛选」「正在获取」。"
+            "\n3. 回复必须包含具体的数据分析结论，不能只说「我来扫描」就结束。"
         )
+        if not tool_results:
+            system += (
+                "\n\n📌 当前没有从工具获取到数据（可能你的工具不覆盖此类查询）。"
+                "请直接基于你的专业知识回答用户问题，明确说明你能力范围内的分析，"
+                "并坦诚指出哪些方面超出了你的工具能力。"
+                "绝对不要尝试调用任何工具或输出工具调用格式，直接给出文字分析即可。"
+            )
+        # ── 注入数据质量警告 ──
+        if validation_summary:
+            system += validation_summary
         if context_parts:
             system += "\n\n" + "\n\n".join(context_parts)
 
@@ -1078,14 +1136,99 @@ class EngineExpert:
 
         result = await self._llm.chat(messages)
 
-        # 剥离可能的 think 标签
-        result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL).strip()
+        # ── DEBUG: 记录非流式重生成的原始输出 ──
+        if _is_llm_debug_raw():
+            logger.info(
+                f"🔬 [{self.expert_type}] _retry_reply_non_stream 第1次原始输出 "
+                f"(长度={len(result)}字):\n{result[:2000]}{'...(截断)' if len(result) > 2000 else ''}"
+            )
+
+        # 保存原始结果（用于后续提取 think 草稿）
+        raw_result = result
+
+        # 剥离标签
+        result = self._strip_llm_tags(result)
+
+        # ── DEBUG: 记录剥离后的内容 ──
+        if _is_llm_debug_raw():
+            logger.info(
+                f"🔬 [{self.expert_type}] _retry_reply_non_stream 第1次剥离后 "
+                f"(长度={len(result)}字)"
+            )
+
+        # ── 第二次调用：如果剥离后内容仍然过短，说明模型又把有效分析全写在 think 里了 ──
+        if len(result.strip()) < 200 and tool_results:
+            # 提取 think 中的推理草稿
+            think_draft = ""
+            think_match = re.search(r"<think>(.*?)</think>", raw_result, re.DOTALL)
+            if think_match:
+                think_draft = think_match.group(1).strip()
+
+            logger.warning(
+                f"⚠️ [{self.expert_type}] 非流式重生成第1次仍然过短({len(result.strip())}字)，"
+                f"提取think草稿({len(think_draft)}字)后做第2次调用"
+            )
+
+            # 构建更强硬的第二次 prompt：直接把 think 草稿和工具数据都给它
+            system2 = self.profile["system_prompt"] + f"\n⏰ 当前时间：{get_current_date_context()}"
+            system2 += (
+                "\n\n你之前已经完成了数据分析（见下方「分析草稿」），现在请直接把分析结果整理成"
+                "用户可以看到的完整 Markdown 报告。"
+                "\n\n🚫 绝对禁止输出任何工具调用代码（[TOOL_CALL]、<tool_call> 等）。"
+                "你不需要再调用任何工具，所有数据已在下方提供。"
+                "\n\n🚫 不要说「正在筛选」「让我调用」之类的话，直接给出分析结论。"
+            )
+            if think_draft:
+                system2 += f"\n\n## 你之前的分析草稿（请基于此整理输出）\n{think_draft}"
+            if context_parts:
+                system2 += "\n\n" + "\n\n".join(context_parts)
+
+            messages2 = [ChatMessage("system", system2)]
+            messages2.append(ChatMessage("user", message))
+
+            result2 = await self._llm.chat(messages2)
+
+            if _is_llm_debug_raw():
+                logger.info(
+                    f"🔬 [{self.expert_type}] _retry_reply_non_stream 第2次原始输出 "
+                    f"(长度={len(result2)}字):\n{result2[:2000]}{'...(截断)' if len(result2) > 2000 else ''}"
+                )
+
+            result2 = self._strip_llm_tags(result2)
+
+            if _is_llm_debug_raw():
+                logger.info(
+                    f"🔬 [{self.expert_type}] _retry_reply_non_stream 第2次剥离后 "
+                    f"(长度={len(result2)}字)"
+                )
+
+            # 如果第二次比第一次好，用第二次
+            if len(result2.strip()) > len(result.strip()):
+                result = result2
 
         return result
+
+    @staticmethod
+    def _strip_llm_tags(text: str) -> str:
+        """剥离 LLM 输出中的 think / tool_call 等标签，返回纯正文"""
+        import re
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        # 未闭合的 <think>（模型输出被截断）
+        if "<think>" in text:
+            text = text.split("<think>", 1)[0].strip()
+        text = re.sub(r"\[TOOL_CALL\].*?\[/TOOL_CALL\]", "", text, flags=re.DOTALL).strip()
+        text = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL).strip()
+        text = re.sub(r"<minimax:tool_call>.*?</minimax:tool_call>", "", text, flags=re.DOTALL).strip()
+        # 清理散落的工具调用片段（未闭合的）
+        text = re.sub(r"\[TOOL_CALL\].*$", "", text, flags=re.DOTALL).strip()
+        text = re.sub(r"<tool_call>.*$", "", text, flags=re.DOTALL).strip()
+        text = re.sub(r"\{tool\s*=>.*$", "", text, flags=re.DOTALL).strip()
+        return text
 
     async def _reply_stream(
         self, message: str, tool_results: list[str],
         history: list[dict] | None = None,
+        validation_summary: str = "",
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复（自动过滤 <think> / <minimax:*> 标签内容）"""
         from llm.providers import ChatMessage
@@ -1099,12 +1242,24 @@ class EngineExpert:
         system += (
             "\n\n⚠️ 重要：你的所有数据通过工具从数据源实时拉取，"
             "不受模型训练截止日期限制。绝对不要提及「知识截止」「训练数据截止」等字眼。"
-            "\n\n🚫 绝对不要使用 <think> 标签！直接输出你的分析和结论。"
-            "不要输出任何思考过程标签，直接给出完整的专业分析回复。"
-            "\n\n🚫 绝对不要在回复中输出任何工具调用！包括 [TOOL_CALL]、<tool_call>、"
-            "function_call 等任何格式的工具调用语法。你的工具已在前一步自动执行完毕，"
-            "结果已包含在上下文中。直接基于已有数据进行分析和回答，不要试图调用新工具。"
+            "\n\n🚫🚫🚫 以下规则最高优先级 🚫🚫🚫"
+            "\n1. 绝对不要在回复正文中输出任何工具调用！包括 [TOOL_CALL]、<tool_call>、"
+            "function_call、struct Tool 或任何格式的工具调用代码。"
+            "你的工具已在前一步自动执行完毕，结果已包含在上下文中。"
+            "\n2. 直接基于下方已有数据进行分析和回答。如果数据不够也要基于已有数据给出结论，"
+            "不要说「正在筛选」「正在获取」「让我查一下」就结束。"
+            "\n3. 回复必须包含具体的数据分析结论、明确的看法和具体标的推荐（如果数据支持）。"
         )
+        if not tool_results:
+            system += (
+                "\n\n📌 当前没有从工具获取到数据（可能你的工具不覆盖此类查询）。"
+                "请直接基于你的专业知识回答用户问题，明确说明你能力范围内的分析，"
+                "并坦诚指出哪些方面超出了你的工具能力。"
+                "绝对不要尝试调用任何工具或输出工具调用格式，直接给出文字分析即可。"
+            )
+        # ── 注入数据质量警告 ──
+        if validation_summary:
+            system += validation_summary
         if context_parts:
             system += "\n\n" + "\n\n".join(context_parts)
 
@@ -1120,6 +1275,11 @@ class EngineExpert:
         in_skip = False          # 跳过区域
         skip_end_tag = ""        # 当前跳过区域的结束标签
         raw_buffer = ""
+
+        # ── DEBUG: 收集完整原始输出和被 skip 的内容 ──
+        _debug_raw_all = []       # LLM 原始输出（所有 token 拼接）
+        _debug_skipped_parts = [] # 被 skip 标签过滤掉的内容
+        _debug_current_skip = []  # 当前正在 skip 的内容
 
         # 需要过滤的标签及其结束标签（包括 XML 尖括号和方括号格式）
         SKIP_TAGS = {
@@ -1138,6 +1298,10 @@ class EngineExpert:
             async for token in self._llm.chat_stream(messages):
                 raw_buffer += token
 
+                # ── DEBUG: 收集原始 token ──
+                if LLM_DEBUG_RAW:
+                    _debug_raw_all.append(token)
+
                 # 检测进入跳过区域
                 if not in_skip:
                     for start_tag, end_tag in SKIP_TAGS.items():
@@ -1150,12 +1314,20 @@ class EngineExpert:
                             skip_end_tag = end_tag
                             skip_bytes = 0
                             raw_buffer = raw_buffer.split(start_tag, 1)[1]
+                            # ── DEBUG: 记录 skip 区域开始 ──
+                            if LLM_DEBUG_RAW:
+                                _debug_current_skip = [f"{start_tag}", raw_buffer]
                             break
                     if in_skip:
                         continue
 
                 # 检测离开跳过区域
                 if in_skip and skip_end_tag in raw_buffer:
+                    # ── DEBUG: 记录 skip 区域结束 ──
+                    if LLM_DEBUG_RAW:
+                        _debug_current_skip.append(skip_end_tag)
+                        _debug_skipped_parts.append("".join(_debug_current_skip))
+                        _debug_current_skip = []
                     in_skip = False
                     remaining = raw_buffer.split(skip_end_tag, 1)[1]
                     raw_buffer = remaining.lstrip("\n")
@@ -1165,11 +1337,19 @@ class EngineExpert:
 
                 # 在跳过块内：丢弃内容，但防止缓冲区无限增长
                 if in_skip:
+                    # ── DEBUG: 收集被 skip 的内容 ──
+                    if LLM_DEBUG_RAW:
+                        _debug_current_skip.append(token)
                     skip_bytes += len(token)
                     # 保护：如果 skip 区域累积超过 20000 字节还未关闭，强制退出
                     # （MiniMax-M2.5 的 <think> 内容通常在 5000~15000 字节）
                     if skip_bytes > 20000:
                         logger.warning(f"skip 区域未关闭(>{skip_bytes}B)，强制退出: {skip_end_tag}")
+                        # ── DEBUG: 记录未关闭的 skip ──
+                        if LLM_DEBUG_RAW:
+                            _debug_current_skip.append(f"[FORCE_EXIT>{skip_bytes}B]")
+                            _debug_skipped_parts.append("".join(_debug_current_skip))
+                            _debug_current_skip = []
                         in_skip = False
                         raw_buffer = ""
                         skip_end_tag = ""
@@ -1194,37 +1374,41 @@ class EngineExpert:
             if raw_buffer and not in_skip:
                 accumulated += raw_buffer
                 yield raw_buffer, accumulated
+            # ── DEBUG: 如果流结束时还在 skip 中，记录未关闭的部分 ──
+            elif in_skip and LLM_DEBUG_RAW:
+                _debug_current_skip.append("[STREAM_END_IN_SKIP]")
+                _debug_skipped_parts.append("".join(_debug_current_skip))
 
         except Exception as e:
             logger.error(f"reply_stream 失败: {e}")
             yield f"回复生成失败: {e}", f"回复生成失败: {e}"
+        finally:
+            # ── DEBUG: 打印完整的 LLM 原始输出诊断日志 ──
+            if LLM_DEBUG_RAW:
+                raw_full = "".join(_debug_raw_all)
+                logger.info(
+                    f"\n{'='*60}\n"
+                    f"🔬 [{self.expert_type}] LLM 原始输出 DEBUG\n"
+                    f"{'='*60}\n"
+                    f"📏 原始总长度: {len(raw_full)} 字符\n"
+                    f"📝 保留内容长度: {len(accumulated)} 字符\n"
+                    f"🗑️ 被过滤块数: {len(_debug_skipped_parts)}\n"
+                    f"{'─'*60}\n"
+                    f"📤 LLM 完整原始输出:\n{raw_full}\n"
+                    f"{'─'*60}\n"
+                    f"✅ 保留给用户的内容:\n{accumulated}\n"
+                    f"{'─'*60}"
+                )
+                for i, sp in enumerate(_debug_skipped_parts):
+                    logger.info(
+                        f"🗑️ [{self.expert_type}] 被过滤块[{i}] "
+                        f"(长度={len(sp)}字): {sp[:1000]}{'...(截断)' if len(sp) > 1000 else ''}"
+                    )
 
     def _get_available_tools_desc(self) -> str:
-        """获取当前引擎可用工具的描述"""
-        TOOLS_DESC = {
-            "data": """- get_current_date(): 获取当前日期、时间、星期几、是否交易日
-- query_market_overview(): 全市场概览快照
-- search_stocks(query: str): 股票搜索（模糊匹配代码或名称）
-- query_stock(code: str): 单股全维度分析，code 示例: '000001'
-- query_cluster(cluster_id: int): 查询指定聚类信息
-- find_similar_stocks(code: str, top_k: int): 跨簇相似股票搜索
-- query_history(code: str, days: int): 历史行情数据。days 是交易日天数（非日历天），用户问30天就传30，问60天就传60，默认60
-- query_hourly(code: str, days: int): 查询个股小时线K线（60分钟级别），默认5个交易日
-- run_screen(filters: dict): 条件选股""",
-            "quant": """- get_technical_indicators(code: str): 获取技术指标（RSI/MACD/布林带）
-- get_factor_scores(code: str): 获取多因子评分
-- query_factor_analysis(factor_name: str): 查看因子体系，不传名称返回全景
-- run_backtest(rolling_window: int, auto_inject: bool): 因子 IC 回测
-- run_screen(filters: dict, sort_by: str): 条件选股
-- query_hourly(code: str, days: int): 查询个股小时线K线（60分钟级别），默认5个交易日""",
-            "info": """- get_news(code: str, limit: int): 获取个股新闻+情感分析
-- get_announcements(code: str, limit: int): 获取公司公告
-- assess_event_impact(code: str, event_desc: str): 评估事件影响""",
-            "industry": """- query_industry_cognition(target: str): 产业链认知（股票代码或行业名）
-- query_industry_mapping(industry: str): 行业板块列表及成分股
-- query_capital_structure(code: str): 资金构成分析""",
-        }
-        return TOOLS_DESC.get(self.expert_type, "无可用工具")
+        """获取当前引擎可用工具的描述 — 由 SkillRegistry 自动生成"""
+        from engine.expert.skill_registry import SkillRegistry
+        return SkillRegistry.get_tools_desc(self.expert_type)
 
 
 def get_expert_profiles() -> list[dict]:

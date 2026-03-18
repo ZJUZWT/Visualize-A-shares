@@ -355,18 +355,92 @@
       "id": "3d2e8043-42e6-4ae9-bc78-d12313250c4b"
     },
     {
-      "id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
       "type": "stock",
       "code": "000533",
       "name": "顺钠股份",
       "industry": "输配电气",
+      "zjh_industry": "制造业-电气机械和器材制造业",
+      "id": "f548f1ed-abc4-4842-89cd-17ae314cda97"
+    },
+    {
+      "type": "material",
+      "name": "医疗器械",
+      "category": "product",
+      "id": "65f7f099-69b1-4dac-9cb2-fc70eb5b9afb"
+    },
+    {
+      "id": "5100dba5-1ed3-4f5a-88d5-6c1e3cfac364",
+      "type": "stock",
+      "code": "002270",
+      "name": "华明装备",
+      "industry": "电网设备",
       "zjh_industry": "制造业-电气机械和器材制造业"
     },
     {
-      "id": "65f7f099-69b1-4dac-9cb2-fc70eb5b9afb",
+      "id": "d58a0058-20d8-43b2-86f2-8d9f76e8ca1f",
+      "type": "sector",
+      "name": "电网设备",
+      "category": "industry"
+    },
+    {
+      "id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
+      "type": "stock",
+      "code": "002202",
+      "name": "金风科技",
+      "industry": "风电设备",
+      "zjh_industry": "制造业-通用设备制造业"
+    },
+    {
+      "id": "2ceb5ef7-2ee0-457a-a803-9be26daf750b",
+      "type": "sector",
+      "name": "风电设备",
+      "category": "industry"
+    },
+    {
+      "id": "472ffef7-9a6b-4125-908d-11792a6a62cd",
       "type": "material",
-      "name": "医疗器械",
+      "name": "风电",
       "category": "product"
+    },
+    {
+      "id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40",
+      "type": "material",
+      "name": "风力发电",
+      "category": "product"
+    },
+    {
+      "id": "f01ae1d2-cdbf-4a14-9eeb-4cbeca39864e",
+      "type": "stock",
+      "code": "600309",
+      "name": "万华化学",
+      "industry": "化工行业",
+      "zjh_industry": "制造业-化学原料和化学制品制造业"
+    },
+    {
+      "id": "754e6d9f-2fc4-408c-80f5-c98287f0be98",
+      "type": "sector",
+      "name": "化工行业",
+      "category": "industry"
+    },
+    {
+      "id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
+      "type": "stock",
+      "code": "600860",
+      "name": "京城股份",
+      "industry": "机械行业",
+      "zjh_industry": "制造业-专用设备制造业"
+    },
+    {
+      "id": "95e82c60-3ad2-4568-af97-44a9b0bdb32c",
+      "type": "sector",
+      "name": "机械行业",
+      "category": "industry"
+    },
+    {
+      "id": "95c4dd97-ac8d-4092-a692-97be0960fce9",
+      "type": "material",
+      "name": "隔膜",
+      "category": "raw_material"
     }
   ],
   "edges": [
@@ -686,39 +760,109 @@
       "target_id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb"
     },
     {
-      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
-      "target_id": "a820950c-d51e-4ccf-aa00-784f0751233c",
       "relation": "belongs_to",
       "reason": "顺钠股份属于输配电气行业",
-      "timestamp": "2026-03-18T03:06:10.710763"
+      "timestamp": "2026-03-18T03:06:10.710763",
+      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "target_id": "a820950c-d51e-4ccf-aa00-784f0751233c"
     },
     {
-      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
-      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
       "relation": "consumes",
       "reason": "顺钠股份使用石油",
-      "timestamp": "2026-03-18T03:06:10.710965"
+      "timestamp": "2026-03-18T03:06:10.710965",
+      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
-      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
-      "target_id": "845b4dfd-f9b3-4422-a476-686f9809322b",
       "relation": "consumes",
       "reason": "顺钠股份使用煤炭",
-      "timestamp": "2026-03-18T03:06:10.711054"
+      "timestamp": "2026-03-18T03:06:10.711054",
+      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "target_id": "845b4dfd-f9b3-4422-a476-686f9809322b"
     },
     {
-      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
-      "target_id": "65f7f099-69b1-4dac-9cb2-fc70eb5b9afb",
       "relation": "supplies",
       "reason": "顺钠股份生产医疗器械",
-      "timestamp": "2026-03-18T03:06:10.711218"
+      "timestamp": "2026-03-18T03:06:10.711218",
+      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "target_id": "65f7f099-69b1-4dac-9cb2-fc70eb5b9afb"
     },
     {
-      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
-      "target_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
       "relation": "competes_with",
       "reason": "同属输配电气行业",
-      "timestamp": "2026-03-18T03:06:10.711381"
+      "timestamp": "2026-03-18T03:06:10.711381",
+      "source_id": "f548f1ed-abc4-4842-89cd-17ae314cda97",
+      "target_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80"
+    },
+    {
+      "source_id": "5100dba5-1ed3-4f5a-88d5-6c1e3cfac364",
+      "target_id": "d58a0058-20d8-43b2-86f2-8d9f76e8ca1f",
+      "relation": "belongs_to",
+      "reason": "华明装备属于电网设备行业",
+      "timestamp": "2026-03-18T13:56:42.072226"
+    },
+    {
+      "source_id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
+      "target_id": "2ceb5ef7-2ee0-457a-a803-9be26daf750b",
+      "relation": "belongs_to",
+      "reason": "金风科技属于风电设备行业",
+      "timestamp": "2026-03-18T14:00:13.281575"
+    },
+    {
+      "source_id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
+      "target_id": "472ffef7-9a6b-4125-908d-11792a6a62cd",
+      "relation": "supplies",
+      "reason": "金风科技生产风电",
+      "timestamp": "2026-03-18T14:00:13.281830"
+    },
+    {
+      "source_id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
+      "target_id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40",
+      "relation": "supplies",
+      "reason": "金风科技生产风力发电",
+      "timestamp": "2026-03-18T14:00:13.281969"
+    },
+    {
+      "source_id": "f01ae1d2-cdbf-4a14-9eeb-4cbeca39864e",
+      "target_id": "754e6d9f-2fc4-408c-80f5-c98287f0be98",
+      "relation": "belongs_to",
+      "reason": "万华化学属于化工行业行业",
+      "timestamp": "2026-03-18T14:09:53.493479"
+    },
+    {
+      "source_id": "f01ae1d2-cdbf-4a14-9eeb-4cbeca39864e",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
+      "relation": "consumes",
+      "reason": "万华化学使用石油",
+      "timestamp": "2026-03-18T14:09:53.493685"
+    },
+    {
+      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
+      "target_id": "95e82c60-3ad2-4568-af97-44a9b0bdb32c",
+      "relation": "belongs_to",
+      "reason": "京城股份属于机械行业行业",
+      "timestamp": "2026-03-18T14:23:14.406917"
+    },
+    {
+      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
+      "relation": "consumes",
+      "reason": "京城股份使用石油",
+      "timestamp": "2026-03-18T14:23:14.407112"
+    },
+    {
+      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
+      "target_id": "95c4dd97-ac8d-4092-a692-97be0960fce9",
+      "relation": "consumes",
+      "reason": "京城股份使用隔膜",
+      "timestamp": "2026-03-18T14:23:14.407274"
+    },
+    {
+      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
+      "target_id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5",
+      "relation": "supplies",
+      "reason": "京城股份生产机器人",
+      "timestamp": "2026-03-18T14:23:14.407339"
     }
   ]
 }

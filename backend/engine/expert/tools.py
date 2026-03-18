@@ -104,6 +104,13 @@ class ExpertTools:
         if not full_text:
             return f"专家 {expert_type} 未返回有效内容"
 
+        # ── DEBUG: 记录引擎专家返回给 RAG Agent 的完整回复 ──
+        logger.info(
+            f"🔬 _ask_expert({expert_type}) 回复长度={len(full_text)}字, "
+            f"工具链={len(tool_summaries)}步, "
+            f"回复前200字: {full_text[:200]}"
+        )
+
         # 组装结果：工具调用摘要 + 完整回复
         parts = []
         if tool_summaries:
