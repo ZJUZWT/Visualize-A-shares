@@ -47,77 +47,214 @@ function getPriceDirection(
   return 1; // 绝大多数关系价格同向传导
 }
 
+/** 转义正则特殊字符 */
+function _escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
- * 根据企业与商品的关系，计算利好/利空：
- *   企业的产品涨价 → 售价上升 → 利好
- *   企业的原料涨价 → 成本上升 → 利空
- *   替代品涨价 → 自身需求上升 → 利好
- *   竞品涨价 → 竞争压力降低 → 利好
+ * 判断企业节点与相邻商品节点的真实产业关系：是"生产商"还是"消费者"。
  *
- * 参数说明：
- * - relation: link 标注的关系（source → target）
- * - direction: 冲击传到企业时走的方向
- *     "out" = link 从当前企业出发（企业=source, 商品=target）
- *     "in"  = link 指向当前企业（商品=source, 企业=target）
- * - priceSign: 传来的商品涨（>0）还是跌（<0）
+ * LLM 标注 upstream/downstream 时经常在企业-商品之间搞混方向，
+ * 所以这里用**语义推断**而非机械翻译 relation：
  *
- * 核心逻辑：判断那个商品相对于企业是"产品"还是"原料"
- *   - 企业(source) →[downstream]→ 商品(target)：商品是企业的产物
- *   - 企业(source) →[upstream/cost_input]→ 商品(target)：商品是企业的原料
- *   - 商品(source) →[downstream]→ 企业(target)：企业是商品的下游客户 → 商品是企业的原料
- *   - 商品(source) →[upstream]→ 企业(target)：企业是商品的上游供应商 → 商品是企业的产物
+ * 核心原则：
+ *   1. 如果 link 带有 cost_input → 商品一定是企业的原料
+ *   2. 如果 link 带有 byproduct → 商品一定是企业的产物
+ *   3. 对于 upstream/downstream，我们统一用一个"企业是这个商品的什么角色"来判断：
+ *      - 不管 LLM 标的方向，我们根据 link 两端的角色语义来判断
+ *      - 企业(source) → 商品(target) + downstream = LLM 想说"企业的下游产物" → 产品
+ *      - 企业(source) → 商品(target) + upstream = LLM 想说"企业的上游原料" → 原料
+ *      - 商品(source) → 企业(target) + downstream = "商品流向企业" → 可能是原料输入
+ *      - 商品(source) → 企业(target) + upstream = "商品的上游是企业" → 企业是生产商 → 产品
+ *
+ *   但实际上 LLM 经常把这些搞混！比如：
+ *      - PVC → [downstream] → 中泰化学：LLM 可能想表达"中泰化学生产PVC"，
+ *        但 downstream 语义变成了"中泰是PVC的下游消费者" → 利空（错！）
+ *
+ *   所以我们新增一个**企业-主营产品推断**：如果 impact_reason 里包含"生产""制造""产品"
+ *   等关键词，就强制判定为产品关系。
  */
 function getCompanyImpact(
   relation: string,
   direction: "out" | "in",
-  priceSign: number, // >0 涨, <0 跌
+  priceSign: number,  // >0 涨, <0 跌
+  impactReason?: string,  // LLM 生成的关系描述，用于辅助推断
+  companyName?: string,
+  commodityName?: string,
 ): "benefit" | "hurt" {
-  // 判断：商品对企业来说是"产品/产出"还是"原料/成本"
-  let isProduct = false; // true=商品是企业的产品，false=商品是企业的原料
 
-  if (direction === "out") {
-    // link: 企业(source) → 商品(target)
-    // relation 描述的是 source→target 的关系
-    if (relation === "downstream" || relation === "byproduct") {
-      // 企业的下游产物 → 商品是企业的产品
-      isProduct = true;
-    } else if (relation === "upstream" || relation === "cost_input") {
-      // 企业的上游原料 → 商品是企业的原料（边方向可能 LLM 标反了，但含义明确）
-      isProduct = false;
-    } else if (relation === "substitute" || relation === "competes") {
-      // 替代品/竞品涨 → 利好
-      return priceSign > 0 ? "benefit" : "hurt";
-    } else {
-      // 默认按原料算
-      isProduct = false;
-    }
-  } else {
-    // direction === "in", link: 商品(source) → 企业(target)
-    // relation 描述的是 source→target 的关系
-    if (relation === "downstream") {
-      // 商品→[downstream]→企业 = 商品的下游是企业 = 企业是消费者 = 商品是企业的原料
-      isProduct = false;
-    } else if (relation === "upstream") {
-      // 商品→[upstream]→企业 = 商品的上游是企业 = 企业是生产者 = 商品是企业的产品
-      isProduct = true;
-    } else if (relation === "cost_input") {
-      // 商品→[cost_input]→企业 = 商品作为成本输入给企业 = 商品是企业的原料
-      isProduct = false;
-    } else if (relation === "substitute" || relation === "competes") {
-      return priceSign > 0 ? "benefit" : "hurt";
-    } else {
-      // 默认：外部商品传入企业 → 偏原料
-      isProduct = false;
-    }
-  }
-
-  if (isProduct) {
-    // 产品涨价 → 售价提升 → 利好；跌价 → 利空
+  // ── 第 0 步：substitute / competes 直接走简单路径 ──
+  if (relation === "substitute" || relation === "competes") {
+    // 替代品/竞品涨价 → 对企业有利（需求转移/竞争缓解）
     return priceSign > 0 ? "benefit" : "hurt";
-  } else {
-    // 原料涨价 → 成本上升 → 利空；跌价 → 利好
-    return priceSign > 0 ? "hurt" : "benefit";
   }
+
+  // ── 第 1 步：从 impactReason 中推断真实关系 ──
+  // 这是最可靠的信号：LLM 在 impactReason 里通常会用自然语言说清楚
+  if (impactReason) {
+    const reason = impactReason.toLowerCase();
+
+    // ── 第 1a 步：检查明确标签（最高优先级）──
+    // prompt 要求 LLM 在 impact_reason 开头用【生产】/【消费】标注角色
+    if (reason.includes("【生产】") || reason.includes("[生产]")) {
+      return priceSign > 0 ? "benefit" : "hurt";  // 企业是生产商 → 产品涨利好
+    }
+    if (reason.includes("【消费】") || reason.includes("[消费]")) {
+      return priceSign > 0 ? "hurt" : "benefit";  // 企业是消费者 → 原料涨利空
+    }
+
+    // ── 第 1b 步：模式匹配推断 ──
+    // "生产商""制造商""主营产品""产出""供应商" → 企业生产这个商品 → 产品
+    const producerPatterns = [
+      "生产", "制造", "产出", "主营", "供应商", "产能", "产量",
+      "龙头", "厂商", "出产", "加工", "冶炼", "合成", "聚合",
+    ];
+    // "采购""消费""原料""成本""需要""使用""耗用" → 企业消费这个商品 → 原料
+    const consumerPatterns = [
+      "采购", "消费", "原料", "成本", "需要", "使用", "耗用",
+      "进口", "购买", "投入", "输入",
+    ];
+
+    const isProducerHint = producerPatterns.some((p) => reason.includes(p));
+    const isConsumerHint = consumerPatterns.some((p) => reason.includes(p));
+
+    if (isProducerHint && !isConsumerHint) {
+      // 企业是生产商 → 商品是产品 → 涨价利好
+      return priceSign > 0 ? "benefit" : "hurt";
+    }
+    if (isConsumerHint && !isProducerHint) {
+      // 企业是消费者 → 商品是原料 → 涨价利空
+      return priceSign > 0 ? "hurt" : "benefit";
+    }
+
+    // ── 两者都命中时：上下文精细匹配 ──
+    // 看"生产/制造"关键词附近有没有出现商品名
+    // 如果 "生产PVC"/"PVC生产"/"PVC...龙头" 出现 → 企业是这个商品的生产者
+    // 如果 "原料...电石"/"采购...煤炭" → 那些是其他原料，不影响对当前商品的判断
+    if (isProducerHint && isConsumerHint && commodityName) {
+      const commodity = commodityName.toLowerCase();
+
+      // 策略1：商品名出现在"生产/制造/产品/产出/产能/龙头/供应"附近 → 生产商
+      // 匹配模式：生产X / X生产 / X...龙头 / X产能 / 主营X / X产品
+      const producerContextPatterns = [
+        new RegExp(`生产.*${_escapeRegex(commodity)}`, "i"),
+        new RegExp(`制造.*${_escapeRegex(commodity)}`, "i"),
+        new RegExp(`${_escapeRegex(commodity)}.*生产`, "i"),
+        new RegExp(`${_escapeRegex(commodity)}.*制造`, "i"),
+        new RegExp(`${_escapeRegex(commodity)}.*龙头`, "i"),
+        new RegExp(`${_escapeRegex(commodity)}.*产能`, "i"),
+        new RegExp(`${_escapeRegex(commodity)}.*产量`, "i"),
+        new RegExp(`主营.*${_escapeRegex(commodity)}`, "i"),
+        new RegExp(`${_escapeRegex(commodity)}.*产品`, "i"),
+        new RegExp(`核心产品.*${_escapeRegex(commodity)}`, "i"),
+        new RegExp(`供应.*${_escapeRegex(commodity)}`, "i"),
+      ];
+
+      // 策略2：商品名出现在"采购/原料/成本/消费/需要"附近 → 消费者
+      const consumerContextPatterns = [
+        new RegExp(`采购.*${_escapeRegex(commodity)}`, "i"),
+        new RegExp(`${_escapeRegex(commodity)}.*原料`, "i"),
+        new RegExp(`${_escapeRegex(commodity)}.*成本`, "i"),
+        new RegExp(`消费.*${_escapeRegex(commodity)}`, "i"),
+        new RegExp(`需要.*${_escapeRegex(commodity)}`, "i"),
+        new RegExp(`${_escapeRegex(commodity)}.*采购`, "i"),
+      ];
+
+      const isProducerContext = producerContextPatterns.some((p) => p.test(reason));
+      const isConsumerContext = consumerContextPatterns.some((p) => p.test(reason));
+
+      if (isProducerContext && !isConsumerContext) {
+        return priceSign > 0 ? "benefit" : "hurt";
+      }
+      if (isConsumerContext && !isProducerContext) {
+        return priceSign > 0 ? "hurt" : "benefit";
+      }
+
+      // 策略3：如果企业名和商品名高度相关（如"中泰化学"与"PVC"），
+      // 且 reason 中出现"核心""主营""主要""最大"等词 → 大概率是生产商
+      const coreProducerHints = ["核心", "主营", "主要", "最大", "龙头", "领先", "行业第"];
+      if (coreProducerHints.some((h) => reason.includes(h))) {
+        return priceSign > 0 ? "benefit" : "hurt";
+      }
+    }
+
+    // 仍然无法判断 → fallback 到结构推断
+  }
+
+  // ── 第 2 步：结构推断（基于 relation + direction）──
+  //
+  // direction 是 BFS 遍历方向：
+  //   "out" = 从 link.source 走到 link.target（我们正在处理 target 节点，即企业）
+  //   "in"  = 从 link.target 走到 link.source（我们正在处理 source 节点，即企业）
+  //
+  // 所以：
+  //   direction="out" → 企业是 target，商品是 source （商品→企业）
+  //   direction="in"  → 企业是 source，商品是 target （企业→商品）
+  //
+  // LLM 标注的 relation 是从 source→target 的语义：
+  //   upstream: source 是 target 的上游
+  //   downstream: source 是 target 的下游
+  //   cost_input: source 是 target 的成本项
+  //   byproduct: source 是 target 的副产品
+  let isProduct = false;
+
+  if (relation === "cost_input") {
+    // cost_input: source 是 target 的成本项
+    if (direction === "out") {
+      // 商品(source)是企业(target)的成本项 → 商品是企业的原料
+      isProduct = false;
+    } else {
+      // 企业(source)是商品(target)的成本项 → 不太合理，但按原料处理
+      isProduct = false;
+    }
+  } else if (relation === "byproduct") {
+    // byproduct: source 是 target 的副产品
+    if (direction === "out") {
+      // 商品(source)是企业(target)的副产品 → 商品是企业的产物
+      isProduct = true;
+    } else {
+      // 企业(source)是商品(target)的副产品 → 不合理，按产品处理
+      isProduct = true;
+    }
+  } else if (direction === "out") {
+    // 商品(source) → 企业(target)
+    // relation 描述的是 source→target 的关系
+    if (relation === "upstream") {
+      // 商品是企业的上游 → 商品是原料，供应给企业
+      isProduct = false;
+    } else if (relation === "downstream") {
+      // 商品是企业的下游 → 这通常是 LLM 标反的情况
+      // "PVC →[downstream]→ 中泰化学" 通常意味着 LLM 想说
+      // "中泰化学在 PVC 产业链的下游"（即中泰消费PVC）或者
+      // "PVC 的产出方向指向中泰化学"（即中泰生产PVC）
+      //
+      // 由于这个方向非常模糊，且之前的 impactReason 语义推断已经失败了，
+      // 我们采用保守策略：看边的另一端（商品端）的 node_type
+      // 如果是 material/commodity（原材料/大宗商品）且企业名含相关行业关键词，
+      // 那大概率企业是这个商品的生产商
+      //
+      // fallback 默认：商品→downstream→企业 = 企业是消费者
+      isProduct = false;
+    } else {
+      isProduct = false; // 默认原料
+    }
+  } else {
+    // direction === "in" → 企业(source) → 商品(target)
+    if (relation === "downstream") {
+      // 企业→[downstream]→商品 = 企业的下游是这个商品 = 企业生产商品
+      isProduct = true;
+    } else if (relation === "upstream") {
+      // 企业→[upstream]→商品 = 企业的上游是这个商品 = 商品是原料
+      isProduct = false;
+    } else {
+      isProduct = false;
+    }
+  }
+
+  return isProduct
+    ? (priceSign > 0 ? "benefit" : "hurt")   // 产品涨价→利好
+    : (priceSign > 0 ? "hurt" : "benefit");   // 原料涨价→利空
 }
 
 export function propagateShocksAlgorithm(
@@ -188,7 +325,13 @@ export function propagateShocksAlgorithm(
 
         if (isCompanyNode(neighborType)) {
           // ── 企业节点：只算利好/利空，不继续传播价格 ──
-          const impactDir = getCompanyImpact(link.relation, direction, priceSign);
+          // 传入 impact_reason 帮助语义推断（解决 LLM upstream/downstream 标反问题）
+          const companyName = neighbor;
+          const commodityName = current;
+          const impactDir = getCompanyImpact(
+            link.relation, direction, priceSign,
+            link.impact_reason, companyName, commodityName,
+          );
           const scoreSign = impactDir === "benefit" ? 1 : -1;
 
           const prev = nodeImpacts.get(neighbor);
@@ -306,6 +449,8 @@ interface ChainStore {
 
   // ── 图谱布局设置 ──
   expandDepth: number; // 双击展开深度（1~3）
+  expandDirection: "both" | "upstream" | "downstream"; // 展开方向
+  expandMaxNodes: number; // 每层最多节点数，0=不限
   graphSettings: {
     linkDistance: number;   // 边长度
     nodeSize: number;       // 节点大小系数
@@ -336,6 +481,8 @@ interface ChainStore {
   selectNode: (node: ChainNode | null) => void;
   setMaxDepth: (depth: number) => void;
   setExpandDepth: (depth: number) => void;
+  setExpandDirection: (dir: "both" | "upstream" | "downstream") => void;
+  setExpandMaxNodes: (n: number) => void;
   setGraphSettings: (settings: Partial<ChainStore["graphSettings"]>) => void;
   reset: () => void;
 
@@ -354,6 +501,8 @@ export const useChainStore = create<ChainStore>((set, get) => ({
   selectedNode: null,
   expandingNodes: [],
   expandDepth: 1,
+  expandDirection: "both",
+  expandMaxNodes: 0,
   graphSettings: {
     linkDistance: 120,
     nodeSize: 1.0,
@@ -662,7 +811,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
   // ── 展开节点（双击触发）— 使用 expandDepth ──
   // 优化版：阶段1 build + 阶段2 批量relate（1次LLM调用代替N次串行add-node）
   expandNode: async (nodeName) => {
-    const { subject, expandingNodes, expandDepth, nodes } = get();
+    const { subject, expandingNodes, expandDepth, expandDirection, expandMaxNodes, nodes } = get();
     if (!subject || expandingNodes.includes(nodeName)) return;
 
     set({ expandingNodes: [...expandingNodes, nodeName] });
@@ -670,14 +819,20 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     try {
       const existingNames = nodes.map((n) => n.name);
 
-      // ── 阶段 1：build(subject=nodeName, depth=expandDepth) ──
+      // ── 阶段 1：build(subject=nodeName, depth=expandDepth, direction, maxNodes) ──
+      const buildBody: Record<string, unknown> = {
+        subject: nodeName,
+        max_depth: expandDepth,
+        expand_direction: expandDirection,
+      };
+      if (expandMaxNodes > 0) {
+        buildBody.max_nodes = expandMaxNodes;
+      }
+
       const res = await fetch(`${API_BASE}/api/v1/industry/chain/build`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: nodeName,
-          max_depth: expandDepth,
-        }),
+        body: JSON.stringify(buildBody),
       });
 
       if (!res.ok) {
@@ -725,6 +880,8 @@ export const useChainStore = create<ChainStore>((set, get) => ({
   selectNode: (node) => set({ selectedNode: node }),
   setMaxDepth: (depth) => set({ maxDepth: depth }),
   setExpandDepth: (depth) => set({ expandDepth: Math.max(1, Math.min(3, depth)) }),
+  setExpandDirection: (dir) => set({ expandDirection: dir }),
+  setExpandMaxNodes: (n) => set({ expandMaxNodes: Math.max(0, Math.min(20, n)) }),
   setGraphSettings: (settings) => set((s) => ({
     graphSettings: { ...s.graphSettings, ...settings },
   })),

@@ -62,10 +62,21 @@ function buildGraphData(
   return { nodes: graphNodes, links: graphLinks };
 }
 
-/** 左下角悬浮设置面板：展开深度 + 布局参数 */
+/** 左下角悬浮设置面板：展开深度 + 方向 + 数量 + 布局参数 */
 function GraphSettingsPanel() {
-  const { expandDepth, setExpandDepth, graphSettings, setGraphSettings } = useChainStore();
+  const {
+    expandDepth, setExpandDepth,
+    expandDirection, setExpandDirection,
+    expandMaxNodes, setExpandMaxNodes,
+    graphSettings, setGraphSettings,
+  } = useChainStore();
   const [open, setOpen] = useState(false);
+
+  const dirOptions: { value: "both" | "upstream" | "downstream"; label: string; icon: string }[] = [
+    { value: "both", label: "全部", icon: "⇄" },
+    { value: "upstream", label: "上游", icon: "⬆" },
+    { value: "downstream", label: "下游", icon: "⬇" },
+  ];
 
   return (
     <div
@@ -112,6 +123,52 @@ function GraphSettingsPanel() {
                   {d}层
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* 展开方向 */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="text-xs">🧭</span>
+              <span className="text-[10px] text-[var(--text-secondary)]">展开方向</span>
+            </div>
+            <div className="flex gap-1">
+              {dirOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setExpandDirection(opt.value)}
+                  className="flex-1 py-1 rounded text-xs font-medium transition-all"
+                  style={{
+                    background: expandDirection === opt.value ? "var(--accent)" : "rgba(100,116,139,0.15)",
+                    color: expandDirection === opt.value ? "#fff" : "var(--text-secondary)",
+                  }}
+                  title={`只展开${opt.label}节点`}
+                >
+                  {opt.icon} {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 每层节点数 */}
+          <div>
+            <div className="flex justify-between text-[10px] text-[var(--text-secondary)] mb-1">
+              <span>每层节点数上限</span>
+              <span className="tabular-nums">{expandMaxNodes === 0 ? "不限" : expandMaxNodes}</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={15}
+              step={1}
+              value={expandMaxNodes}
+              onChange={(e) => setExpandMaxNodes(parseInt(e.target.value))}
+              className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-blue-500"
+              style={{ background: "var(--border)" }}
+            />
+            <div className="flex justify-between text-[9px] text-[var(--text-secondary)]/50 mt-0.5">
+              <span>不限</span>
+              <span>15</span>
             </div>
           </div>
 
