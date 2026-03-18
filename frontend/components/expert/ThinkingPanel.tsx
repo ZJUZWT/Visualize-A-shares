@@ -16,6 +16,7 @@ import {
   Users,
   Loader2,
   TrendingUp,
+  RefreshCw,
 } from "lucide-react";
 import { KLinePreview } from "./KLinePreview";
 
@@ -289,6 +290,24 @@ export function ThinkingPanel({
                       </div>
                     )}
                   </div>
+                </div>
+              );
+
+            if (item.type === "thinking_round")
+              return (
+                <div key={i} className="px-3 py-1.5 flex items-center gap-2 bg-[var(--bg-secondary)]">
+                  <RefreshCw
+                    size={11}
+                    className="shrink-0 animate-spin"
+                    style={{ color }}
+                  />
+                  <span className="text-[10px] font-medium" style={{ color }}>
+                    第 {item.round} 轮补充查询
+                  </span>
+                  <span className="text-[10px] text-[var(--text-tertiary)]">
+                    （最多 {item.maxRounds} 轮）
+                  </span>
+                  <div className="flex-1 h-px bg-[var(--border)]" />
                 </div>
               );
 

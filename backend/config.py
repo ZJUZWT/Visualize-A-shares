@@ -27,6 +27,9 @@ class DataSourceConfig(BaseModel):
     tushare_enabled: bool = False
     tushare_token: str = ""
 
+    # 盘中快照自动刷新间隔（分钟），交易时段内快照超过此时间自动重新拉取
+    snapshot_refresh_minutes: int = 30
+
 
 # ─── 算法配置 ───────────────────────────────────────────
 class UMAPConfig(BaseModel):

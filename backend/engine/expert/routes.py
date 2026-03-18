@@ -410,7 +410,10 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
         full_reply = ""
         tools_used = []
         try:
-            async for event in expert.chat(req.message, history=history):
+            async for event in expert.chat(
+                req.message, history=history,
+                deep_think=req.deep_think, max_rounds=req.max_rounds,
+            ):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":
                     full_reply = event["data"].get("full_text", "")
@@ -448,7 +451,10 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
         tools_used = []
         thinking_items = []
         try:
-            async for event in agent.chat(req.message, history=history, persona=persona):
+            async for event in agent.chat(
+                req.message, history=history, persona=persona,
+                deep_think=req.deep_think, max_rounds=req.max_rounds,
+            ):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":
                     full_reply = event["data"].get("full_text", "")

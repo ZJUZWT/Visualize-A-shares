@@ -290,13 +290,18 @@ class ExpertAgent:
             events.append(event)
         return events
 
-    async def chat(self, message: str, history: list[dict] | None = None, persona: str = "rag") -> AsyncGenerator[dict, None]:
+    async def chat(
+        self, message: str, history: list[dict] | None = None, persona: str = "rag",
+        deep_think: bool = False, max_rounds: int = 3,
+    ) -> AsyncGenerator[dict, None]:
         """完整对话流程，yield 结构化事件 dict
 
         Args:
             message: 用户消息
             history: 对话历史 [{"role": "user"|"expert", "content": "..."}]
             persona: 人格类型 "rag"(投资顾问) 或 "short_term"(短线专家)
+            deep_think: 多轮渐进模式 — 每轮工具执行完后 LLM 可以决定是否继续补查
+            max_rounds: deep_think 模式下最大工具调用轮数
         """
         conv_history = history or []
         agent_role = "short_term" if persona == "short_term" else "expert"
@@ -315,58 +320,98 @@ class ExpertAgent:
             for n in recalled_nodes
         ]}}
 
-        tool_calls: list[ToolCall] = think_output.tool_calls if think_output.needs_data else []
+        # ══════════════════════════════════════════════════════
+        # 多轮渐进工具调用循环
+        # ══════════════════════════════════════════════════════
+        effective_max_rounds = max_rounds if deep_think else 1
+        all_tool_results: list[dict] = []
+        round_num = 0
+        current_tool_calls = think_output.tool_calls if think_output.needs_data else []
 
-        # ── 去重：当已有 expert.data 调用时，过滤掉多余的 data.get_daily_history ──
-        # （数据专家内部会自动获取历史行情，投资顾问不需要额外重复调用）
-        has_data_expert = any(tc.engine == "expert" and tc.action == "data" for tc in tool_calls)
-        if has_data_expert:
-            before_len = len(tool_calls)
-            tool_calls = [tc for tc in tool_calls if not (tc.engine == "data" and tc.action == "get_daily_history")]
-            if len(tool_calls) < before_len:
-                logger.info(f"已过滤 {before_len - len(tool_calls)} 个多余的 data.get_daily_history 调用（已有 expert.data）")
+        while round_num < effective_max_rounds:
+            round_num += 1
 
-        # 4. 工具调用（并行执行所有专家）
-        # 容错：确保每个 expert 调用的 question 非空（但不覆盖 LLM 精心拆解的问题）
-        for tc in tool_calls:
-            if tc.engine == "expert":
-                q = (tc.params.get("question") or "").strip()
-                if not q or len(q) < 4:
-                    tc.params["question"] = message  # 仅在 question 确实为空时兜底
-            is_expert_call = tc.engine == "expert"
-            expert_label = EXPERT_NAMES.get(tc.action, tc.action) if is_expert_call else ""
-            yield {"event": "tool_call", "data": {
-                "engine": tc.engine, "action": tc.action, "params": tc.params,
-                "label": f"咨询{expert_label}" if is_expert_call else f"{tc.engine}.{tc.action}",
-            }}
+            if deep_think and round_num > 1:
+                yield {"event": "thinking_round", "data": {
+                    "round": round_num,
+                    "max_rounds": effective_max_rounds,
+                }}
 
-        tool_results: list[dict] = []
-        async for r in self.execute_tools_streaming(tool_calls):
-            tool_results.append(r)
-            is_expert = r.get("is_expert")
-            expert_label = EXPERT_NAMES.get(r["action"], r["action"]) if is_expert else ""
-            result_text = r.get("result", "")
-            has_error = self._detect_tool_error(result_text, is_expert=bool(is_expert))
-            # K 线数据提取
-            chart_data = {}
-            if r["action"] in ("query_history", "query_hourly") and result_text:
-                try:
-                    parsed = json.loads(result_text)
-                    if "records" in parsed:
-                        chart_data["chartData"] = {
-                            "code": parsed.get("code", ""),
-                            "records": parsed["records"],
-                        }
-                except (json.JSONDecodeError, KeyError):
-                    pass
-            yield {"event": "tool_result", "data": {
-                "engine": r["engine"], "action": r["action"],
-                "summary": result_text[:300] if not is_expert else f"{expert_label}已回复（{len(result_text)}字）",
-                "label": expert_label if is_expert else r["action"],
-                "content": result_text if is_expert else "",
-                "hasError": has_error,
-                **chart_data,
-            }}
+            tool_calls = current_tool_calls
+
+            # ── 去重：当已有 expert.data 调用时，过滤掉多余的 data.get_daily_history ──
+            has_data_expert = any(tc.engine == "expert" and tc.action == "data" for tc in tool_calls)
+            if has_data_expert:
+                before_len = len(tool_calls)
+                tool_calls = [tc for tc in tool_calls if not (tc.engine == "data" and tc.action == "get_daily_history")]
+                if len(tool_calls) < before_len:
+                    logger.info(f"已过滤 {before_len - len(tool_calls)} 个多余的 data.get_daily_history 调用（已有 expert.data）")
+
+            if not tool_calls:
+                break
+
+            # 4. 工具调用（并行执行所有专家）
+            for tc in tool_calls:
+                if tc.engine == "expert":
+                    q = (tc.params.get("question") or "").strip()
+                    if not q or len(q) < 4:
+                        tc.params["question"] = message
+                is_expert_call = tc.engine == "expert"
+                expert_label = EXPERT_NAMES.get(tc.action, tc.action) if is_expert_call else ""
+                yield {"event": "tool_call", "data": {
+                    "engine": tc.engine, "action": tc.action, "params": tc.params,
+                    "label": f"咨询{expert_label}" if is_expert_call else f"{tc.engine}.{tc.action}",
+                    "round": round_num if deep_think else None,
+                }}
+
+            round_results: list[dict] = []
+            async for r in self.execute_tools_streaming(tool_calls):
+                round_results.append(r)
+                is_expert = r.get("is_expert")
+                expert_label = EXPERT_NAMES.get(r["action"], r["action"]) if is_expert else ""
+                result_text = r.get("result", "")
+                has_error = self._detect_tool_error(result_text, is_expert=bool(is_expert))
+                chart_data = {}
+                if r["action"] in ("query_history", "query_hourly") and result_text:
+                    try:
+                        parsed = json.loads(result_text)
+                        if "records" in parsed:
+                            chart_data["chartData"] = {
+                                "code": parsed.get("code", ""),
+                                "records": parsed["records"],
+                            }
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+                yield {"event": "tool_result", "data": {
+                    "engine": r["engine"], "action": r["action"],
+                    "summary": result_text[:300] if not is_expert else f"{expert_label}已回复（{len(result_text)}字）",
+                    "label": expert_label if is_expert else r["action"],
+                    "content": result_text if is_expert else "",
+                    "hasError": has_error,
+                    "round": round_num if deep_think else None,
+                    **chart_data,
+                }}
+
+            all_tool_results.extend(round_results)
+
+            # 单轮模式直接跳出
+            if not deep_think:
+                break
+
+            # deep_think 模式：让 LLM 基于已有数据决定是否继续补查
+            logger.info(
+                f"🔄 [{persona}] deep_think 第{round_num}轮完成, "
+                f"本轮 {len(round_results)} 条, 累计 {len(all_tool_results)} 条"
+            )
+            next_think = await self._think_with_results(
+                message, recalled_nodes, memories, all_tool_results, conv_history, persona, round_num
+            )
+            if not next_think.needs_data or not next_think.tool_calls:
+                logger.info(f"🏁 [{persona}] deep_think 第{round_num}轮后 LLM 认为数据充足，停止补查")
+                break
+            current_tool_calls = next_think.tool_calls
+
+        tool_results = all_tool_results
 
         # 5. 图谱自动学习
         await self.learn_from_context(message, tool_results)
@@ -527,6 +572,99 @@ class ExpertAgent:
                 else:
                     logger.debug(f"think JSON 修复后仍失败: {e}")
         return None
+
+    async def _think_with_results(
+        self,
+        message: str,
+        nodes: list[dict],
+        memories: list[dict],
+        tool_results: list[dict],
+        history: list[dict],
+        persona: str,
+        round_num: int,
+    ) -> ThinkOutput:
+        """多轮渐进模式：带上之前工具结果，让 LLM 决定是否需要继续补查"""
+        from llm.providers import ChatMessage
+
+        # 构建已有工具结果摘要
+        results_summary_parts = []
+        for r in tool_results:
+            engine = r.get("engine", "?")
+            action = r.get("action", "?")
+            result_text = r.get("result", "")[:500]
+            results_summary_parts.append(f"[{engine}.{action}]: {result_text}")
+        results_summary = "\n---\n".join(results_summary_parts)
+
+        if persona == "short_term":
+            from engine.expert.personas import SHORT_TERM_THINK_PROMPT
+            base_prompt = SHORT_TERM_THINK_PROMPT.format(
+                current_date=get_current_date_context(),
+                graph_context=format_graph_context(nodes),
+                memory_context=format_memory_context(memories),
+            )
+        else:
+            base_prompt = THINK_SYSTEM_PROMPT.format(
+                current_date=get_current_date_context(),
+                graph_context=format_graph_context(nodes),
+                memory_context=format_memory_context(memories),
+            )
+
+        supplement = f"""
+
+═══ 多轮渐进模式（第{round_num + 1}轮决策） ═══
+
+你已经进行了 {round_num} 轮数据查询，获得了以下数据：
+{results_summary}
+
+请判断：
+1. 如果已有数据足够给出全面分析 → "needs_data": false
+2. 如果还需要补充关键数据 → "needs_data": true, 并给出需要补查的 tool_calls
+   - 不要重复查询已有的数据
+   - 最多补查 2-3 个工具
+"""
+        prompt = base_prompt + supplement
+
+        try:
+            messages = [ChatMessage("system", prompt)]
+            for h in (history or []):
+                role = "assistant" if h["role"] == "expert" else h["role"]
+                messages.append(ChatMessage(role, h.get("content", "")))
+            messages.append(ChatMessage("user", message))
+
+            chunks: list[str] = []
+            async for token in self._llm.chat_stream(messages):
+                chunks.append(token)
+            raw_text = "".join(chunks).strip()
+
+            if not raw_text:
+                return ThinkOutput(needs_data=False)
+
+            # 复用 _think 的解析逻辑
+            import re
+            text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
+            text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
+
+            candidates = [text]
+            md_match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', raw_text, re.DOTALL)
+            if md_match:
+                candidates.insert(0, md_match.group(1).strip())
+            candidates.append(raw_text)
+
+            for candidate in candidates:
+                json_str = self._extract_outermost_json(candidate)
+                if json_str:
+                    result = self._try_parse_think_json(json_str)
+                    if result is not None:
+                        logger.info(
+                            f"🧠 [{persona}] R{round_num + 1} think_with_results: "
+                            f"needs_data={result.needs_data}, tool_calls={len(result.tool_calls)}"
+                        )
+                        return result
+
+        except Exception as e:
+            logger.warning(f"_think_with_results R{round_num + 1} 异常: {e}")
+
+        return ThinkOutput(needs_data=False)
 
     async def _think(
         self,

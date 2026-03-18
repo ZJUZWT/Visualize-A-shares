@@ -11,6 +11,7 @@ export interface ExpertProfile {
 
 export type ExpertEventType =
   | "thinking_start"
+  | "thinking_round"
   | "graph_recall"
   | "tool_call"
   | "tool_result"
@@ -32,6 +33,8 @@ export interface ToolCallData {
   params: Record<string, unknown>;
   /** 展示标签，如 "咨询📊 数据专家" 或 "data.get_daily_history" */
   label?: string;
+  /** 多轮渐进模式：所属轮次 */
+  round?: number | null;
 }
 
 export interface ToolResultData {
@@ -44,6 +47,8 @@ export interface ToolResultData {
   content?: string;
   /** 工具调用是否失败 */
   hasError?: boolean;
+  /** 多轮渐进模式：所属轮次 */
+  round?: number | null;
   /** K 线图表数据（query_history/query_hourly 时有值） */
   chartData?: {
     code: string;
@@ -68,6 +73,7 @@ export interface BeliefUpdatedData {
 
 export type ThinkingItem =
   | { type: "graph_recall"; nodes: GraphNode[] }
+  | { type: "thinking_round"; round: number; maxRounds: number }
   | { type: "tool_call"; data: ToolCallData; result?: ToolResultData; status: "pending" | "done" | "error" }
   | { type: "tool_result"; data: ToolResultData }
   | { type: "belief_updated"; data: BeliefUpdatedData };

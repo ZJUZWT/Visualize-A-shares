@@ -123,6 +123,8 @@ class BeliefUpdateOutput(BaseModel):
 class ExpertChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+    deep_think: bool = False          # 多轮渐进工具调用（AI 看数据后可以继续补查）
+    max_rounds: int = Field(default=3, ge=1, le=5)  # 最大工具调用轮数
 
 
 class SessionCreateRequest(BaseModel):

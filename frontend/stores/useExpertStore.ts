@@ -35,6 +35,8 @@ interface ExpertStore {
   /** 当前活跃专家的状态（便捷 getter） */
   status: ExpertStatus;
   error: string | null;
+  /** 多轮渐进模式开关 */
+  deepThink: boolean;
   /** 每个专家的 session 列表 */
   sessions: Record<ExpertType, Session[]>;
   /** 每个专家当前激活的 session ID */
@@ -52,6 +54,8 @@ interface ExpertStore {
   clearChat: () => void;
   /** 清除所有对话 */
   reset: () => void;
+  /** 切换多轮渐进模式 */
+  toggleDeepThink: () => void;
   /** 加载专家配置 */
   fetchProfiles: () => Promise<void>;
   /** 加载 session 列表 */
@@ -116,6 +120,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   errorMap: { ...EMPTY_ERRORS },
   status: "idle",
   error: null,
+  deepThink: false,
   sessions: { ...EMPTY_SESSIONS },
   activeSessions: { ...EMPTY_ACTIVE },
 
@@ -158,6 +163,10 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       status: "idle",
       error: null,
     });
+  },
+
+  toggleDeepThink: () => {
+    set((s) => ({ deepThink: !s.deepThink }));
   },
 
   fetchProfiles: async () => {
@@ -435,6 +444,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           body: JSON.stringify({
             message: text,
             session_id: sessionId,
+            deep_think: get().deepThink,
           }),
           signal: ac.signal,
         }
@@ -481,6 +491,15 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
               } else if (eventType === "reply_complete") {
                 msg.content = (data.full_text as string) ?? msg.content;
                 msg.isStreaming = false;
+              } else if (eventType === "thinking_round") {
+                msg.thinking = [
+                  ...msg.thinking,
+                  {
+                    type: "thinking_round" as const,
+                    round: data.round as number,
+                    maxRounds: data.max_rounds as number,
+                  },
+                ];
               } else if (eventType === "graph_recall") {
                 msg.thinking = [
                   ...msg.thinking,

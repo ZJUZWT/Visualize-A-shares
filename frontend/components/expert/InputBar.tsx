@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useExpertStore } from "@/stores/useExpertStore";
-import { ArrowUp, Square, Download } from "lucide-react";
+import { ArrowUp, Square, Download, BrainCircuit } from "lucide-react";
 
 interface InputBarProps {
   onExport?: () => void;
@@ -10,7 +10,10 @@ interface InputBarProps {
 
 export function InputBar({ onExport }: InputBarProps) {
   const [input, setInput] = useState("");
-  const { sendMessage, stopStreaming, status, error, activeExpert, profiles, chatHistories } = useExpertStore();
+  const {
+    sendMessage, stopStreaming, status, error, activeExpert,
+    profiles, chatHistories, deepThink, toggleDeepThink,
+  } = useExpertStore();
   const isThinking = status === "thinking";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const profile = profiles.find((p) => p.type === activeExpert);
@@ -81,6 +84,22 @@ export function InputBar({ onExport }: InputBarProps) {
           </button>
         )}
 
+        {/* 深度思考开关 */}
+        <button
+          onClick={toggleDeepThink}
+          className={`shrink-0 h-8 px-2 rounded-xl flex items-center gap-1 text-[10px] font-medium
+                     transition-all duration-150 border
+                     ${deepThink
+                       ? "border-current bg-current/10 text-opacity-100"
+                       : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-primary)]"
+                     }`}
+          style={deepThink ? { color, borderColor: color + "40", backgroundColor: color + "10" } : undefined}
+          title={deepThink ? "深度思考已开启：AI 会多轮查询数据后再回答" : "点击开启深度思考：AI 可以看一步查一步，分析更深入"}
+        >
+          <BrainCircuit size={13} />
+          <span>深度</span>
+        </button>
+
         <textarea
           ref={textareaRef}
           value={input}
@@ -131,6 +150,13 @@ export function InputBar({ onExport }: InputBarProps) {
         )}
       </div>
       <p className="text-center text-[10px] text-[var(--text-tertiary)] mt-2">
+        {deepThink && (
+          <span className="inline-flex items-center gap-1 mr-1" style={{ color }}>
+            <BrainCircuit size={10} />
+            深度思考已开启
+            <span className="text-[var(--text-tertiary)]">·</span>
+          </span>
+        )}
         {activeExpert === "rag"
           ? "投资顾问会主动查询行情数据，并在对话中更新自己的认知"
           : `${profile?.name ?? "专家"}会调用引擎工具获取数据并生成分析`}
