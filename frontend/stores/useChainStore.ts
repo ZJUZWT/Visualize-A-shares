@@ -1,0 +1,987 @@
+import { create } from "zustand";
+import type { ChainNode, ChainLink, NodeShock, ExploreStatus } from "@/types/chain";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+
+// ── 冲击传播算法（纯前端 BFS）──
+// 设计原则：
+//   1. 商品价格沿产业链**同向传导**（原油涨→石脑油涨→乙烯涨→PE涨）
+//   2. 企业的利好/利空由其与商品的**连边关系**决定
+//      - 上游原料涨 → 成本上升 → 利空
+//      - 下游产品涨 → 售价上升 → 利好
+//      - 替代品涨 → 需求转移到自身 → 利好
+
+const STRENGTH_DECAY: Record<string, number> = {
+  "强刚性": 0.10,
+  "中等": 0.35,
+  "弱弹性": 0.60,
+};
+
+/** 商品类节点（价格沿产业链同向传导）*/
+const COMMODITY_TYPES = new Set(["material", "commodity", "industry", "logistics", "macro", "event"]);
+
+/** 企业类节点（只算利好/利空，不传播价格）*/
+function isCompanyNode(nodeType: string): boolean {
+  return nodeType === "company";
+}
+
+/**
+ * 计算价格传导方向：
+ *   上游涨 → 下游也涨（成本推升 = 同向）
+ *   替代品涨 → 本品也涨（需求转移 = 同向）
+ *   竞品涨 → 竞品贵了 → 本品相对便宜但不一定涨 → 中性/弱涨
+ *   副产品 → 同向
+ */
+function getPriceDirection(
+  relation: string,
+  direction: "out" | "in",
+): number {
+  const effectiveRelation = direction === "out" ? relation : _reverseRelation(relation);
+  // 所有关系的价格传导都是同向的：上游涨→下游涨，下游涨→上游也涨（需求拉动涨价）
+  // substitute: A涨→B也涨（需求转移推高B价格）
+  // competes: A涨→B需求增加→B也涨
+  // byproduct/logistics/其他: 同向
+  if (effectiveRelation === "competes") {
+    return -1; // 竞品涨 → 自己相对更有优势，但价格可能不变或微跌
+  }
+  return 1; // 绝大多数关系价格同向传导
+}
+
+/**
+ * 根据企业与商品的关系，计算利好/利空：
+ *   企业的产品涨价 → 售价上升 → 利好
+ *   企业的原料涨价 → 成本上升 → 利空
+ *   替代品涨价 → 自身需求上升 → 利好
+ *   竞品涨价 → 竞争压力降低 → 利好
+ *
+ * 参数说明：
+ * - relation: link 标注的关系（source → target）
+ * - direction: 冲击传到企业时走的方向
+ *     "out" = link 从当前企业出发（企业=source, 商品=target）
+ *     "in"  = link 指向当前企业（商品=source, 企业=target）
+ * - priceSign: 传来的商品涨（>0）还是跌（<0）
+ *
+ * 核心逻辑：判断那个商品相对于企业是"产品"还是"原料"
+ *   - 企业(source) →[downstream]→ 商品(target)：商品是企业的产物
+ *   - 企业(source) →[upstream/cost_input]→ 商品(target)：商品是企业的原料
+ *   - 商品(source) →[downstream]→ 企业(target)：企业是商品的下游客户 → 商品是企业的原料
+ *   - 商品(source) →[upstream]→ 企业(target)：企业是商品的上游供应商 → 商品是企业的产物
+ */
+function getCompanyImpact(
+  relation: string,
+  direction: "out" | "in",
+  priceSign: number, // >0 涨, <0 跌
+): "benefit" | "hurt" {
+  // 判断：商品对企业来说是"产品/产出"还是"原料/成本"
+  let isProduct = false; // true=商品是企业的产品，false=商品是企业的原料
+
+  if (direction === "out") {
+    // link: 企业(source) → 商品(target)
+    // relation 描述的是 source→target 的关系
+    if (relation === "downstream" || relation === "byproduct") {
+      // 企业的下游产物 → 商品是企业的产品
+      isProduct = true;
+    } else if (relation === "upstream" || relation === "cost_input") {
+      // 企业的上游原料 → 商品是企业的原料（边方向可能 LLM 标反了，但含义明确）
+      isProduct = false;
+    } else if (relation === "substitute" || relation === "competes") {
+      // 替代品/竞品涨 → 利好
+      return priceSign > 0 ? "benefit" : "hurt";
+    } else {
+      // 默认按原料算
+      isProduct = false;
+    }
+  } else {
+    // direction === "in", link: 商品(source) → 企业(target)
+    // relation 描述的是 source→target 的关系
+    if (relation === "downstream") {
+      // 商品→[downstream]→企业 = 商品的下游是企业 = 企业是消费者 = 商品是企业的原料
+      isProduct = false;
+    } else if (relation === "upstream") {
+      // 商品→[upstream]→企业 = 商品的上游是企业 = 企业是生产者 = 商品是企业的产品
+      isProduct = true;
+    } else if (relation === "cost_input") {
+      // 商品→[cost_input]→企业 = 商品作为成本输入给企业 = 商品是企业的原料
+      isProduct = false;
+    } else if (relation === "substitute" || relation === "competes") {
+      return priceSign > 0 ? "benefit" : "hurt";
+    } else {
+      // 默认：外部商品传入企业 → 偏原料
+      isProduct = false;
+    }
+  }
+
+  if (isProduct) {
+    // 产品涨价 → 售价提升 → 利好；跌价 → 利空
+    return priceSign > 0 ? "benefit" : "hurt";
+  } else {
+    // 原料涨价 → 成本上升 → 利空；跌价 → 利好
+    return priceSign > 0 ? "hurt" : "benefit";
+  }
+}
+
+export function propagateShocksAlgorithm(
+  nodes: ChainNode[],
+  links: ChainLink[],
+  shocks: Map<string, NodeShock>,
+): { nodes: ChainNode[]; links: ChainLink[] } {
+  if (shocks.size === 0) {
+    // 无冲击 → 全部回归 neutral
+    return {
+      nodes: nodes.map((n) => ({ ...n, impact: "neutral" as const, impact_score: 0, price_change: 0 })),
+      links: links.map((l) => ({ ...l, impact: "neutral" as const })),
+    };
+  }
+
+  // 节点类型查找
+  const nodeTypeMap = new Map(nodes.map((n) => [n.name, n.node_type]));
+
+  // 构建邻接表（双向）
+  const adjacency = new Map<string, Array<{ neighbor: string; link: ChainLink; direction: "out" | "in" }>>();
+  for (const n of nodes) {
+    adjacency.set(n.name, []);
+  }
+  for (const l of links) {
+    adjacency.get(l.source)?.push({ neighbor: l.target, link: l, direction: "out" });
+    adjacency.get(l.target)?.push({ neighbor: l.source, link: l, direction: "in" });
+  }
+
+  // 存储结果：价格变动 + 利好利空
+  const nodePrices = new Map<string, { totalPrice: number; count: number }>();
+  const nodeImpacts = new Map<string, { totalScore: number; count: number }>();
+  const linkImpacts = new Map<string, "positive" | "negative" | "neutral">();
+
+  for (const [shockNodeName, shock] of shocks) {
+    const visited = new Set<string>();
+    // BFS queue: [nodeName, currentMagnitude, priceSign]
+    // priceSign: +1 涨, -1 跌（沿链传导时保持/翻转）
+    const queue: Array<[string, number, number]> = [
+      [shockNodeName, Math.abs(shock.shock), shock.shock > 0 ? 1 : -1],
+    ];
+    visited.add(shockNodeName);
+
+    while (queue.length > 0) {
+      const [current, magnitude, priceSign] = queue.shift()!;
+      const neighbors = adjacency.get(current) || [];
+
+      for (const { neighbor, link, direction } of neighbors) {
+        if (visited.has(neighbor) || shocks.has(neighbor)) continue;
+        visited.add(neighbor);
+
+        // 衰减
+        const decayRate = STRENGTH_DECAY[link.transmission_strength] ?? 0.35;
+        let newMagnitude = magnitude * (1 - decayRate);
+
+        // dampening/amplifying 调整
+        const dampeningCount = link.dampening_factors?.length || 0;
+        const amplifyingCount = link.amplifying_factors?.length || 0;
+        newMagnitude *= (1 - dampeningCount * 0.1) * (1 + amplifyingCount * 0.08);
+        newMagnitude = Math.max(0, Math.min(1, newMagnitude));
+
+        if (newMagnitude < 0.02) continue; // 忽略微弱影响
+
+        const neighborType = nodeTypeMap.get(neighbor) || "industry";
+
+        // 价格传导方向
+        const priceDirMultiplier = getPriceDirection(link.relation, direction);
+        const newPriceSign = priceSign * priceDirMultiplier;
+
+        if (isCompanyNode(neighborType)) {
+          // ── 企业节点：只算利好/利空，不继续传播价格 ──
+          const impactDir = getCompanyImpact(link.relation, direction, priceSign);
+          const scoreSign = impactDir === "benefit" ? 1 : -1;
+
+          const prev = nodeImpacts.get(neighbor);
+          if (prev) {
+            prev.totalScore += scoreSign * newMagnitude;
+            prev.count += 1;
+          } else {
+            nodeImpacts.set(neighbor, {
+              totalScore: scoreSign * newMagnitude,
+              count: 1,
+            });
+          }
+
+          // 企业节点价格变动=0（企业本身没有"价格"概念）
+          if (!nodePrices.has(neighbor)) {
+            nodePrices.set(neighbor, { totalPrice: 0, count: 1 });
+          }
+
+          // 边着色：对企业的影响
+          const linkKey = `${link.source}->${link.target}`;
+          linkImpacts.set(linkKey, impactDir === "benefit" ? "positive" : "negative");
+
+          // 企业节点不继续传播（企业是产业链末端）
+        } else {
+          // ── 商品/材料/行业节点：价格同向传导 ──
+          const priceScore = newPriceSign * newMagnitude;
+
+          const prevPrice = nodePrices.get(neighbor);
+          if (prevPrice) {
+            prevPrice.totalPrice += priceScore;
+            prevPrice.count += 1;
+          } else {
+            nodePrices.set(neighbor, {
+              totalPrice: priceScore,
+              count: 1,
+            });
+          }
+
+          // 商品节点的 impact 也根据价格方向设定：涨 = benefit（价格上升），跌 = hurt
+          const prev = nodeImpacts.get(neighbor);
+          const impactScore = newPriceSign > 0 ? newMagnitude : -newMagnitude;
+          if (prev) {
+            prev.totalScore += impactScore;
+            prev.count += 1;
+          } else {
+            nodeImpacts.set(neighbor, { totalScore: impactScore, count: 1 });
+          }
+
+          // 边着色
+          const linkKey = `${link.source}->${link.target}`;
+          linkImpacts.set(linkKey, newPriceSign > 0 ? "positive" : "negative");
+
+          // 继续传播（商品→商品 或 商品→企业）
+          queue.push([neighbor, newMagnitude, newPriceSign]);
+        }
+      }
+    }
+  }
+
+  // 应用结果
+  const updatedNodes = nodes.map((n) => {
+    if (shocks.has(n.name)) {
+      const sk = shocks.get(n.name)!;
+      return {
+        ...n,
+        impact: "source" as const,
+        impact_score: sk.shock,
+        price_change: sk.shock,
+      };
+    }
+    const priceInfo = nodePrices.get(n.name);
+    const impactInfo = nodeImpacts.get(n.name);
+
+    const priceChange = priceInfo ? Math.max(-1, Math.min(1, priceInfo.totalPrice / priceInfo.count)) : 0;
+    const impactAvg = impactInfo ? impactInfo.totalScore / impactInfo.count : 0;
+
+    const impact: ChainNode["impact"] = impactAvg > 0.01 ? "benefit" : impactAvg < -0.01 ? "hurt" : "neutral";
+
+    return {
+      ...n,
+      impact,
+      impact_score: Math.max(-1, Math.min(1, impactAvg)),
+      price_change: priceChange,
+    };
+  });
+
+  const updatedLinks = links.map((l) => {
+    const key = `${l.source}->${l.target}`;
+    const imp = linkImpacts.get(key);
+    return { ...l, impact: imp || ("neutral" as const) };
+  });
+
+  return { nodes: updatedNodes, links: updatedLinks };
+}
+
+function _reverseRelation(relation: string): string {
+  if (relation === "upstream") return "downstream";
+  if (relation === "downstream") return "upstream";
+  return relation;
+}
+
+// ── Store ──
+
+interface ChainStore {
+  // ── 状态 ──
+  nodes: ChainNode[];
+  links: ChainLink[];
+  status: ExploreStatus;
+  subject: string;
+  currentDepth: number;
+  maxDepth: number;
+  error: string | null;
+  selectedNode: ChainNode | null;
+  expandingNodes: string[];
+
+  // ── 图谱布局设置 ──
+  expandDepth: number; // 双击展开深度（1~3）
+  graphSettings: {
+    linkDistance: number;   // 边长度
+    nodeSize: number;       // 节点大小系数
+    chargeStrength: number; // 斥力强度（负数）
+  };
+
+  // ── 沙盘模式 ──
+  shocks: Map<string, NodeShock>;
+  simulateSummary: string;
+  simulateProgress: {
+    phase: "idle" | "thinking" | "parsing" | "propagating";
+    tokens: number;
+    progress: number;
+    nodesApplied: number;
+    linksApplied: number;
+  };
+
+  // ── 操作 ──
+  build: (subject: string, maxDepth?: number, focusArea?: string) => Promise<void>;
+  parseAndBuild: (text: string) => Promise<void>;
+  addNode: (nodeName: string, nodeType?: string) => Promise<void>;
+  expandAll: () => Promise<void>;
+  setShock: (nodeName: string, shock: number, label?: string) => void;
+  clearShock: (nodeName: string) => void;
+  clearAllShocks: () => void;
+  simulate: () => Promise<void>;
+  expandNode: (nodeName: string) => Promise<void>;
+  selectNode: (node: ChainNode | null) => void;
+  setMaxDepth: (depth: number) => void;
+  setExpandDepth: (depth: number) => void;
+  setGraphSettings: (settings: Partial<ChainStore["graphSettings"]>) => void;
+  reset: () => void;
+
+  // ── 内部 ──
+  _abortController: AbortController | null;
+}
+
+export const useChainStore = create<ChainStore>((set, get) => ({
+  nodes: [],
+  links: [],
+  status: "idle",
+  subject: "",
+  currentDepth: 0,
+  maxDepth: 1,
+  error: null,
+  selectedNode: null,
+  expandingNodes: [],
+  expandDepth: 1,
+  graphSettings: {
+    linkDistance: 120,
+    nodeSize: 1.0,
+    chargeStrength: -300,
+  },
+  shocks: new Map(),
+  simulateSummary: "",
+  simulateProgress: {
+    phase: "idle",
+    tokens: 0,
+    progress: 0,
+    nodesApplied: 0,
+    linksApplied: 0,
+  },
+  _abortController: null,
+
+  // ── 构建中性网络 ──
+  build: async (subject, maxDepth, focusArea) => {
+    const prev = get()._abortController;
+    if (prev) prev.abort();
+
+    const controller = new AbortController();
+    set({
+      nodes: [],
+      links: [],
+      status: "building",
+      subject,
+      currentDepth: 0,
+      maxDepth: maxDepth || get().maxDepth,
+      error: null,
+      selectedNode: null,
+      shocks: new Map(),
+      simulateSummary: "",
+      _abortController: controller,
+    });
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/industry/chain/build`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject,
+          max_depth: maxDepth || get().maxDepth,
+          focus_area: focusArea || "",
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        set({ status: "error", error: `HTTP ${res.status}` });
+        return;
+      }
+
+      await _parseSSE(res, set, get);
+    } catch (e: unknown) {
+      if ((e as Error).name === "AbortError") return;
+      set({ status: "error", error: (e as Error).message });
+    }
+  },
+
+  // ── 智能解析 + 放置节点（统一入口 — 只放置，不扩展）──
+  parseAndBuild: async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const prev = get()._abortController;
+    if (prev) prev.abort();
+    const controller = new AbortController();
+
+    set({
+      status: "adding",
+      error: null,
+      _abortController: controller,
+    });
+
+    // 如果是首次，设置 subject
+    if (!get().subject) {
+      set({ subject: trimmed });
+    }
+
+    try {
+      // 1. 调 /chain/parse 拆解文本
+      const parseRes = await fetch(`${API_BASE}/api/v1/industry/chain/parse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: trimmed }),
+        signal: controller.signal,
+      });
+
+      if (!parseRes.ok) {
+        set({ status: get().nodes.length > 0 ? "ready" : "idle", error: `Parse HTTP ${parseRes.status}` });
+        return;
+      }
+
+      const { nodes: parsedNodes } = await parseRes.json() as {
+        nodes: Array<{ name: string; type: string }>;
+      };
+
+      if (!parsedNodes || parsedNodes.length === 0) {
+        set({ status: get().nodes.length > 0 ? "ready" : "idle", error: "无法解析输入" });
+        return;
+      }
+
+      // 逐个放置节点（轻量级：只放置 + 发现关系，不扩展上下游）
+      for (const node of parsedNodes) {
+        if (get().nodes.some((n) => n.name === node.name)) continue;
+
+        set({ status: "adding" });
+        const existing = get().nodes.map((n) => n.name);
+        const placeRes = await fetch(`${API_BASE}/api/v1/industry/chain/place-node`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            node_name: node.name,
+            node_type: node.type,
+            existing_nodes: existing,
+          }),
+          signal: controller.signal,
+        });
+
+        if (placeRes.ok) {
+          await _parseSSE(placeRes, set, get, true);
+        }
+      }
+
+      // 更新 subject
+      set((s) => ({
+        status: "ready",
+        subject: s.subject && s.subject !== trimmed
+          ? `${s.subject}、${trimmed}`
+          : trimmed,
+      }));
+    } catch (e: unknown) {
+      if ((e as Error).name === "AbortError") return;
+      set({ status: get().nodes.length > 0 ? "ready" : "idle", error: (e as Error).message });
+    }
+  },
+
+  // ── 添加单个节点 ──
+  addNode: async (nodeName, nodeType) => {
+    const { nodes } = get();
+    set({ status: "adding" });
+
+    try {
+      const existing = nodes.map((n) => n.name);
+      const res = await fetch(`${API_BASE}/api/v1/industry/chain/add-node`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          node_name: nodeName,
+          node_type: nodeType || "industry",
+          existing_nodes: existing,
+        }),
+      });
+
+      if (!res.ok) {
+        set({ status: "ready", error: `HTTP ${res.status}` });
+        return;
+      }
+
+      await _parseSSE(res, set, get, true);
+      set({ status: "ready" });
+    } catch (e: unknown) {
+      set({ status: "ready", error: (e as Error).message });
+    }
+  },
+
+  // ── 全局扩展 ──
+  expandAll: async () => {
+    const { nodes, links } = get();
+
+    // 找叶子节点（出度 <= 0）
+    const outDegree = new Map<string, number>();
+    for (const l of links) {
+      outDegree.set(l.source, (outDegree.get(l.source) || 0) + 1);
+    }
+    const leafNodes = nodes
+      .filter((n) => !outDegree.has(n.name) || (outDegree.get(n.name) || 0) <= 0)
+      .map((n) => n.name);
+
+    if (leafNodes.length === 0) return;
+
+    const allNodeNames = nodes.map((n) => n.name);
+    set({ status: "building", expandingNodes: leafNodes });
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/industry/chain/expand-all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leaf_nodes: leafNodes,
+          existing_nodes: allNodeNames,
+        }),
+      });
+
+      if (!res.ok) {
+        set({ status: "ready", expandingNodes: [], error: `HTTP ${res.status}` });
+        return;
+      }
+
+      await _parseSSE(res, set, get, true);
+      set({ status: "ready", expandingNodes: [] });
+    } catch (e: unknown) {
+      set({ status: "ready", expandingNodes: [], error: (e as Error).message });
+    }
+  },
+
+  // ── 施加 / 清除冲击 — 自动触发纯前端传播 ──
+  setShock: (nodeName, shock, label) => {
+    set((s) => {
+      const next = new Map(s.shocks);
+      next.set(nodeName, { node_name: nodeName, shock, shock_label: label || "" });
+      const { nodes: propagated, links: propagatedLinks } = propagateShocksAlgorithm(
+        s.nodes, s.links, next,
+      );
+      return { shocks: next, nodes: propagated, links: propagatedLinks };
+    });
+  },
+
+  clearShock: (nodeName) => {
+    set((s) => {
+      const next = new Map(s.shocks);
+      next.delete(nodeName);
+      const { nodes: propagated, links: propagatedLinks } = propagateShocksAlgorithm(
+        s.nodes, s.links, next,
+      );
+      return { shocks: next, nodes: propagated, links: propagatedLinks };
+    });
+  },
+
+  clearAllShocks: () => {
+    set((s) => ({
+      shocks: new Map(),
+      simulateSummary: "",
+      simulateProgress: { phase: "idle", tokens: 0, progress: 0, nodesApplied: 0, linksApplied: 0 },
+      nodes: s.nodes.map((n) => ({
+        ...n,
+        impact: "neutral" as const,
+        impact_score: 0,
+        price_change: 0,
+      })),
+      links: s.links.map((l) => ({ ...l, impact: "neutral" as const })),
+    }));
+  },
+
+  // ── AI 深度解读（原 simulate）──
+  simulate: async () => {
+    const { shocks, subject, nodes, links } = get();
+    if (shocks.size === 0) return;
+
+    set({ status: "simulating", error: null, simulateProgress: {
+      phase: "thinking",
+      tokens: 0,
+      progress: 0,
+      nodesApplied: 0,
+      linksApplied: 0,
+    }});
+
+    const nodesForApi = nodes.map((n) => ({
+      name: n.name,
+      node_type: n.node_type,
+      summary: n.summary,
+      constraint_summary: n.constraint
+        ? [
+            n.constraint.shutdown_recovery_time,
+            n.constraint.capacity_ceiling,
+            n.constraint.inventory_buffer_days,
+            n.constraint.import_dependency,
+            n.constraint.substitution_path,
+          ].filter(Boolean).join("; ")
+        : "",
+    }));
+
+    const linksForApi = links.map((l) => ({
+      source: l.source,
+      target: l.target,
+      relation: l.relation,
+      transmission_speed: l.transmission_speed,
+      transmission_strength: l.transmission_strength,
+      transmission_mechanism: l.transmission_mechanism,
+    }));
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/industry/chain/simulate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject,
+          shocks: Array.from(shocks.values()),
+          nodes: nodesForApi,
+          links: linksForApi,
+        }),
+      });
+
+      if (!res.ok) {
+        set({ status: "ready", error: `HTTP ${res.status}` });
+        return;
+      }
+
+      await _parseSimulateSSE(res, set, get);
+    } catch (e: unknown) {
+      set({ status: "ready", error: (e as Error).message });
+    }
+  },
+
+  // ── 展开节点（双击触发）— 使用 expandDepth ──
+  // 优化版：阶段1 build + 阶段2 批量relate（1次LLM调用代替N次串行add-node）
+  expandNode: async (nodeName) => {
+    const { subject, expandingNodes, expandDepth, nodes } = get();
+    if (!subject || expandingNodes.includes(nodeName)) return;
+
+    set({ expandingNodes: [...expandingNodes, nodeName] });
+
+    try {
+      const existingNames = nodes.map((n) => n.name);
+
+      // ── 阶段 1：build(subject=nodeName, depth=expandDepth) ──
+      const res = await fetch(`${API_BASE}/api/v1/industry/chain/build`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: nodeName,
+          max_depth: expandDepth,
+        }),
+      });
+
+      if (!res.ok) {
+        set((s) => ({
+          expandingNodes: s.expandingNodes.filter((n) => n !== nodeName),
+        }));
+        return;
+      }
+
+      await _parseSSE(res, set, get, true);
+
+      // ── 阶段 2：批量 relate — 一次 LLM 调用发现所有新节点与旧图的关系 ──
+      const newNodes = get().nodes.filter((n) => !existingNames.includes(n.name));
+      if (newNodes.length > 0 && existingNames.length > 0) {
+        try {
+          const relateRes = await fetch(`${API_BASE}/api/v1/industry/chain/relate-batch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              new_nodes: newNodes.slice(0, 15).map((n) => ({
+                name: n.name,
+                node_type: n.node_type,
+              })),
+              existing_nodes: existingNames,
+            }),
+          });
+          if (relateRes.ok) {
+            await _parseSSE(relateRes, set, get, true);
+          }
+        } catch {
+          // relate 失败不影响展开结果
+        }
+      }
+
+      set((s) => ({
+        expandingNodes: s.expandingNodes.filter((n) => n !== nodeName),
+      }));
+    } catch {
+      set((s) => ({
+        expandingNodes: s.expandingNodes.filter((n) => n !== nodeName),
+      }));
+    }
+  },
+
+  selectNode: (node) => set({ selectedNode: node }),
+  setMaxDepth: (depth) => set({ maxDepth: depth }),
+  setExpandDepth: (depth) => set({ expandDepth: Math.max(1, Math.min(3, depth)) }),
+  setGraphSettings: (settings) => set((s) => ({
+    graphSettings: { ...s.graphSettings, ...settings },
+  })),
+
+  reset: () => {
+    const prev = get()._abortController;
+    if (prev) prev.abort();
+    set({
+      nodes: [],
+      links: [],
+      status: "idle",
+      subject: "",
+      currentDepth: 0,
+      error: null,
+      selectedNode: null,
+      expandingNodes: [],
+      shocks: new Map(),
+      simulateSummary: "",
+      simulateProgress: { phase: "idle", tokens: 0, progress: 0, nodesApplied: 0, linksApplied: 0 },
+      _abortController: null,
+    });
+  },
+}));
+
+
+// ── SSE 解析 — build 流 ──
+
+async function _parseSSE(
+  res: Response,
+  set: (partial: Partial<ChainStore> | ((s: ChainStore) => Partial<ChainStore>)) => void,
+  get: () => ChainStore,
+  isExpand = false,
+) {
+  const reader = res.body?.getReader();
+  if (!reader) return;
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const events = buffer.split("\n\n");
+    buffer = events.pop() || "";
+
+    for (const eventBlock of events) {
+      const lines = eventBlock.split("\n");
+      let eventType = "";
+      let eventData = "";
+      for (const line of lines) {
+        if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+        if (line.startsWith("data: ")) eventData = line.slice(6).trim();
+      }
+      if (!eventType || !eventData) continue;
+
+      try {
+        const parsed = JSON.parse(eventData);
+
+        switch (eventType) {
+          case "depth_start":
+            set({ currentDepth: parsed.depth || 0 });
+            break;
+
+          case "nodes_discovered": {
+            const newNodes: ChainNode[] = (parsed.nodes || []).map((n: ChainNode) => ({
+              ...n,
+              id: n.id || `n_${n.name}`,
+              price_change: n.price_change ?? 0,
+            }));
+            set((s) => {
+              const existingNames = new Set(s.nodes.map((n) => n.name));
+              // 增强去重：精确匹配 + 名称包含关系（如"PVC管材"和"管材"）
+              const unique = newNodes.filter((n) => {
+                if (existingNames.has(n.name)) return false;
+                // 检查是否有已有节点名包含新节点名或反之
+                for (const existing of existingNames) {
+                  if (existing.includes(n.name) || n.name.includes(existing)) {
+                    return false;
+                  }
+                }
+                return true;
+              });
+              return { nodes: [...s.nodes, ...unique] };
+            });
+            break;
+          }
+
+          case "links_discovered": {
+            const newLinks: ChainLink[] = parsed.links || [];
+            set((s) => {
+              const existingKeys = new Set(s.links.map((l) => `${l.source}->${l.target}`));
+              const unique = newLinks.filter((l) => !existingKeys.has(`${l.source}->${l.target}`));
+              return { links: [...s.links, ...unique] };
+            });
+            break;
+          }
+
+          case "build_complete":
+          case "explore_complete":
+          case "add_node_complete":
+          case "place_node_complete":
+          case "expand_all_complete":
+          case "relate_batch_complete":
+            if (!isExpand) {
+              set({ status: "ready" });
+            }
+            break;
+
+          case "error":
+            set({ error: parsed.message || "未知错误" });
+            break;
+        }
+      } catch {
+        // skip
+      }
+    }
+  }
+}
+
+
+// ── SSE 解析 — simulate 流 ──
+
+async function _parseSimulateSSE(
+  res: Response,
+  set: (partial: Partial<ChainStore> | ((s: ChainStore) => Partial<ChainStore>)) => void,
+  get: () => ChainStore,
+) {
+  const reader = res.body?.getReader();
+  if (!reader) return;
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let nodesApplied = 0;
+  let linksApplied = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const events = buffer.split("\n\n");
+    buffer = events.pop() || "";
+
+    for (const eventBlock of events) {
+      const lines = eventBlock.split("\n");
+      let eventType = "";
+      let eventData = "";
+      for (const line of lines) {
+        if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+        if (line.startsWith("data: ")) eventData = line.slice(6).trim();
+      }
+      if (!eventType || !eventData) continue;
+
+      try {
+        const parsed = JSON.parse(eventData);
+
+        switch (eventType) {
+          case "simulate_thinking": {
+            set((s) => ({
+              simulateProgress: {
+                ...s.simulateProgress,
+                phase: parsed.phase || "thinking",
+                tokens: parsed.tokens || 0,
+                progress: parsed.progress || 0,
+              },
+            }));
+            break;
+          }
+
+          case "node_impact": {
+            nodesApplied++;
+            const name = parsed.name as string;
+            const impact = parsed.impact as ChainNode["impact"];
+            const score = parseFloat(parsed.impact_score ?? "0");
+            const priceChange = parseFloat(parsed.price_change ?? "0");
+            const reason = (parsed.impact_reason ?? "") as string;
+            const path = (parsed.transmission_path ?? "") as string;
+
+            set((s) => {
+              const shocks = s.shocks;
+              return {
+                nodes: s.nodes.map((n) => {
+                  if (n.name === name && !shocks.has(name)) {
+                    return {
+                      ...n,
+                      impact,
+                      impact_score: score,
+                      price_change: priceChange,
+                      summary: reason + (path ? ` [${path}]` : ""),
+                    };
+                  }
+                  return n;
+                }),
+                simulateProgress: {
+                  ...s.simulateProgress,
+                  phase: "propagating",
+                  progress: 0.98,
+                  nodesApplied,
+                  linksApplied,
+                },
+              };
+            });
+            break;
+          }
+
+          case "link_impact": {
+            linksApplied++;
+            const src = parsed.source as string;
+            const tgt = parsed.target as string;
+            const linkImpact = parsed.impact as ChainLink["impact"];
+            const linkReason = (parsed.impact_reason ?? "") as string;
+
+            set((s) => ({
+              links: s.links.map((l) => {
+                if (l.source === src && l.target === tgt) {
+                  return { ...l, impact: linkImpact, impact_reason: linkReason };
+                }
+                return l;
+              }),
+              simulateProgress: {
+                ...s.simulateProgress,
+                phase: "propagating",
+                progress: 0.99,
+                nodesApplied,
+                linksApplied,
+              },
+            }));
+            break;
+          }
+
+          case "simulate_complete":
+            set({
+              status: "ready",
+              simulateSummary: (parsed.summary ?? "") as string,
+              simulateProgress: {
+                phase: "idle",
+                tokens: 0,
+                progress: 1,
+                nodesApplied,
+                linksApplied,
+              },
+            });
+            break;
+
+          case "error":
+            set({
+              status: "ready",
+              error: parsed.message || "模拟失败",
+              simulateProgress: { phase: "idle", tokens: 0, progress: 0, nodesApplied: 0, linksApplied: 0 },
+            });
+            break;
+        }
+      } catch {
+        // skip
+      }
+    }
+  }
+}
