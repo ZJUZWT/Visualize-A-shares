@@ -711,16 +711,30 @@ class ExpertAgent:
 
         def make_question(expert_type: str) -> str:
             base = user_message
-            if not stock_hint:
-                return base
-            if expert_type == "data":
-                return f"查询{stock_hint}最近30天行情走势、成交量变化和涨跌幅"
-            elif expert_type == "quant":
-                return f"分析{stock_hint}的技术指标(RSI/MACD/KDJ)，给出支撑位和阻力位"
-            elif expert_type == "info":
-                return f"查询{stock_hint}最近的新闻和公告，评估消息面利好利空"
-            elif expert_type == "industry":
-                return f"分析{stock_hint}所在行业的产业链位置和行业周期阶段"
+            if stock_hint:
+                # 有具体股票：围绕股票做多维度分析
+                if expert_type == "data":
+                    return f"查询{stock_hint}最近30天行情走势、成交量变化和涨跌幅"
+                elif expert_type == "quant":
+                    return f"分析{stock_hint}的技术指标(RSI/MACD/KDJ)，给出支撑位和阻力位"
+                elif expert_type == "info":
+                    return f"查询{stock_hint}最近的新闻和公告，评估消息面利好利空"
+                elif expert_type == "industry":
+                    return f"分析{stock_hint}所在行业的产业链位置和行业周期阶段"
+            else:
+                # 无具体股票：发散式全市场扫描（核心改动）
+                if expert_type == "data":
+                    return ("扫描全市场行情概览，找出今日成交量较近期显著放大、"
+                            "涨幅在3%~7%之间的强势股；同时关注近5天连续放量上涨的个股，按涨幅排序列出前10只")
+                elif expert_type == "quant":
+                    return ("用条件选股筛选技术面强势的股票：换手率大于3%、涨幅为正的股票，"
+                            "列出前10只；额外关注近期MACD金叉、RSI脱离超卖区的个股")
+                elif expert_type == "info":
+                    return ("扫描近期A股最重大的新闻、政策和行业动态，"
+                            "找出有明确利好催化的板块和受益个股，按消息重要性排序")
+                elif expert_type == "industry":
+                    return ("分析当前A股哪些行业板块处于景气上行期或有新的政策催化，"
+                            "推荐最具投资价值的2-3个板块，给出每个板块的龙头股")
             return base
 
         # ── 先检测是否是"综合分析"型问题 → 直接调全部 4 个专家 ──
@@ -1154,6 +1168,15 @@ class ExpertAgent:
                 "- 你也敢否定：当专家们意见分歧时，你会明确站队并解释为什么\n"
                 "- 你善于发现专家们各自角度的盲区，给出更全面的判断\n"
                 "- 你对用户负责，不说正确但无用的废话\n\n"
+                "## 多维度交叉验证（推荐股票时必须遵守）\n"
+                "当用户请求推荐股票时，你的分析框架是：\n"
+                "1. **数据面筛选**：从数据专家的全市场扫描中找出量价异动的候选标的\n"
+                "2. **技术面确认**：用量化专家的技术信号验证候选标的的买点/卖点\n"
+                "3. **消息面催化**：用资讯专家的新闻验证候选标的是否有催化剂\n"
+                "4. **产业面支撑**：用产业链专家的行业分析验证候选标的是否处于景气赛道\n"
+                "5. **交叉验证**：只有2个以上维度同时看好的标的才值得推荐\n\n"
+                "⚠️ **重要：不要只推荐你之前聊过的股票！** 你必须基于专家的新鲜数据分析来推荐。\n"
+                "如果专家没有找到好的标的，你要诚实地说「目前市场没有明显机会」，而不是凑数推荐。\n\n"
                 "## 输出要求\n"
                 "1. **结论先行**：开头就给出核心判断（看多/看空/中性 + 具体标的）\n"
                 "2. 综合各专家的一致观点和分歧点\n"
