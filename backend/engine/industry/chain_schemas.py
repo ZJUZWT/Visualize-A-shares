@@ -120,6 +120,8 @@ class ChainBuildRequest(BaseModel):
     subject: str = Field(description="产业链主体：公司名(中泰化学)、股票代码(002092)、原材料(石油)、行业(光伏)、宏观(美联储加息)、大宗(黄金)均可")
     max_depth: int = Field(default=1, ge=1, le=6)
     focus_area: str = ""
+    expand_direction: str = Field(default="both", description="展开方向：upstream=只找上游, downstream=只找下游, both=全部")
+    max_nodes: int = Field(default=0, ge=0, le=20, description="每层最多返回的节点数，0=不限制（LLM自行决定）")
 
 
 class NodeShock(BaseModel):
