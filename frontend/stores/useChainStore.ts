@@ -724,6 +724,11 @@ export const useChainStore = create<ChainStore>((set, get) => ({
         body: JSON.stringify({
           targets,
           existing_nodes: allNodeNames,
+          existing_links: links.map((l) => ({
+            source: l.source,
+            target: l.target,
+            relation: l.relation || "upstream",
+          })),
           max_depth: depth,
         }),
       });
@@ -1130,6 +1135,11 @@ async function _parseSSE(
 
           case "reindex_start":
             // 进度提示（可选）
+            break;
+
+          case "bridge_start":
+            // 自动桥梁发现开始（展开后检测到断连子图）
+            console.log(`[bridge] 检测到 ${parsed.component_count} 个断连板块，正在寻找桥梁...`);
             break;
 
           case "error":
