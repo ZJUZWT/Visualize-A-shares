@@ -103,7 +103,7 @@ async def chain_build(req: ChainBuildRequest):
         return {"error": "LLM 未配置"}
 
     from .chain_agent import ChainAgent
-    agent = ChainAgent(ie._llm)
+    agent = ChainAgent(ie._llm, ie._store)
 
     async def event_stream():
         try:
@@ -131,7 +131,7 @@ async def chain_simulate(req: ChainSimulateRequest):
         return {"error": "LLM 未配置"}
 
     from .chain_agent import ChainAgent
-    agent = ChainAgent(ie._llm)
+    agent = ChainAgent(ie._llm, ie._store)
 
     async def event_stream():
         try:
@@ -165,7 +165,7 @@ async def chain_explore(req: ChainExploreRequest):
         return {"error": "LLM 未配置，无法进行产业链推演"}
 
     from .chain_agent import ChainAgent
-    agent = ChainAgent(ie._llm)
+    agent = ChainAgent(ie._llm, ie._store)
 
     async def event_stream():
         try:
@@ -196,7 +196,7 @@ async def chain_expand_node(req: _ChainExpandRequest):
         return {"error": "LLM 未配置"}
 
     from .chain_agent import ChainAgent
-    agent = ChainAgent(ie._llm)
+    agent = ChainAgent(ie._llm, ie._store)
 
     expand_req = ChainExploreRequest(
         event=req.event,
@@ -277,7 +277,7 @@ async def chain_place_node(req: _ChainPlaceNodeRequest):
         return StreamingResponse(fallback_stream(), media_type="text/event-stream")
 
     from .chain_agent import ChainAgent
-    agent = ChainAgent(ie._llm)
+    agent = ChainAgent(ie._llm, ie._store)
 
     async def event_stream():
         try:
@@ -312,7 +312,7 @@ async def chain_add_node(req: _ChainAddNodeRequest):
         return {"error": "LLM 未配置"}
 
     from .chain_agent import ChainAgent
-    agent = ChainAgent(ie._llm)
+    agent = ChainAgent(ie._llm, ie._store)
 
     async def event_stream():
         try:
@@ -362,7 +362,7 @@ async def chain_relate_batch(req: _ChainRelateBatchRequest):
         return {"error": "LLM 未配置"}
 
     from .chain_agent import ChainAgent
-    agent = ChainAgent(ie._llm)
+    agent = ChainAgent(ie._llm, ie._store)
 
     async def event_stream():
         try:
@@ -395,7 +395,7 @@ async def chain_reindex_links(req: _ChainReindexRequest):
         return {"error": "LLM 未配置"}
 
     from .chain_agent import ChainAgent
-    agent = ChainAgent(ie._llm)
+    agent = ChainAgent(ie._llm, ie._store)
 
     async def event_stream():
         try:
@@ -423,7 +423,7 @@ async def chain_expand_all(req: _ChainExpandAllRequest):
         return {"error": "LLM 未配置"}
 
     from .chain_agent import ChainAgent
-    agent = ChainAgent(ie._llm)
+    agent = ChainAgent(ie._llm, ie._store)
 
     async def event_stream():
         try:

@@ -485,6 +485,7 @@ interface ChainStore {
   setExpandDirection: (dir: "both" | "upstream" | "downstream") => void;
   setExpandMaxNodes: (n: number) => void;
   setGraphSettings: (settings: Partial<ChainStore["graphSettings"]>) => void;
+  simplifyGraph: () => { removed: number };
   reset: () => void;
 
   // ── 内部 ──
@@ -948,6 +949,78 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     graphSettings: { ...s.graphSettings, ...settings },
   })),
 
+  // ── 精简图谱：传递性归约（Transitive Reduction）──
+  // 如果 A→B→C 存在，则 A→C 是冗余的（信息已通过 B 间接传达），可以删除
+  // 只对方向性传导边做归约（upstream/downstream/cost_input），不动 substitute/competes/byproduct 等
+  simplifyGraph: () => {
+    const { nodes, links } = get();
+    if (links.length === 0) return { removed: 0 };
+
+    // 可归约的边类型：方向性传导关系（A是B的上游/下游/成本项 → 有传递性）
+    const TRANSITIVE_RELATIONS = new Set([
+      "upstream", "downstream", "cost_input",
+    ]);
+
+    // 构建邻接表：node → Set<直接后继 node>（只考虑可归约类型的边）
+    const adj = new Map<string, Set<string>>();
+    const allNodes = new Set(nodes.map((n) => n.name));
+
+    for (const link of links) {
+      if (!TRANSITIVE_RELATIONS.has(link.relation)) continue;
+      if (!allNodes.has(link.source) || !allNodes.has(link.target)) continue;
+      if (!adj.has(link.source)) adj.set(link.source, new Set());
+      adj.get(link.source)!.add(link.target);
+    }
+
+    // 对每条可归约的边 A→C，检查是否存在中间节点 B 使得 A→B 且 B 能到达 C（BFS，深度≤3）
+    const redundant = new Set<string>(); // "source->target" keys
+
+    for (const link of links) {
+      if (!TRANSITIVE_RELATIONS.has(link.relation)) continue;
+      const { source, target } = link;
+      const neighbors = adj.get(source);
+      if (!neighbors || neighbors.size <= 1) continue;
+
+      // 从 source 的每个邻居 B（B≠target）出发，BFS 看能否在短路径内到达 target
+      for (const mid of neighbors) {
+        if (mid === target) continue;
+        // BFS from mid, max depth 2 (so total path A→B→...→C is max 3 hops)
+        const visited = new Set<string>([source, mid]);
+        let frontier = [mid];
+        let found = false;
+        for (let d = 0; d < 2 && !found; d++) {
+          const next: string[] = [];
+          for (const cur of frontier) {
+            const curAdj = adj.get(cur);
+            if (!curAdj) continue;
+            for (const nb of curAdj) {
+              if (nb === target) { found = true; break; }
+              if (!visited.has(nb)) {
+                visited.add(nb);
+                next.push(nb);
+              }
+            }
+            if (found) break;
+          }
+          frontier = next;
+        }
+        if (found) {
+          redundant.add(`${source}->${target}`);
+          break;
+        }
+      }
+    }
+
+    if (redundant.size === 0) return { removed: 0 };
+
+    // 过滤掉冗余边
+    set((s) => ({
+      links: s.links.filter((l) => !redundant.has(`${l.source}->${l.target}`)),
+    }));
+
+    return { removed: redundant.size };
+  },
+
   reset: () => {
     const prev = get()._abortController;
     if (prev) prev.abort();
@@ -1030,6 +1103,16 @@ async function _parseSSE(
               const unique = newLinks.filter((l) => !existingKeys.has(`${l.source}->${l.target}`));
               return { links: [...s.links, ...unique] };
             });
+            break;
+          }
+
+          case "nodes_removed": {
+            const removeNames: string[] = parsed.nodes || [];
+            if (removeNames.length > 0) {
+              set((s) => ({
+                nodes: s.nodes.filter((n) => !removeNames.includes(n.name)),
+              }));
+            }
             break;
           }
 
