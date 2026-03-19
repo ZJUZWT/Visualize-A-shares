@@ -8,6 +8,7 @@ export default function ChainToolbar() {
   const {
     parseAndBuild, addNode, expandAll, simulate, reset, clearAllShocks,
     status, subject, shocks,
+    expandDepth, setExpandDepth,
   } = useChainStore();
   const [input, setInput] = useState("");
   const [showAddNode, setShowAddNode] = useState(false);
@@ -74,18 +75,37 @@ export default function ChainToolbar() {
         {isAdding ? "添加中..." : "添加"}
       </button>
 
-      {/* 全局扩展 */}
-      <button
-        onClick={() => expandAll()}
-        disabled={isAdding || isSimulating || !hasNodes}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium
-                   bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)]
-                   hover:bg-[var(--border)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        title="展开所有叶子节点"
-      >
-        <Globe size={14} />
-        全局扩展
-      </button>
+      {/* 全局扩展 + 深度选择 */}
+      <div className="flex items-center">
+        <button
+          onClick={() => expandAll()}
+          disabled={isAdding || isSimulating || !hasNodes}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-l-lg text-sm font-medium
+                     bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)]
+                     hover:bg-[var(--border)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title="展开所有末端/源头节点"
+        >
+          <Globe size={14} />
+          全局扩展
+        </button>
+        {/* 深度快选 */}
+        <div className="flex border border-l-0 border-[var(--border)] rounded-r-lg overflow-hidden">
+          {[1, 2, 3].map((d) => (
+            <button
+              key={d}
+              onClick={() => setExpandDepth(d)}
+              className="px-2 py-2 text-xs font-medium transition-all border-r border-[var(--border)] last:border-r-0"
+              style={{
+                background: expandDepth === d ? "var(--accent)" : "var(--bg-primary)",
+                color: expandDepth === d ? "#fff" : "var(--text-secondary)",
+              }}
+              title={`展开深度 ${d} 层`}
+            >
+              {d}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* 手动添加节点 */}
       <div className="relative">

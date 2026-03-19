@@ -331,8 +331,14 @@ async def chain_add_node(req: _ChainAddNodeRequest):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+class _ExpandTarget(BaseModel):
+    name: str
+    direction: str = "both"  # upstream | downstream | both
+
+
 class _ChainExpandAllRequest(BaseModel):
-    leaf_nodes: list[str]
+    leaf_nodes: list[str] = []  # 兼容旧格式（纯名称列表，全部用 both）
+    targets: list[_ExpandTarget] = []  # 新格式（带方向）
     existing_nodes: list[str] = []
 
 
@@ -387,8 +393,13 @@ async def chain_expand_all(req: _ChainExpandAllRequest):
 
     async def event_stream():
         try:
+            # 兼容：旧格式 leaf_nodes → 转为 targets(direction=both)
+            targets = req.targets
+            if not targets and req.leaf_nodes:
+                targets = [_ExpandTarget(name=n, direction="both") for n in req.leaf_nodes]
+
             async for event in agent.expand_all(
-                leaf_nodes=req.leaf_nodes,
+                targets=[(t.name, t.direction) for t in targets],
                 existing_nodes=req.existing_nodes,
             ):
                 evt_type = event["event"]

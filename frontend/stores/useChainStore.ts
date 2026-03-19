@@ -674,26 +674,52 @@ export const useChainStore = create<ChainStore>((set, get) => ({
   expandAll: async () => {
     const { nodes, links } = get();
 
-    // 找叶子节点（出度 <= 0）
+    // 统计出度和入度
     const outDegree = new Map<string, number>();
+    const inDegree = new Map<string, number>();
     for (const l of links) {
       outDegree.set(l.source, (outDegree.get(l.source) || 0) + 1);
+      inDegree.set(l.target, (inDegree.get(l.target) || 0) + 1);
     }
-    const leafNodes = nodes
-      .filter((n) => !outDegree.has(n.name) || (outDegree.get(n.name) || 0) <= 0)
-      .map((n) => n.name);
 
-    if (leafNodes.length === 0) return;
+    // 稀疏度阈值：入度或出度 ≤ SPARSE 视为信息不足，需要补充扩展
+    // 例如 PVC 只有一条 电石→PVC 的入边 → 入度稀疏 → 补充上游（乙烯法等替代路线）
+    const SPARSE = 1;
+
+    // 智能分类：按稀疏度决定每个节点的扩展方向
+    const targets: Array<{ name: string; direction: string }> = [];
+    for (const n of nodes) {
+      const out = outDegree.get(n.name) || 0;
+      const inp = inDegree.get(n.name) || 0;
+
+      const sparseIn = inp <= SPARSE;   // 上游来源不足
+      const sparseOut = out <= SPARSE;  // 下游去向不足
+
+      if (sparseIn && sparseOut) {
+        // 两个方向都稀疏 → 全方位扩展
+        targets.push({ name: n.name, direction: "both" });
+      } else if (sparseOut) {
+        // 下游稀疏 → 补充下游
+        targets.push({ name: n.name, direction: "downstream" });
+      } else if (sparseIn) {
+        // 上游稀疏 → 补充上游（发现更多制备路线、原料来源）
+        targets.push({ name: n.name, direction: "upstream" });
+      }
+      // 两个方向都 >= 2 → 信息足够丰富，不扩展
+    }
+
+    if (targets.length === 0) return;
 
     const allNodeNames = nodes.map((n) => n.name);
-    set({ status: "building", expandingNodes: leafNodes });
+    const targetNames = targets.map((t) => t.name);
+    set({ status: "building", expandingNodes: targetNames });
 
     try {
       const res = await fetch(`${API_BASE}/api/v1/industry/chain/expand-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          leaf_nodes: leafNodes,
+          targets,
           existing_nodes: allNodeNames,
         }),
       });
