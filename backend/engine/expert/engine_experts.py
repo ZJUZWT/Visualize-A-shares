@@ -391,10 +391,9 @@ class EngineExpert:
                     "max_rounds": effective_max_rounds,
                 }}
 
-            # 1. 规划工具调用
+            # 1. 规划工具调用（优先原生 Tool Use，fallback 到 prompt 方式）
             if round_num == 1:
-                # 首轮：正常规划
-                tool_plan = await self._plan_tools(message)
+                tool_plan = await self._plan_tools_dispatch(message)
             else:
                 # 后续轮次：带上之前的工具结果，让 LLM 决定是否继续
                 tool_plan = await self._plan_tools_with_context(
@@ -737,6 +736,13 @@ class EngineExpert:
             json_match = re.search(r'\{.*\}', text, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group())
+                # 防御：LLM 可能返回 list 而非 dict
+                if isinstance(data, list):
+                    logger.info(f"🧠 [{self.expert_type}] R{round_num} LLM 返回 list，自动包装")
+                    for tc in data:
+                        if isinstance(tc, dict) and "engine" not in tc:
+                            tc["engine"] = self.expert_type
+                    return {"tool_calls": data}
                 reasoning = data.get("reasoning", "")
                 tool_calls = data.get("tool_calls", [])
                 if reasoning:
@@ -764,6 +770,100 @@ class EngineExpert:
             logger.warning(f"_plan_tools_with_context R{round_num} 异常: {e}")
 
         return {"tool_calls": []}
+
+    async def _plan_tools_dispatch(self, message: str) -> dict:
+        """工具规划调度器 — 优先使用原生 Tool Use，失败时 fallback 到 prompt 方式
+
+        原生 Tool Use 的优势：
+        - 省掉一次独立的 LLM plan 调用（模型直接在响应中结构化返回工具调用）
+        - 消除 JSON 解析失败、<think> 标签污染等问题
+        - MiniMax M2.7 原生支持 OpenAI tools 协议
+        """
+        if self._llm and getattr(self._llm, "supports_tool_use", False):
+            try:
+                result = await self._plan_tools_native(message)
+                if result.get("tool_calls"):
+                    logger.info(
+                        f"🚀 [{self.expert_type}] 原生 Tool Use 规划成功: "
+                        f"{len(result['tool_calls'])} 个工具调用"
+                    )
+                    return result
+                # 原生返回空 tool_calls — 也是合法的（不需要工具）
+                logger.info(f"🚀 [{self.expert_type}] 原生 Tool Use: 无需调用工具")
+                return result
+            except Exception as e:
+                logger.warning(
+                    f"⚠️ [{self.expert_type}] 原生 Tool Use 失败，fallback 到 prompt 方式: {e}"
+                )
+        # Fallback: prompt 方式规划
+        return await self._plan_tools(message)
+
+    async def _plan_tools_native(self, message: str) -> dict:
+        """使用原生 Function Calling (OpenAI tools 协议) 规划工具调用
+
+        一次 LLM 调用即可完成工具规划，不需要额外的 plan 步骤。
+        模型会在 response.tool_calls 中结构化返回工具调用。
+        """
+        import json as _json
+        from llm.providers import ChatMessage
+        from engine.expert.personas import get_current_date_context
+        from engine.expert.skill_registry import SkillRegistry
+
+        tools_schema = SkillRegistry.get_tools_schema(self.expert_type)
+        if not tools_schema:
+            return {"tool_calls": []}
+
+        expert_name = self.profile["name"]
+        expert_desc = self.profile.get("description", "")
+        date_ctx = get_current_date_context()
+
+        system_prompt = (
+            f"你是{expert_name}。{expert_desc}\n"
+            f"⏰ 当前时间：{date_ctx}\n\n"
+            "用户提出了一个问题，请根据问题决定是否需要调用工具获取数据。\n"
+            '注意：当用户提到"今天"、"最近"、"本周"等相对时间时，请根据上方的当前时间来理解。'
+        )
+
+        messages = [
+            ChatMessage("system", system_prompt),
+            ChatMessage("user", message),
+        ]
+
+        result = await self._llm.chat_with_tools(messages, tools=tools_schema)
+
+        if LLM_DEBUG_RAW:
+            logger.info(
+                f"🔬 [{self.expert_type}] _plan_tools_native 返回: "
+                f"content={len(result.content)}字, tool_calls={len(result.tool_calls)}个"
+            )
+            if result.tool_calls:
+                for tc in result.tool_calls:
+                    logger.info(
+                        f"  📎 {tc['function']['name']}({tc['function']['arguments']})"
+                    )
+
+        if not result.tool_calls:
+            return {"tool_calls": []}
+
+        # 将 OpenAI tool_calls 格式转换为内部格式
+        tool_calls = []
+        for tc in result.tool_calls:
+            func = tc.get("function", {})
+            name = func.get("name", "")
+            try:
+                params = _json.loads(func.get("arguments", "{}"))
+            except (_json.JSONDecodeError, Exception):
+                params = {}
+
+            tool_calls.append({
+                "action": name,
+                "params": params if isinstance(params, dict) else {},
+                "engine": self.expert_type,
+                # 保存原始 tool_call_id，用于后续多轮对话
+                "_tool_call_id": tc.get("id", ""),
+            })
+
+        return {"tool_calls": tool_calls}
 
     async def _plan_tools(self, message: str) -> dict:
         """让 LLM 规划需要调用的工具（流式收集 + think 标签剥离）"""
@@ -793,6 +893,7 @@ class EngineExpert:
 直接输出 JSON，不要包含 markdown 代码块、不要包含任何额外文字。
 绝对不要输出 <think> 标签或任何思考过程，只输出纯 JSON。"""
 
+        raw_text = ""  # 提前声明，避免 except 块中 UnboundLocalError
         try:
             # 流式收集（保持链路活跃）
             chunks: list[str] = []
@@ -863,7 +964,16 @@ class EngineExpert:
 
             # 先尝试直接解析
             try:
-                return json.loads(text)
+                parsed = json.loads(text)
+                # 防御：LLM 可能返回纯 list（如 [{...}]）而非 {"tool_calls": [...]}
+                if isinstance(parsed, list):
+                    logger.info(f"工具规划: LLM 返回了 list 而非 dict，自动包装为 tool_calls")
+                    return {"tool_calls": parsed}
+                if isinstance(parsed, dict):
+                    return parsed
+                # 其他类型（str, int 等）→ 跳过
+                logger.warning(f"工具规划: json.loads 返回了意外类型 {type(parsed).__name__}")
+                return {"tool_calls": []}
             except json.JSONDecodeError as je:
                 # "Extra data" 说明 LLM 返回了多个连续 JSON 对象，提取第一个含 tool_calls 的
                 if "Extra data" in str(je) or "Expecting value" in str(je):

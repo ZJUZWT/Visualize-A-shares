@@ -116,35 +116,35 @@
       "name": "中泰化学",
       "industry": "化学原料",
       "zjh_industry": "制造业-化学原料和化学制品制造业",
-      "updated_at": "2026-03-19T20:46:08.164111",
+      "updated_at": "2026-03-19T21:30:41.591205",
       "id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc"
     },
     {
       "type": "sector",
       "name": "化学原料",
       "category": "industry",
-      "updated_at": "2026-03-19T20:46:08.164123",
+      "updated_at": "2026-03-19T21:30:41.591573",
       "id": "15150ef1-7265-484b-bc7f-acf750726155"
     },
     {
       "type": "material",
       "name": "石油",
       "category": "raw_material",
-      "updated_at": "2026-03-19T20:46:08.164208",
+      "updated_at": "2026-03-19T21:30:41.591337",
       "id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
       "type": "material",
       "name": "煤炭",
       "category": "raw_material",
-      "updated_at": "2026-03-19T20:46:08.164215",
+      "updated_at": "2026-03-19T22:04:45.008960",
       "id": "845b4dfd-f9b3-4422-a476-686f9809322b"
     },
     {
       "type": "material",
       "name": "锰",
       "category": "raw_material",
-      "updated_at": "2026-03-19T20:46:08.164218",
+      "updated_at": "2026-03-19T21:30:41.591346",
       "id": "1e3226d9-2be7-40e9-b945-ba62201b81ec"
     },
     {
@@ -211,14 +211,14 @@
       "type": "sector",
       "name": "小金属",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-19T22:04:45.008843",
       "id": "012015b4-5053-48ba-9122-9c150328395f"
     },
     {
       "type": "material",
       "name": "稀土",
       "category": "raw_material",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-19T22:04:45.008927",
       "id": "0df250c0-5398-4dc5-9046-0b13559d09de"
     },
     {
@@ -512,6 +512,24 @@
       "category": "industry",
       "updated_at": "2000-01-01T00:00:00",
       "id": "4751cf07-5192-4a30-abd7-2c39c23290b2"
+    },
+    {
+      "type": "stock",
+      "code": "600075",
+      "name": "新疆天业",
+      "industry": "化学原料",
+      "zjh_industry": "制造业-化学原料和化学制品制造业",
+      "updated_at": "2026-03-19T21:30:41.591415",
+      "id": "eeb78204-b45d-4046-8f2b-b5516f3525f8"
+    },
+    {
+      "id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
+      "type": "stock",
+      "code": "600111",
+      "name": "北方稀土",
+      "industry": "小金属",
+      "zjh_industry": "制造业-有色金属冶炼和压延加工业",
+      "updated_at": "2026-03-19T22:04:45.008748"
     }
   ],
   "edges": [
@@ -661,6 +679,13 @@
       "timestamp": "2026-03-16T19:35:12.905140",
       "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
       "target_id": "1e3226d9-2be7-40e9-b945-ba62201b81ec"
+    },
+    {
+      "relation": "competes_with",
+      "reason": "同属化学原料行业",
+      "timestamp": "2026-03-19T21:30:41.591751",
+      "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
+      "target_id": "eeb78204-b45d-4046-8f2b-b5516f3525f8"
     },
     {
       "relation": "belongs_to",
@@ -948,6 +973,34 @@
       "timestamp": "2026-03-19T19:48:13.956520",
       "source_id": "512f3851-9a9a-43ac-add5-7758f1fe46f9",
       "target_id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40"
+    },
+    {
+      "relation": "belongs_to",
+      "reason": "新疆天业属于化学原料行业",
+      "timestamp": "2026-03-19T21:30:41.591589",
+      "source_id": "eeb78204-b45d-4046-8f2b-b5516f3525f8",
+      "target_id": "15150ef1-7265-484b-bc7f-acf750726155"
+    },
+    {
+      "source_id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
+      "target_id": "012015b4-5053-48ba-9122-9c150328395f",
+      "relation": "belongs_to",
+      "reason": "北方稀土属于小金属行业",
+      "timestamp": "2026-03-19T22:04:45.008855"
+    },
+    {
+      "source_id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
+      "target_id": "0df250c0-5398-4dc5-9046-0b13559d09de",
+      "relation": "consumes",
+      "reason": "北方稀土使用稀土",
+      "timestamp": "2026-03-19T22:04:45.008931"
+    },
+    {
+      "source_id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
+      "target_id": "845b4dfd-f9b3-4422-a476-686f9809322b",
+      "relation": "consumes",
+      "reason": "北方稀土使用煤炭",
+      "timestamp": "2026-03-19T22:04:45.008963"
     }
   ]
 }
