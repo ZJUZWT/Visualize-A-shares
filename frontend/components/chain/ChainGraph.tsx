@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useMemo, useState } from "react";
 import { useChainStore } from "@/stores/useChainStore";
 import { IMPACT_COLORS, NODE_TYPE_ICONS, NODE_TYPE_BASE_COLORS } from "@/types/chain";
 import type { ChainNode, ChainLink } from "@/types/chain";
-import { Settings2, Layers, ChevronDown, ChevronUp } from "lucide-react";
+import { Settings2, ChevronDown, ChevronUp } from "lucide-react";
 import dynamic from "next/dynamic";
 
 // react-force-graph-2d 依赖 window，需要动态导入
@@ -62,21 +62,12 @@ function buildGraphData(
   return { nodes: graphNodes, links: graphLinks };
 }
 
-/** 左下角悬浮设置面板：展开深度 + 方向 + 数量 + 布局参数 */
+/** 左下角悬浮设置面板：布局参数 */
 function GraphSettingsPanel() {
   const {
-    expandDepth, setExpandDepth,
-    expandDirection, setExpandDirection,
-    expandMaxNodes, setExpandMaxNodes,
     graphSettings, setGraphSettings,
   } = useChainStore();
   const [open, setOpen] = useState(false);
-
-  const dirOptions: { value: "both" | "upstream" | "downstream"; label: string; icon: string }[] = [
-    { value: "both", label: "全部", icon: "⇄" },
-    { value: "upstream", label: "上游", icon: "⬆" },
-    { value: "downstream", label: "下游", icon: "⬇" },
-  ];
 
   return (
     <div
@@ -102,79 +93,6 @@ function GraphSettingsPanel() {
           className="mt-1.5 p-3 rounded-xl border border-[var(--border)] backdrop-blur-md space-y-3"
           style={{ background: "rgba(15, 23, 42, 0.92)", width: 240 }}
         >
-          {/* 双击展开深度 */}
-          <div>
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <Layers size={12} className="text-[var(--text-secondary)]" />
-              <span className="text-[10px] text-[var(--text-secondary)]">双击展开深度</span>
-            </div>
-            <div className="flex gap-1">
-              {[1, 2, 3].map((d) => (
-                <button
-                  key={d}
-                  onClick={() => setExpandDepth(d)}
-                  className="flex-1 py-1 rounded text-xs font-medium transition-all"
-                  style={{
-                    background: expandDepth === d ? "var(--accent)" : "rgba(100,116,139,0.15)",
-                    color: expandDepth === d ? "#fff" : "var(--text-secondary)",
-                  }}
-                  title={`双击节点展开 ${d} 层`}
-                >
-                  {d}层
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 展开方向 */}
-          <div>
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-xs">🧭</span>
-              <span className="text-[10px] text-[var(--text-secondary)]">展开方向</span>
-            </div>
-            <div className="flex gap-1">
-              {dirOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setExpandDirection(opt.value)}
-                  className="flex-1 py-1 rounded text-xs font-medium transition-all"
-                  style={{
-                    background: expandDirection === opt.value ? "var(--accent)" : "rgba(100,116,139,0.15)",
-                    color: expandDirection === opt.value ? "#fff" : "var(--text-secondary)",
-                  }}
-                  title={`只展开${opt.label}节点`}
-                >
-                  {opt.icon} {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* 每层节点数 */}
-          <div>
-            <div className="flex justify-between text-[10px] text-[var(--text-secondary)] mb-1">
-              <span>每层节点数上限</span>
-              <span className="tabular-nums">{expandMaxNodes === 0 ? "不限" : expandMaxNodes}</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={15}
-              step={1}
-              value={expandMaxNodes}
-              onChange={(e) => setExpandMaxNodes(parseInt(e.target.value))}
-              className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-blue-500"
-              style={{ background: "var(--border)" }}
-            />
-            <div className="flex justify-between text-[9px] text-[var(--text-secondary)]/50 mt-0.5">
-              <span>不限</span>
-              <span>15</span>
-            </div>
-          </div>
-
-          {/* 分割线 */}
-          <div className="border-t border-[var(--border)]" />
-
           {/* 边长度 */}
           <div>
             <div className="flex justify-between text-[10px] text-[var(--text-secondary)] mb-1">

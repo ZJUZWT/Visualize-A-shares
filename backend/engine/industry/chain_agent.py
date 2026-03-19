@@ -931,12 +931,20 @@ class ChainAgent:
             if known_nodes:
                 combined_note += (
                     "\n\n## ⚠️ 精简模式（展开场景）\n"
-                    "这是扩展已有图谱的场景，**最重要的是建立连接关系**。\n"
+                    "这是扩展已有图谱的场景，**最重要的是补充信息密度，丰富连接关系**。\n"
                     "1. 节点的 `constraint` 字段全部设为 `null`（节省 token，确保 links 不被截断）\n"
                     "2. 节点的 `summary` 只写一句话\n"
                     "3. **必须输出 links 数组**，每个新节点至少有一条边连接到已有节点或聚焦节点\n"
                     "4. 先输出 nodes，再输出 links，最后输出 expand_candidates\n"
                     "5. 新节点数量控制在 3-5 个以内\n"
+                    "\n## 💡 补充丰富度指引\n"
+                    "**请特别注意挖掘以下信息**（这是扩展的核心价值）：\n"
+                    "- **替代路线/工艺**：聚焦节点是否有多种制备方式？（如 PVC 有电石法和乙烯法，要分别建节点并标 substitute）\n"
+                    "- **竞争产品/替代品**：同一用途是否有不同材料可选？（如 PVC管 vs PE管 vs PPR管，标 substitute）\n"
+                    "- **关键企业**：该环节的龙头企业是谁？产能占比多少？（建 company 节点）\n"
+                    "- **成本结构**：哪些是主要成本项？各占比多少？（在 impact_reason 中写明\"占成本XX%\"）\n"
+                    "- **副产品**：生产过程有无重要副产物？（如氯碱联产：PVC 与烧碱，标 byproduct）\n"
+                    "已有图谱中聚焦节点的连接可能很单薄，你的任务就是让它变得丰满。\n"
                 )
 
             # 合并已探索 + 外部已知节点，让 LLM 复用已有节点名建边
@@ -1638,73 +1646,92 @@ class ChainAgent:
 
     # ── 批量展开所有叶子节点 ──
 
-    async def expand_all(self, leaf_nodes: list[str], existing_nodes: list[str]):
-        """并发展开多个叶子节点
+    async def expand_all(self, targets: list[tuple[str, str]], existing_nodes: list[str]):
+        """并发展开多个节点，每个节点可指定扩展方向 — 真正流式
 
-        对每个 leaf_node 并发调 build(subject=leaf_node, max_depth=1)，
-        合并结果去重后 yield SSE 事件。
+        Args:
+            targets: [(node_name, direction), ...] direction = "upstream" | "downstream" | "both"
+            existing_nodes: 已有节点名列表
+
+        使用 asyncio.Queue 实现：每个并发 build() 产出的 node/link 立即入队，
+        主循环从队列取出后即刻 yield SSE 事件，用户看到图逐步生长而非等全部完成。
 
         yield SSE 事件流：
         - expand_all_start
-        - nodes_discovered, links_discovered (每个节点的 build 结果)
+        - nodes_discovered, links_discovered (实时推送)
         - expand_all_complete
         """
         # 最多并发 10 个
-        targets = leaf_nodes[:10]
+        targets = targets[:10]
+        target_names = [t[0] for t in targets]
 
         yield {
             "event": "expand_all_start",
-            "data": {"targets": targets, "count": len(targets)},
+            "data": {"targets": target_names, "count": len(targets)},
         }
 
-        async def _expand_one(node_name: str) -> list[dict]:
-            """展开单个节点，收集所有事件"""
-            results: list[dict] = []
-            req = ChainBuildRequest(subject=node_name, max_depth=1)
-            async for evt in self.build(req, known_nodes=existing_nodes):
-                results.append(evt)
-            return results
+        # 用队列实现真正流式：生产者(build)→队列→消费者(yield SSE)
+        queue: asyncio.Queue[dict | None] = asyncio.Queue()
+        pending = len(targets)
 
-        # 并发执行
-        tasks = [_expand_one(n) for n in targets]
-        all_results = await asyncio.gather(*tasks, return_exceptions=True)
+        async def _expand_one(node_name: str, direction: str):
+            """展开单个节点，事件直接入队"""
+            try:
+                req = ChainBuildRequest(
+                    subject=node_name,
+                    max_depth=1,
+                    expand_direction=direction,
+                )
+                async for evt in self.build(req, known_nodes=existing_nodes):
+                    await queue.put(evt)
+            except Exception as e:
+                logger.warning(f"expand_all: {node_name} 失败: {e}")
+            finally:
+                await queue.put(None)  # 哨兵：标记此任务完成
 
-        # 合并去重并逐个 yield
+        # 启动所有并发任务
+        for name, direction in targets:
+            asyncio.create_task(_expand_one(name, direction))
+
+        # 去重状态
         seen_nodes: set[str] = set(existing_nodes)
         seen_links: set[str] = set()
+        finished = 0
 
-        for i, result in enumerate(all_results):
-            if isinstance(result, Exception):
-                logger.warning(f"expand_all: {targets[i]} 失败: {result}")
+        # 从队列消费事件并即刻 yield
+        while finished < pending:
+            evt = await queue.get()
+            if evt is None:
+                finished += 1
                 continue
-            for evt in result:
-                etype = evt.get("event", "")
-                if etype == "nodes_discovered":
-                    raw_nodes = evt["data"].get("nodes", [])
-                    unique_nodes = [
-                        n for n in raw_nodes
-                        if n.get("name", "") not in seen_nodes
-                    ]
-                    for n in unique_nodes:
-                        seen_nodes.add(n.get("name", ""))
-                    if unique_nodes:
-                        yield {
-                            "event": "nodes_discovered",
-                            "data": {"depth": evt["data"].get("depth", 1), "nodes": unique_nodes},
-                        }
-                elif etype == "links_discovered":
-                    raw_links = evt["data"].get("links", [])
-                    unique_links = []
-                    for l in raw_links:
-                        key = f"{l.get('source', '')}->{l.get('target', '')}"
-                        if key not in seen_links:
-                            seen_links.add(key)
-                            unique_links.append(l)
-                    if unique_links:
-                        yield {
-                            "event": "links_discovered",
-                            "data": {"depth": evt["data"].get("depth", 1), "links": unique_links},
-                        }
+
+            etype = evt.get("event", "")
+            if etype == "nodes_discovered":
+                raw_nodes = evt["data"].get("nodes", [])
+                unique_nodes = [
+                    n for n in raw_nodes
+                    if n.get("name", "") not in seen_nodes
+                ]
+                for n in unique_nodes:
+                    seen_nodes.add(n.get("name", ""))
+                if unique_nodes:
+                    yield {
+                        "event": "nodes_discovered",
+                        "data": {"depth": evt["data"].get("depth", 1), "nodes": unique_nodes},
+                    }
+            elif etype == "links_discovered":
+                raw_links = evt["data"].get("links", [])
+                unique_links = []
+                for l in raw_links:
+                    key = f"{l.get('source', '')}->{l.get('target', '')}"
+                    if key not in seen_links:
+                        seen_links.add(key)
+                        unique_links.append(l)
+                if unique_links:
+                    yield {
+                        "event": "links_discovered",
+                        "data": {"depth": evt["data"].get("depth", 1), "links": unique_links},
+                    }
 
         yield {
             "event": "expand_all_complete",
