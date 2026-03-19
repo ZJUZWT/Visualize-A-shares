@@ -18,6 +18,7 @@ class StockNode(BaseModel):
     name: str
     industry: str = ""           # 行业（如"银行"）
     zjh_industry: str = ""       # 证监会二级行业
+    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
 class SectorNode(BaseModel):
@@ -25,6 +26,7 @@ class SectorNode(BaseModel):
     type: Literal["sector"] = "sector"
     name: str
     category: str = ""           # "industry" | "zjh" | "concept"
+    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
 class EventNode(BaseModel):
@@ -41,6 +43,7 @@ class MaterialNode(BaseModel):
     type: Literal["material"] = "material"
     name: str
     category: str = ""           # "raw_material" | "product" | "resource"
+    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
 class RegionNode(BaseModel):
@@ -48,6 +51,7 @@ class RegionNode(BaseModel):
     id: str = Field(default_factory=new_id)
     type: Literal["region"] = "region"
     name: str                    # 如 "深圳" "上海" "北京"
+    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
 class BeliefNode(BaseModel):
