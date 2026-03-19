@@ -140,6 +140,76 @@ class SkillRegistry:
                 lines.append(f"- {skill.name}(): {skill.description}")
         return "\n".join(lines)
 
+    # ─── OpenAI tools schema 生成（原生 Function Calling 用） ──
+
+    # SkillParam.type → JSON Schema type 映射
+    _TYPE_MAP: dict[str, str] = {
+        "str": "string",
+        "int": "integer",
+        "float": "number",
+        "bool": "boolean",
+        "dict": "object",
+    }
+
+    @classmethod
+    def get_tools_schema(cls, expert_type: str) -> list[dict]:
+        """生成 OpenAI 兼容的 tools JSON（用于原生 Function Calling）
+
+        输出格式：
+        [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_technical_indicators",
+                    "description": "...",
+                    "parameters": {
+                        "type": "object",
+                        "properties": { ... },
+                        "required": [...]
+                    }
+                }
+            },
+            ...
+        ]
+        """
+        cls._ensure_loaded()
+        skills = cls.get_skills_for_expert(expert_type)
+        if not skills:
+            return []
+
+        tools = []
+        for skill in skills:
+            properties = {}
+            required = []
+            for p in skill.params:
+                prop: dict[str, Any] = {
+                    "type": cls._TYPE_MAP.get(p.type, "string"),
+                }
+                if p.description:
+                    prop["description"] = p.description
+                properties[p.name] = prop
+                if p.required:
+                    required.append(p.name)
+
+            func_def: dict[str, Any] = {
+                "name": skill.name,
+                "description": skill.description,
+            }
+            # 即使无参数也要给 parameters（部分厂商要求）
+            func_def["parameters"] = {
+                "type": "object",
+                "properties": properties,
+            }
+            if required:
+                func_def["parameters"]["required"] = required
+
+            tools.append({
+                "type": "function",
+                "function": func_def,
+            })
+
+        return tools
+
     # ─── 执行 ───────────────────────────────────────────
 
     @classmethod
