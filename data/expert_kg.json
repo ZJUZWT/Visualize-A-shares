@@ -45,21 +45,21 @@
       "type": "material",
       "name": "锂",
       "category": "raw_material",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.511996",
       "id": "8480f145-b8e2-4d2f-b1b4-ed21954c34e0"
     },
     {
       "type": "material",
       "name": "电池",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.512003",
       "id": "951d6bbe-9130-435b-878b-a61faecc5e14"
     },
     {
       "type": "material",
       "name": "储能",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.512009",
       "id": "3179130f-c22b-48f0-832b-28b2668e288a"
     },
     {
@@ -75,7 +75,7 @@
       "type": "sector",
       "name": "电池",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.511896",
       "id": "c5038974-b5a8-4a11-9351-845b173dd97b"
     },
     {
@@ -116,35 +116,35 @@
       "name": "中泰化学",
       "industry": "化学原料",
       "zjh_industry": "制造业-化学原料和化学制品制造业",
-      "updated_at": "2026-03-19T21:30:41.591205",
+      "updated_at": "2026-03-20T00:51:55.511756",
       "id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc"
     },
     {
       "type": "sector",
       "name": "化学原料",
       "category": "industry",
-      "updated_at": "2026-03-19T21:30:41.591573",
+      "updated_at": "2026-03-20T00:51:55.511765",
       "id": "15150ef1-7265-484b-bc7f-acf750726155"
     },
     {
       "type": "material",
       "name": "石油",
       "category": "raw_material",
-      "updated_at": "2026-03-19T21:30:41.591337",
+      "updated_at": "2026-03-20T01:12:51.926193",
       "id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
       "type": "material",
       "name": "煤炭",
       "category": "raw_material",
-      "updated_at": "2026-03-19T22:04:45.008960",
+      "updated_at": "2026-03-20T00:51:55.511883",
       "id": "845b4dfd-f9b3-4422-a476-686f9809322b"
     },
     {
       "type": "material",
       "name": "锰",
       "category": "raw_material",
-      "updated_at": "2026-03-19T21:30:41.591346",
+      "updated_at": "2026-03-20T00:51:55.511887",
       "id": "1e3226d9-2be7-40e9-b945-ba62201b81ec"
     },
     {
@@ -153,21 +153,21 @@
       "name": "雄韬股份",
       "industry": "电池",
       "zjh_industry": "制造业-电气机械和器材制造业",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.511893",
       "id": "87c47001-28f8-4d79-b802-8e086cc3ab50"
     },
     {
       "type": "material",
       "name": "锌",
       "category": "raw_material",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.511999",
       "id": "b3824adb-71ab-4101-a360-4d1a5aeef0b7"
     },
     {
       "type": "material",
       "name": "动力电池",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.512006",
       "id": "d99d9619-6385-41af-8a11-927efade46ca"
     },
     {
@@ -313,7 +313,7 @@
       "type": "sector",
       "name": "石油行业",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T01:12:51.925923",
       "id": "83f99713-cb7d-448a-ba61-64df686e26a4"
     },
     {
@@ -455,7 +455,7 @@
       "type": "material",
       "name": "风力发电",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.512076",
       "id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40"
     },
     {
@@ -503,14 +503,14 @@
       "name": "美利云",
       "industry": "通信服务",
       "zjh_industry": "制造业-造纸和纸制品业",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:49:06.235116",
       "id": "512f3851-9a9a-43ac-add5-7758f1fe46f9"
     },
     {
       "type": "sector",
       "name": "通信服务",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:49:06.235130",
       "id": "4751cf07-5192-4a30-abd7-2c39c23290b2"
     },
     {
@@ -523,13 +523,47 @@
       "id": "eeb78204-b45d-4046-8f2b-b5516f3525f8"
     },
     {
-      "id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
       "type": "stock",
       "code": "600111",
       "name": "北方稀土",
       "industry": "小金属",
       "zjh_industry": "制造业-有色金属冶炼和压延加工业",
-      "updated_at": "2026-03-19T22:04:45.008748"
+      "updated_at": "2026-03-19T22:04:45.008748",
+      "id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674"
+    },
+    {
+      "id": "21482947-f9fb-4145-a74b-e3c190c7f600",
+      "type": "stock",
+      "code": "600938",
+      "name": "中国海油",
+      "industry": "石油行业",
+      "zjh_industry": "采矿业-石油和天然气开采业",
+      "updated_at": "2026-03-19T22:14:33.943208"
+    },
+    {
+      "id": "a25be5e4-5fcc-4340-8fcf-063ed648c74b",
+      "type": "stock",
+      "code": "600875",
+      "name": "东方电气",
+      "industry": "电源设备",
+      "zjh_industry": "制造业-通用设备制造业",
+      "updated_at": "2026-03-20T00:51:55.512015"
+    },
+    {
+      "id": "bee499f1-a028-4a18-b518-faca970cf84c",
+      "type": "sector",
+      "name": "电源设备",
+      "category": "industry",
+      "updated_at": "2026-03-20T00:51:55.512018"
+    },
+    {
+      "id": "dd14efbd-e7f6-4e73-b9b5-98de20fd5fc8",
+      "type": "stock",
+      "code": "002221",
+      "name": "东华能源",
+      "industry": "石油行业",
+      "zjh_industry": "批发和零售业-批发业",
+      "updated_at": "2026-03-20T01:12:51.925524"
     }
   ],
   "edges": [
@@ -982,25 +1016,67 @@
       "target_id": "15150ef1-7265-484b-bc7f-acf750726155"
     },
     {
-      "source_id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
-      "target_id": "012015b4-5053-48ba-9122-9c150328395f",
       "relation": "belongs_to",
       "reason": "北方稀土属于小金属行业",
-      "timestamp": "2026-03-19T22:04:45.008855"
+      "timestamp": "2026-03-19T22:04:45.008855",
+      "source_id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
+      "target_id": "012015b4-5053-48ba-9122-9c150328395f"
     },
     {
-      "source_id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
-      "target_id": "0df250c0-5398-4dc5-9046-0b13559d09de",
       "relation": "consumes",
       "reason": "北方稀土使用稀土",
-      "timestamp": "2026-03-19T22:04:45.008931"
+      "timestamp": "2026-03-19T22:04:45.008931",
+      "source_id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
+      "target_id": "0df250c0-5398-4dc5-9046-0b13559d09de"
     },
     {
-      "source_id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
-      "target_id": "845b4dfd-f9b3-4422-a476-686f9809322b",
       "relation": "consumes",
       "reason": "北方稀土使用煤炭",
-      "timestamp": "2026-03-19T22:04:45.008963"
+      "timestamp": "2026-03-19T22:04:45.008963",
+      "source_id": "e2815ff9-7628-4d8d-aa31-f61d7e93e674",
+      "target_id": "845b4dfd-f9b3-4422-a476-686f9809322b"
+    },
+    {
+      "source_id": "21482947-f9fb-4145-a74b-e3c190c7f600",
+      "target_id": "83f99713-cb7d-448a-ba61-64df686e26a4",
+      "relation": "belongs_to",
+      "reason": "中国海油属于石油行业行业",
+      "timestamp": "2026-03-19T22:14:33.943511"
+    },
+    {
+      "source_id": "a25be5e4-5fcc-4340-8fcf-063ed648c74b",
+      "target_id": "bee499f1-a028-4a18-b518-faca970cf84c",
+      "relation": "belongs_to",
+      "reason": "东方电气属于电源设备行业",
+      "timestamp": "2026-03-20T00:01:19.902074"
+    },
+    {
+      "source_id": "a25be5e4-5fcc-4340-8fcf-063ed648c74b",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
+      "relation": "consumes",
+      "reason": "东方电气使用石油",
+      "timestamp": "2026-03-20T00:01:19.902271"
+    },
+    {
+      "source_id": "a25be5e4-5fcc-4340-8fcf-063ed648c74b",
+      "target_id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40",
+      "relation": "supplies",
+      "reason": "东方电气生产风力发电",
+      "timestamp": "2026-03-20T00:01:19.902358"
+    },
+    {
+      "source_id": "dd14efbd-e7f6-4e73-b9b5-98de20fd5fc8",
+      "target_id": "83f99713-cb7d-448a-ba61-64df686e26a4",
+      "relation": "belongs_to",
+      "reason": "东华能源属于石油行业行业",
+      "timestamp": "2026-03-20T01:12:51.925949"
+    },
+    {
+      "source_id": "dd14efbd-e7f6-4e73-b9b5-98de20fd5fc8",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
+      "relation": "consumes",
+      "reason": "东华能源使用石油",
+      "timestamp": "2026-03-20T01:12:51.926210"
     }
   ]
 }
