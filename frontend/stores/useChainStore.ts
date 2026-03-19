@@ -955,17 +955,7 @@ async function _parseSSE(
             }));
             set((s) => {
               const existingNames = new Set(s.nodes.map((n) => n.name));
-              // 增强去重：精确匹配 + 名称包含关系（如"PVC管材"和"管材"）
-              const unique = newNodes.filter((n) => {
-                if (existingNames.has(n.name)) return false;
-                // 检查是否有已有节点名包含新节点名或反之
-                for (const existing of existingNames) {
-                  if (existing.includes(n.name) || n.name.includes(existing)) {
-                    return false;
-                  }
-                }
-                return true;
-              });
+              const unique = newNodes.filter((n) => !existingNames.has(n.name));
               return { nodes: [...s.nodes, ...unique] };
             });
             break;
