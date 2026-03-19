@@ -340,6 +340,7 @@ class _ChainExpandAllRequest(BaseModel):
     leaf_nodes: list[str] = []  # 兼容旧格式（纯名称列表，全部用 both）
     targets: list[_ExpandTarget] = []  # 新格式（带方向）
     existing_nodes: list[str] = []
+    existing_links: list[dict] = []  # [{"source": "A", "target": "B", "relation": "upstream"}, ...]
     max_depth: int = 1  # 展开深度
 
 
@@ -435,6 +436,7 @@ async def chain_expand_all(req: _ChainExpandAllRequest):
             async for event in agent.expand_all(
                 targets=[(t.name, t.direction) for t in targets],
                 existing_nodes=req.existing_nodes,
+                existing_links=req.existing_links,
                 max_depth=req.max_depth,
             ):
                 evt_type = event["event"]
