@@ -988,6 +988,7 @@ class ChainAgent:
                     "3. **必须输出 links 数组**，每个新节点至少有一条边连接到已有节点或聚焦节点\n"
                     "4. 先输出 nodes，再输出 links，最后输出 expand_candidates\n"
                     "5. 新节点数量控制在 3-5 个以内\n"
+                    "6. **expand_candidates 必须输出**：从你本次输出的新节点中，选出最值得继续深挖的 2-3 个节点名称放入 expand_candidates 数组。这些候选节点将用于后续层级的递归展开，**不能为空数组**\n"
                     "\n## 💡 补充丰富度指引\n"
                     "**请特别注意挖掘以下信息**（这是扩展的核心价值）：\n"
                     "- **替代路线/工艺**：聚焦节点是否有多种制备方式？（如 PVC 有电石法和乙烯法，要分别建节点并标 substitute）\n"
@@ -1090,6 +1091,12 @@ class ChainAgent:
                     pass
 
                 explored.update(focus_list)
+
+                # ── 兜底：如果 LLM 没给 expand_candidates，用本层新节点作为下层候选 ──
+                if not to_expand and streamed_nodes:
+                    to_expand = [n for n in streamed_nodes if n not in explored]
+                    if to_expand:
+                        logger.info(f"ChainAgent build depth={depth}: LLM 未返回 expand_candidates，自动使用本层 {len(to_expand)} 个新节点作为候选")
 
             except Exception as e:
                 logger.error(f"ChainAgent build depth={depth} 失败: {e}")
@@ -1904,6 +1911,8 @@ class ChainAgent:
             "event": "expand_all_start",
             "data": {"targets": target_names, "count": len(targets)},
         }
+
+        logger.info(f"expand_all: {len(targets)} 个目标, max_depth={max_depth}, targets={[(t[0], t[1]) for t in targets[:5]]}")
 
         # 用队列实现真正流式：生产者(build)→队列→消费者(yield SSE)
         queue: asyncio.Queue[dict | None] = asyncio.Queue()
