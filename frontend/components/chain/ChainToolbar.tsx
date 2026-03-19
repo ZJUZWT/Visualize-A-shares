@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Search, Plus, RotateCcw, Brain, Trash2, Globe, X } from "lucide-react";
+import { Search, Plus, RotateCcw, Brain, Trash2, Globe, X, Link2 } from "lucide-react";
 import { useChainStore } from "@/stores/useChainStore";
 
 export default function ChainToolbar() {
   const {
-    parseAndBuild, addNode, expandAll, simulate, reset, clearAllShocks,
+    parseAndBuild, addNode, expandAll, reindexLinks, simulate, reset, clearAllShocks,
     status, subject, shocks,
     expandDepth, setExpandDepth,
   } = useChainStore();
@@ -106,6 +106,19 @@ export default function ChainToolbar() {
           ))}
         </div>
       </div>
+
+      {/* 重整关系 */}
+      <button
+        onClick={() => reindexLinks()}
+        disabled={isAdding || isSimulating || !hasNodes}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium
+                   bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)]
+                   hover:bg-[var(--border)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        title="审视全图，补全缺失的关系边"
+      >
+        <Link2 size={14} />
+        重整关系
+      </button>
 
       {/* 手动添加节点 */}
       <div className="relative">

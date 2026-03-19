@@ -340,6 +340,7 @@ class _ChainExpandAllRequest(BaseModel):
     leaf_nodes: list[str] = []  # 兼容旧格式（纯名称列表，全部用 both）
     targets: list[_ExpandTarget] = []  # 新格式（带方向）
     existing_nodes: list[str] = []
+    max_depth: int = 1  # 展开深度
 
 
 class _ChainRelateBatchRequest(BaseModel):
@@ -379,6 +380,39 @@ async def chain_relate_batch(req: _ChainRelateBatchRequest):
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+class _ChainReindexRequest(BaseModel):
+    nodes: list[dict]  # [{"name": "xxx", "node_type": "yyy"}, ...]
+    links: list[dict] = []  # [{"source": "A", "target": "B", "relation": "upstream"}, ...]
+
+
+@router.post("/chain/reindex-links")
+async def chain_reindex_links(req: _ChainReindexRequest):
+    """重整关系：审视全图节点，补全缺失的边（SSE）"""
+    from . import get_industry_engine
+    ie = get_industry_engine()
+
+    if not ie._llm:
+        return {"error": "LLM 未配置"}
+
+    from .chain_agent import ChainAgent
+    agent = ChainAgent(ie._llm)
+
+    async def event_stream():
+        try:
+            async for event in agent.reindex_links(
+                nodes=req.nodes,
+                existing_links=req.links,
+            ):
+                evt_type = event["event"]
+                evt_data = json.dumps(event["data"], ensure_ascii=False, default=str)
+                yield f"event: {evt_type}\ndata: {evt_data}\n\n"
+        except Exception as e:
+            logger.error(f"重整关系失败: {e}")
+            yield f"event: error\ndata: {json.dumps({'message': type(e).__name__}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @router.post("/chain/expand-all")
 async def chain_expand_all(req: _ChainExpandAllRequest):
     """批量展开所有叶子节点（SSE）"""
@@ -401,6 +435,7 @@ async def chain_expand_all(req: _ChainExpandAllRequest):
             async for event in agent.expand_all(
                 targets=[(t.name, t.direction) for t in targets],
                 existing_nodes=req.existing_nodes,
+                max_depth=req.max_depth,
             ):
                 evt_type = event["event"]
                 evt_data = json.dumps(event["data"], ensure_ascii=False, default=str)

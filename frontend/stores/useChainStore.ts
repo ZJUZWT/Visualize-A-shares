@@ -473,6 +473,7 @@ interface ChainStore {
   parseAndBuild: (text: string) => Promise<void>;
   addNode: (nodeName: string, nodeType?: string) => Promise<void>;
   expandAll: () => Promise<void>;
+  reindexLinks: () => Promise<void>;
   setShock: (nodeName: string, shock: number, label?: string) => void;
   clearShock: (nodeName: string) => void;
   clearAllShocks: () => void;
@@ -715,12 +716,14 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     set({ status: "building", expandingNodes: targetNames });
 
     try {
+      const depth = get().expandDepth;
       const res = await fetch(`${API_BASE}/api/v1/industry/chain/expand-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           targets,
           existing_nodes: allNodeNames,
+          max_depth: depth,
         }),
       });
 
@@ -733,6 +736,39 @@ export const useChainStore = create<ChainStore>((set, get) => ({
       set({ status: "ready", expandingNodes: [] });
     } catch (e: unknown) {
       set({ status: "ready", expandingNodes: [], error: (e as Error).message });
+    }
+  },
+
+  // ── 重整关系 ──
+  reindexLinks: async () => {
+    const { nodes, links } = get();
+    if (nodes.length < 2) return;
+
+    set({ status: "building" });
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/industry/chain/reindex-links`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nodes: nodes.map((n) => ({ name: n.name, node_type: n.node_type })),
+          links: links.map((l) => ({
+            source: l.source,
+            target: l.target,
+            relation: l.relation,
+          })),
+        }),
+      });
+
+      if (!res.ok) {
+        set({ status: "ready", error: `HTTP ${res.status}` });
+        return;
+      }
+
+      await _parseSSE(res, set, get, true);
+      set({ status: "ready" });
+    } catch (e: unknown) {
+      set({ status: "ready", error: (e as Error).message });
     }
   },
 
@@ -1003,9 +1039,14 @@ async function _parseSSE(
           case "place_node_complete":
           case "expand_all_complete":
           case "relate_batch_complete":
+          case "reindex_complete":
             if (!isExpand) {
               set({ status: "ready" });
             }
+            break;
+
+          case "reindex_start":
+            // 进度提示（可选）
             break;
 
           case "error":
