@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 
@@ -706,14 +707,134 @@ CHAIN_REINDEX_PROMPT = """你是「产业物理学家」。用户已经构建了
   }}
 ]}}
 
-如果所有关系都已经完整，输出 {{"links": []}}。
+如果所有关系都已经完整，输出 {{"links": []}}\n。
 """
+
+
+# ── 跨子图桥梁发现 Prompt ──
+
+CHAIN_BRIDGE_PROMPT = """你是「产业物理学家」。用户构建的产业链图谱中存在**断开的板块**（多个不相连的子图），你的任务是**找出板块之间的产业链桥梁关系**，将它们连接起来。
+
+## ⚠️ 核心任务
+图谱中检测到 {component_count} 个断开的板块。你**必须**为每两个相邻板块找到至少 1 条连接边。这是强制要求——如果两个板块存在于同一张产业链图上，它们之间**一定**有直接或间接的产业链联系。
+
+{components_description}
+
+## 关键思路指引
+寻找板块间桥梁时，请从以下角度思考：
+- **共同原材料**：不同产品是否共用某种上游原材料？（如 PVC 和涤纶都依赖石油/天然气）
+- **共同客户/应用**：不同产品是否进入同一终端市场？（如建材、汽车、电子都是多种化工品的下游）
+- **替代关系**：A 板块的产品是否能替代 B 板块的产品？
+- **副产品联产**：A 的生产过程是否产生 B 的原料？（如氯碱联产）
+- **能源/物流共享**：不同板块是否共享电力、运输等基础设施？
+- **宏观因子传导**：是否有共同的宏观变量影响两个板块？（如利率、汇率、油价）
+- **企业跨界经营**：某家企业是否同时涉及两个板块？
+
+## 已有的边（参考，不要重复）
+{existing_links}
+
+## 关系类型
+upstream | downstream | substitute | cost_input | byproduct | logistics | competes
+
+## 输出格式
+{{"links": [
+  {{
+    "source": "板块A中的节点名",
+    "target": "板块B中的节点名",
+    "relation": "...",
+    "impact": "neutral",
+    "impact_reason": "详细说明两个板块之间的产业联系（必须具体：运输方式、成本占比、供需依赖等）",
+    "confidence": 0.75,
+    "transmission_speed": "...",
+    "transmission_strength": "...",
+    "transmission_mechanism": "...",
+    "dampening_factors": [],
+    "amplifying_factors": []
+  }}
+]}}
+
+**你必须输出至少 {min_bridges} 条桥梁边，将断开的板块连接起来。空输出是不允许的。**
+"""
+
+
+def _find_connected_components(nodes: list[str], links: list[tuple[str, str]]) -> list[set[str]]:
+    """用 BFS 找出图中所有连通分量（无向图）
+
+    Returns: 按大小降序排列的连通分量列表 [set of node names]
+    """
+    adj: dict[str, set[str]] = {n: set() for n in nodes}
+    for s, t in links:
+        if s in adj and t in adj:
+            adj[s].add(t)
+            adj[t].add(s)
+
+    visited: set[str] = set()
+    components: list[set[str]] = []
+
+    for node in nodes:
+        if node in visited:
+            continue
+        # BFS
+        component: set[str] = set()
+        queue = [node]
+        while queue:
+            cur = queue.pop(0)
+            if cur in visited:
+                continue
+            visited.add(cur)
+            component.add(cur)
+            for nb in adj.get(cur, set()):
+                if nb not in visited:
+                    queue.append(nb)
+        if component:
+            components.append(component)
+
+    return sorted(components, key=len, reverse=True)
+
 
 class ChainAgent:
     """产业链推演 Agent — 递归多跳展开"""
 
-    def __init__(self, llm: BaseLLMProvider):
+    def __init__(self, llm: BaseLLMProvider, store=None):
         self._llm = llm
+        self._store = store  # DuckDBStore，用于 LLM 结果缓存
+
+    # ── 节点级缓存 ──
+
+    def _cache_key(self, subject: str, direction: str, depth: int) -> str:
+        """生成缓存 key：chain:{subject}:{direction}:{depth}"""
+        raw = f"chain_build:{subject}:{direction}:{depth}"
+        return f"chain_{hashlib.sha256(raw.encode()).hexdigest()[:16]}"
+
+    def _get_cached_build(self, subject: str, direction: str, depth: int) -> dict | None:
+        """查询节点构建缓存，返回 {nodes: [...], links: [...]} 或 None"""
+        if not self._store:
+            return None
+        key = self._cache_key(subject, direction, depth)
+        try:
+            raw = self._store.get_llm_cache(key)
+            if raw:
+                data = json.loads(raw)
+                if data.get("nodes") or data.get("links"):
+                    logger.info(f"ChainAgent cache HIT: {subject}/{direction}/depth={depth} → {len(data.get('nodes', []))} nodes, {len(data.get('links', []))} links")
+                    return data
+        except Exception as e:
+            logger.debug(f"ChainAgent cache read error: {e}")
+        return None
+
+    def _set_cached_build(self, subject: str, direction: str, depth: int, nodes: list[dict], links: list[dict]) -> None:
+        """写入节点构建缓存"""
+        if not self._store:
+            return
+        if not nodes and not links:
+            return
+        key = self._cache_key(subject, direction, depth)
+        try:
+            data = {"nodes": nodes, "links": links}
+            self._store.set_llm_cache(key, f"chain_build:{subject}", json.dumps(data, ensure_ascii=False))
+            logger.debug(f"ChainAgent cache SET: {subject}/{direction}/depth={depth} → {len(nodes)} nodes, {len(links)} links")
+        except Exception as e:
+            logger.debug(f"ChainAgent cache write error: {e}")
 
     async def explore(self, req: ChainExploreRequest):
         """递归探索产业链传导，yield SSE 事件流（真正流式 + 名称归一化）"""
@@ -922,33 +1043,54 @@ class ChainAgent:
         explored: set[str] = set()
         to_expand: list[str] = []
 
-        # 根据输入智能判断节点类型
-        root_name = _normalize_name(req.subject)
-        root_type = _guess_subject_type(root_name)
+        # ── 多主体支持：subject 含顿号时拆分为多个 focus 节点 ──
+        subjects = [_normalize_name(s.strip()) for s in req.subject.split("、") if s.strip()]
+        is_batch = len(subjects) > 1
 
-        root = ChainNode(
-            id=f"n_{root_name}",
-            name=root_name,
-            node_type=root_type,
-            impact="source",
-            impact_score=0.0,
-            depth=0,
-            summary=f"产业链中心：{root_name}",
-        )
-        all_nodes[root_name] = root
+        if is_batch:
+            # 合批模式：不创建合并 root，每个子节点都是已知节点（由 expand_all 传入）
+            root_name = subjects[0]  # 仅用于日志/事件标识
+            # 把所有子节点加入 all_nodes（它们在前端已存在，这里只需跟踪）
+            for s in subjects:
+                stype = _guess_subject_type(s)
+                all_nodes[s] = ChainNode(
+                    id=f"n_{s}", name=s, node_type=stype,
+                    impact="neutral", impact_score=0.0, depth=0,
+                    summary=f"批量展开目标：{s}",
+                )
+            yield {
+                "event": "build_start",
+                "data": {"subject": "、".join(subjects), "max_depth": req.max_depth},
+            }
+            # 不 yield nodes_discovered（这些节点前端已经有了）
+        else:
+            # 单主体模式（原有逻辑）
+            root_name = subjects[0] if subjects else _normalize_name(req.subject)
+            root_type = _guess_subject_type(root_name)
 
-        yield {
-            "event": "build_start",
-            "data": {"subject": root_name, "max_depth": req.max_depth},
-        }
-        yield {
-            "event": "nodes_discovered",
-            "data": {"depth": 0, "nodes": [root.model_dump()]},
-        }
+            root = ChainNode(
+                id=f"n_{root_name}",
+                name=root_name,
+                node_type=root_type,
+                impact="source",
+                impact_score=0.0,
+                depth=0,
+                summary=f"产业链中心：{root_name}",
+            )
+            all_nodes[root_name] = root
+
+            yield {
+                "event": "build_start",
+                "data": {"subject": root_name, "max_depth": req.max_depth},
+            }
+            yield {
+                "event": "nodes_discovered",
+                "data": {"depth": 0, "nodes": [root.model_dump()]},
+            }
 
         for depth in range(1, req.max_depth + 1):
             if depth == 1:
-                focus_list = [root_name]
+                focus_list = subjects if is_batch else [root_name]
             else:
                 focus_list = to_expand[:5]
 
@@ -959,6 +1101,45 @@ class ChainAgent:
                 "event": "depth_start",
                 "data": {"depth": depth, "expanding": focus_list},
             }
+
+            # ── 缓存快速路径（expand 场景）──
+            # 对每个 focus 节点查缓存，命中则直接 yield，未命中的走 LLM
+            if known_nodes and len(focus_list) == 1:
+                cache_subject = focus_list[0]
+                cache_dir = req.expand_direction or "both"
+                cached = self._get_cached_build(cache_subject, cache_dir, depth)
+                if cached:
+                    # 从缓存恢复节点
+                    cached_nodes = cached.get("nodes", [])
+                    cached_links = cached.get("links", [])
+                    _streamed_nodes: list[str] = []
+                    _streamed_links: list[tuple[str, str]] = []
+                    for nd in cached_nodes:
+                        node = self._parse_node_obj(nd, depth, all_nodes)
+                        if node:
+                            all_nodes[node.name] = node
+                            _streamed_nodes.append(node.name)
+                            yield {
+                                "event": "nodes_discovered",
+                                "data": {"depth": depth, "nodes": [node.model_dump()]},
+                            }
+                    for lk in cached_links:
+                        link = self._parse_link_obj(lk, depth, all_nodes)
+                        if link:
+                            link_key = (link.source, link.target)
+                            if link_key not in {(l.source, l.target) for l in all_links}:
+                                all_links.append(link)
+                                _streamed_links.append(link_key)
+                                yield {
+                                    "event": "links_discovered",
+                                    "data": {"depth": depth, "links": [link.model_dump()]},
+                                }
+                    # expand_candidates 从缓存取
+                    to_expand = cached.get("expand_candidates", [])
+                    if not to_expand and _streamed_nodes:
+                        to_expand = [n for n in _streamed_nodes if n not in explored]
+                    explored.update(focus_list)
+                    continue  # 跳过本层 LLM 调用
 
             focus_area_note = ""
             if req.focus_area:
@@ -985,9 +1166,9 @@ class ChainAgent:
                     "这是扩展已有图谱的场景，**最重要的是补充信息密度，丰富连接关系**。\n"
                     "1. 节点的 `constraint` 字段全部设为 `null`（节省 token，确保 links 不被截断）\n"
                     "2. 节点的 `summary` 只写一句话\n"
-                    "3. **必须输出 links 数组**，每个新节点至少有一条边连接到已有节点或聚焦节点\n"
+                    "3. **links 是最关键的输出** — 每个新节点至少有一条边连接到已有节点或聚焦节点，**没有 links 的 node 等于废物**\n"
                     "4. 先输出 nodes，再输出 links，最后输出 expand_candidates\n"
-                    "5. 新节点数量控制在 3-5 个以内\n"
+                    "5. **新节点数量硬限制：最多 5 个**。超过 5 个会导致 links 被截断，宁少勿多！\n"
                     "6. **expand_candidates 必须输出**：从你本次输出的新节点中，选出最值得继续深挖的 2-3 个节点名称放入 expand_candidates 数组。这些候选节点将用于后续层级的递归展开，**不能为空数组**\n"
                     "\n## 💡 补充丰富度指引\n"
                     "**请特别注意挖掘以下信息**（这是扩展的核心价值）：\n"
@@ -1002,10 +1183,17 @@ class ChainAgent:
             # 合并已探索 + 外部已知节点，让 LLM 复用已有节点名建边
             all_existing = explored | set(known_nodes or [])
 
+            # 限制传给 LLM 的已有节点数量，避免 prompt 过大导致输出被截断
+            # 优先保留聚焦节点和根节点附近的节点
+            existing_for_prompt = sorted(all_existing)
+            if len(existing_for_prompt) > 30:
+                logger.info(f"ChainAgent build depth={depth}: 已有节点 {len(existing_for_prompt)} 个，截取前 30 个传入 prompt")
+                existing_for_prompt = existing_for_prompt[:30]
+
             prompt = CHAIN_BUILD_PROMPT.format(
                 subject=root_name,
                 focus_nodes="、".join(focus_list),
-                existing_nodes="、".join(sorted(all_existing)) if all_existing else "（无）",
+                existing_nodes="、".join(existing_for_prompt) if existing_for_prompt else "（无）",
                 focus_area_note=combined_note,
             )
 
@@ -1080,6 +1268,29 @@ class ChainAgent:
                     except Exception as e:
                         logger.warning(f"ChainAgent build depth={depth}: links 兜底也失败: {e}")
 
+                # ── 孤立节点清理：如果本层有新节点但完全没有新 links，回滚这些孤立节点 ──
+                if streamed_nodes and not streamed_links:
+                    # 检查兜底是否补上了 links
+                    current_link_keys = {(l.source, l.target) for l in all_links}
+                    orphan_nodes = [
+                        n for n in streamed_nodes
+                        if not any(n in (s, t) for s, t in current_link_keys)
+                    ]
+                    if orphan_nodes:
+                        logger.warning(
+                            f"ChainAgent build depth={depth}: 发现 {len(orphan_nodes)} 个孤立节点（无任何边连接），"
+                            f"从图中移除: {orphan_nodes[:5]}{'...' if len(orphan_nodes) > 5 else ''}"
+                        )
+                        for orphan in orphan_nodes:
+                            all_nodes.pop(orphan, None)
+                            streamed_nodes.remove(orphan)
+                        # 通知前端移除这些孤立节点
+                        if orphan_nodes:
+                            yield {
+                                "event": "nodes_removed",
+                                "data": {"nodes": orphan_nodes, "reason": "no_links"},
+                            }
+
                 # ── 从完整响应提取 expand_candidates（流式解析器不处理这个字段）──
                 try:
                     raw = extractor.get_full_raw()
@@ -1097,6 +1308,30 @@ class ChainAgent:
                     to_expand = [n for n in streamed_nodes if n not in explored]
                     if to_expand:
                         logger.info(f"ChainAgent build depth={depth}: LLM 未返回 expand_candidates，自动使用本层 {len(to_expand)} 个新节点作为候选")
+
+                # ── 写入缓存：保存本层结果（仅 expand 场景且有实质内容）──
+                if known_nodes and streamed_nodes and len(focus_list) == 1:
+                    cache_nodes = [all_nodes[n].model_dump() for n in streamed_nodes if n in all_nodes]
+                    cache_links = [
+                        l.model_dump() for l in all_links
+                        if (l.source, l.target) in set(streamed_links)
+                    ]
+                    cache_data = {"nodes": cache_nodes, "links": cache_links, "expand_candidates": to_expand}
+                    self._set_cached_build(
+                        focus_list[0],
+                        req.expand_direction or "both",
+                        depth,
+                        cache_data.get("nodes", []),
+                        cache_data.get("links", []),
+                    )
+                    # 把 expand_candidates 也存进去（复用 set 接口，覆盖写）
+                    if self._store and to_expand:
+                        key = self._cache_key(focus_list[0], req.expand_direction or "both", depth)
+                        try:
+                            full_data = json.dumps(cache_data, ensure_ascii=False)
+                            self._store.set_llm_cache(key, f"chain_build:{focus_list[0]}", full_data)
+                        except Exception:
+                            pass
 
             except Exception as e:
                 logger.error(f"ChainAgent build depth={depth} 失败: {e}")
@@ -1880,6 +2115,100 @@ class ChainAgent:
                 except Exception as e:
                     logger.warning(f"ChainAgent reindex_links batch 失败: {e}")
 
+        # ── 连通分量检测：发现断开的子图并强迫 LLM 找桥梁 ──
+        # 收集所有边（原有 + 本次 reindex 新发现的）用于连通性分析
+        all_link_pairs: list[tuple[str, str]] = [
+            (l.get("source", ""), l.get("target", ""))
+            for l in existing_links
+        ]
+        # existing_keys_bidir 包含双向边，只取正向（source, target）即可
+        for s, t in existing_keys_bidir:
+            if (s, t) not in set(all_link_pairs):
+                all_link_pairs.append((s, t))
+
+        components = _find_connected_components(node_names, all_link_pairs)
+        if len(components) > 1:
+            logger.info(f"ChainAgent reindex_links: 检测到 {len(components)} 个断连子图，启动桥梁发现")
+
+            # 构建子图描述
+            comp_desc_parts = []
+            for i, comp in enumerate(components):
+                comp_nodes = sorted(comp)[:10]
+                suffix = f"... 等共 {len(comp)} 个节点" if len(comp) > 10 else ""
+                comp_desc_parts.append(f"### 板块 {i+1}（{len(comp)} 个节点）\n{', '.join(comp_nodes)}{suffix}")
+
+            components_description = "\n\n".join(comp_desc_parts)
+
+            # 已有边描述（精简版）— 使用原始 existing_links 保留真实 relation 信息
+            bridge_existing_lines = []
+            for l in existing_links[:50]:
+                s = l.get("source", "")
+                t = l.get("target", "")
+                r = l.get("relation", "?")
+                if s and t:
+                    bridge_existing_lines.append(f"- {s} →[{r}]→ {t}")
+            bridge_existing = "\n".join(bridge_existing_lines)[:2000]
+
+            min_bridges = len(components) - 1  # 至少 N-1 条边才能连通
+
+            prompt = CHAIN_BRIDGE_PROMPT.format(
+                component_count=len(components),
+                components_description=components_description,
+                existing_links=bridge_existing if bridge_existing else "（暂无）",
+                min_bridges=min_bridges,
+            )
+
+            try:
+                raw = await self._collect_llm_response(prompt)
+                parsed = _lenient_json_loads(raw)
+
+                bridge_links = []
+                for lk in parsed.get("links", []):
+                    source = _normalize_name(lk.get("source", ""))
+                    target = _normalize_name(lk.get("target", ""))
+                    if not source or not target or source == target:
+                        continue
+                    if (source, target) in existing_keys_bidir:
+                        continue
+
+                    corrected_relation = _auto_correct_relation(
+                        source, target, lk.get("relation", "upstream"), lk.get("impact_reason", ""),
+                    )
+                    link = ChainLink(
+                        source=source,
+                        target=target,
+                        relation=corrected_relation,
+                        impact="neutral",
+                        impact_reason=lk.get("impact_reason", ""),
+                        confidence=float(lk.get("confidence", 0.75)),
+                        transmission_speed=lk.get("transmission_speed", ""),
+                        transmission_strength=lk.get("transmission_strength", ""),
+                        transmission_mechanism=lk.get("transmission_mechanism", ""),
+                        dampening_factors=lk.get("dampening_factors", []),
+                        amplifying_factors=lk.get("amplifying_factors", []),
+                    )
+                    bridge_links.append(link)
+                    existing_keys_bidir.add((source, target))
+                    existing_keys_bidir.add((target, source))
+
+                if bridge_links:
+                    total_new_links += len(bridge_links)
+                    logger.info(f"ChainAgent bridge: 发现 {len(bridge_links)} 条跨子图桥梁边")
+                    yield {
+                        "event": "links_discovered",
+                        "data": {
+                            "depth": 0,
+                            "links": [l.model_dump() for l in bridge_links],
+                            "source": "bridge",
+                        },
+                    }
+                else:
+                    logger.warning("ChainAgent bridge: LLM 未返回任何桥梁边")
+            except Exception as e:
+                logger.warning(f"ChainAgent bridge 失败: {e}")
+        else:
+            logger.info("ChainAgent reindex_links: 图已连通，无需桥梁发现")
+
         yield {
             "event": "reindex_complete",
             "data": {"new_link_count": total_new_links},
@@ -1888,23 +2217,22 @@ class ChainAgent:
     # ── 批量展开所有叶子节点 ──
 
     async def expand_all(self, targets: list[tuple[str, str]], existing_nodes: list[str], max_depth: int = 1):
-        """并发展开多个节点，每个节点可指定扩展方向 — 真正流式
+        """合批展开多个节点 — 同方向目标合并为一次 LLM 调用
+
+        优化策略：
+        1. 按方向分组：upstream/downstream/both
+        2. 每组内按 BATCH_SIZE 个节点合批，共享一个 build() 调用
+        3. 先查缓存，只有未命中的才走 LLM
+        4. 用 asyncio.Queue 保持流式推送
 
         Args:
             targets: [(node_name, direction), ...] direction = "upstream" | "downstream" | "both"
             existing_nodes: 已有节点名列表
             max_depth: 每个节点的展开深度（默认 1）
-
-        使用 asyncio.Queue 实现：每个并发 build() 产出的 node/link 立即入队，
-        主循环从队列取出后即刻 yield SSE 事件，用户看到图逐步生长而非等全部完成。
-
-        yield SSE 事件流：
-        - expand_all_start
-        - nodes_discovered, links_discovered (实时推送)
-        - expand_all_complete
         """
-        # 最多并发 10 个
-        targets = targets[:10]
+        BATCH_SIZE = 5  # 每批最多合并 5 个节点
+
+        targets = targets[:15]
         target_names = [t[0] for t in targets]
 
         yield {
@@ -1912,74 +2240,131 @@ class ChainAgent:
             "data": {"targets": target_names, "count": len(targets)},
         }
 
-        logger.info(f"expand_all: {len(targets)} 个目标, max_depth={max_depth}, targets={[(t[0], t[1]) for t in targets[:5]]}")
+        # ── 第一阶段：缓存预查，分离命中和未命中 ──
+        cached_targets: list[tuple[str, str]] = []
+        uncached_targets: list[tuple[str, str]] = []
 
-        # 用队列实现真正流式：生产者(build)→队列→消费者(yield SSE)
-        queue: asyncio.Queue[dict | None] = asyncio.Queue()
-        pending = len(targets)
-
-        async def _expand_one(node_name: str, direction: str):
-            """展开单个节点，事件直接入队"""
-            try:
-                req = ChainBuildRequest(
-                    subject=node_name,
-                    max_depth=max_depth,
-                    expand_direction=direction,
-                )
-                async for evt in self.build(req, known_nodes=existing_nodes):
-                    await queue.put(evt)
-            except Exception as e:
-                logger.warning(f"expand_all: {node_name} 失败: {e}")
-            finally:
-                await queue.put(None)  # 哨兵：标记此任务完成
-
-        # 启动所有并发任务
         for name, direction in targets:
-            asyncio.create_task(_expand_one(name, direction))
+            cached = self._get_cached_build(name, direction, 1)
+            if cached:
+                cached_targets.append((name, direction))
+            else:
+                uncached_targets.append((name, direction))
 
-        # 去重状态
+        cache_hit = len(cached_targets)
+        cache_miss = len(uncached_targets)
+        logger.info(
+            f"expand_all: {len(targets)} 个目标, max_depth={max_depth}, "
+            f"缓存命中={cache_hit}, 未命中={cache_miss}"
+        )
+
+        # ── 第二阶段：缓存命中的直接 yield ──
         seen_nodes: set[str] = set(existing_nodes)
         seen_links: set[str] = set()
-        finished = 0
 
-        # 从队列消费事件并即刻 yield
-        while finished < pending:
-            evt = await queue.get()
-            if evt is None:
-                finished += 1
+        for name, direction in cached_targets:
+            cached = self._get_cached_build(name, direction, 1)
+            if not cached:
                 continue
-
-            etype = evt.get("event", "")
-            if etype == "nodes_discovered":
-                raw_nodes = evt["data"].get("nodes", [])
-                unique_nodes = [
-                    n for n in raw_nodes
-                    if n.get("name", "") not in seen_nodes
-                ]
-                for n in unique_nodes:
-                    seen_nodes.add(n.get("name", ""))
-                if unique_nodes:
+            for nd in cached.get("nodes", []):
+                nd_name = nd.get("name", "")
+                if nd_name and nd_name not in seen_nodes:
+                    seen_nodes.add(nd_name)
                     yield {
                         "event": "nodes_discovered",
-                        "data": {"depth": evt["data"].get("depth", 1), "nodes": unique_nodes},
+                        "data": {"depth": 1, "nodes": [nd]},
                     }
-            elif etype == "links_discovered":
-                raw_links = evt["data"].get("links", [])
-                unique_links = []
-                for l in raw_links:
-                    key = f"{l.get('source', '')}->{l.get('target', '')}"
-                    if key not in seen_links:
-                        seen_links.add(key)
-                        unique_links.append(l)
-                if unique_links:
+            for lk in cached.get("links", []):
+                key = f"{lk.get('source', '')}->{lk.get('target', '')}"
+                if key not in seen_links:
+                    seen_links.add(key)
                     yield {
                         "event": "links_discovered",
-                        "data": {"depth": evt["data"].get("depth", 1), "links": unique_links},
+                        "data": {"depth": 1, "links": [lk]},
                     }
+
+        # ── 第三阶段：未命中的按方向分组 + 合批 ──
+        if uncached_targets:
+            # 按方向分组
+            groups: dict[str, list[str]] = {"upstream": [], "downstream": [], "both": []}
+            for name, direction in uncached_targets:
+                groups.setdefault(direction, []).append(name)
+
+            # 构建批次：每批最多 BATCH_SIZE 个同方向节点
+            batches: list[tuple[list[str], str]] = []
+            for direction, names in groups.items():
+                if not names:
+                    continue
+                for i in range(0, len(names), BATCH_SIZE):
+                    batch = names[i:i + BATCH_SIZE]
+                    batches.append((batch, direction))
+
+            logger.info(f"expand_all: {len(uncached_targets)} 个未缓存目标分为 {len(batches)} 个批次")
+
+            # 用 Queue 流式推送
+            queue: asyncio.Queue[dict | None] = asyncio.Queue()
+            pending = len(batches)
+
+            async def _expand_batch(batch_names: list[str], direction: str):
+                """合批展开：多个节点共享一个 build() 调用"""
+                try:
+                    # 合批：subject 用逗号连接，聚焦节点就是这些节点
+                    subject = "、".join(batch_names)
+                    req = ChainBuildRequest(
+                        subject=subject,
+                        max_depth=max_depth,
+                        expand_direction=direction,
+                    )
+                    async for evt in self.build(req, known_nodes=existing_nodes):
+                        await queue.put(evt)
+                except Exception as e:
+                    logger.warning(f"expand_all batch 失败: {batch_names}: {e}")
+                finally:
+                    await queue.put(None)
+
+            for batch_names, direction in batches:
+                asyncio.create_task(_expand_batch(batch_names, direction))
+
+            finished = 0
+            while finished < pending:
+                evt = await queue.get()
+                if evt is None:
+                    finished += 1
+                    continue
+
+                etype = evt.get("event", "")
+                if etype == "nodes_discovered":
+                    raw_nodes = evt["data"].get("nodes", [])
+                    unique_nodes = [
+                        n for n in raw_nodes
+                        if n.get("name", "") not in seen_nodes
+                    ]
+                    for n in unique_nodes:
+                        seen_nodes.add(n.get("name", ""))
+                    if unique_nodes:
+                        yield {
+                            "event": "nodes_discovered",
+                            "data": {"depth": evt["data"].get("depth", 1), "nodes": unique_nodes},
+                        }
+                elif etype == "links_discovered":
+                    raw_links = evt["data"].get("links", [])
+                    unique_links = []
+                    for l in raw_links:
+                        key = f"{l.get('source', '')}->{l.get('target', '')}"
+                        if key not in seen_links:
+                            seen_links.add(key)
+                            unique_links.append(l)
+                    if unique_links:
+                        yield {
+                            "event": "links_discovered",
+                            "data": {"depth": evt["data"].get("depth", 1), "links": unique_links},
+                        }
+                elif etype == "nodes_removed":
+                    yield evt
 
         yield {
             "event": "expand_all_complete",
-            "data": {"expanded_count": len(targets)},
+            "data": {"expanded_count": len(targets), "cache_hit": cache_hit, "cache_miss": cache_miss},
         }
 
 

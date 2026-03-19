@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Search, Plus, RotateCcw, Brain, Trash2, Globe, X, Link2 } from "lucide-react";
+import { Search, Plus, RotateCcw, Brain, Trash2, Globe, X, Link2, Scissors } from "lucide-react";
 import { useChainStore } from "@/stores/useChainStore";
 
 export default function ChainToolbar() {
   const {
-    parseAndBuild, addNode, expandAll, reindexLinks, simulate, reset, clearAllShocks,
+    parseAndBuild, addNode, expandAll, reindexLinks, simplifyGraph, simulate, reset, clearAllShocks,
     status, subject, shocks,
     expandDepth, setExpandDepth,
   } = useChainStore();
@@ -118,6 +118,24 @@ export default function ChainToolbar() {
       >
         <Link2 size={14} />
         重整关系
+      </button>
+
+      {/* 精简图谱 */}
+      <button
+        onClick={() => {
+          const { removed } = simplifyGraph();
+          if (removed === 0) {
+            alert("图谱已经是最简形态，没有可精简的冗余边");
+          }
+        }}
+        disabled={isAdding || isSimulating || !hasNodes}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium
+                   bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)]
+                   hover:bg-[var(--border)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        title="删除可通过中间节点间接到达的冗余边（如 原油→PVC 可通过 原油→石脑油→PVC 表达）"
+      >
+        <Scissors size={14} />
+        精简图谱
       </button>
 
       {/* 手动添加节点 */}
