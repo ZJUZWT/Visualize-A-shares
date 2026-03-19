@@ -22,6 +22,7 @@
       "name": "国电南瑞",
       "industry": "",
       "zjh_industry": "",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "b6d87c06-6a06-489b-a249-6ddc914fdf80"
     },
     {
@@ -30,30 +31,35 @@
       "name": "比亚迪",
       "industry": "汽车整车",
       "zjh_industry": "制造业-汽车制造业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "5e76c3a3-9b4c-4517-9cad-2aa9782a8391"
     },
     {
       "type": "sector",
       "name": "汽车整车",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "d32a77e7-d0d0-4cb1-9499-011463de758b"
     },
     {
       "type": "material",
       "name": "锂",
       "category": "raw_material",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "8480f145-b8e2-4d2f-b1b4-ed21954c34e0"
     },
     {
       "type": "material",
       "name": "电池",
       "category": "product",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "951d6bbe-9130-435b-878b-a61faecc5e14"
     },
     {
       "type": "material",
       "name": "储能",
       "category": "product",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "3179130f-c22b-48f0-832b-28b2668e288a"
     },
     {
@@ -62,12 +68,14 @@
       "name": "宁德时代",
       "industry": "电池",
       "zjh_industry": "制造业-电气机械和器材制造业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "6df1ebfc-e787-4fbb-b516-78fedf50d967"
     },
     {
       "type": "sector",
       "name": "电池",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "c5038974-b5a8-4a11-9351-845b173dd97b"
     },
     {
@@ -76,12 +84,14 @@
       "name": "贵州茅台",
       "industry": "酿酒行业",
       "zjh_industry": "制造业-酒、饮料和精制茶制造业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "d34a6b46-3e36-461b-9f22-d7b22efa99c0"
     },
     {
       "type": "sector",
       "name": "酿酒行业",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "339a6d46-e12d-43fa-9c05-d6491f0086f7"
     },
     {
@@ -90,12 +100,14 @@
       "name": "豫能控股",
       "industry": "电力行业",
       "zjh_industry": "电力、热力、燃气及水生产和供应业-电力、热力生产和供应业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "d8a45109-ceea-4cb9-8aad-77a826b835a7"
     },
     {
       "type": "sector",
       "name": "电力行业",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "f165a0be-62c8-4697-87af-94dfb0502ae1"
     },
     {
@@ -104,30 +116,35 @@
       "name": "中泰化学",
       "industry": "化学原料",
       "zjh_industry": "制造业-化学原料和化学制品制造业",
+      "updated_at": "2026-03-19T20:46:08.164111",
       "id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc"
     },
     {
       "type": "sector",
       "name": "化学原料",
       "category": "industry",
+      "updated_at": "2026-03-19T20:46:08.164123",
       "id": "15150ef1-7265-484b-bc7f-acf750726155"
     },
     {
       "type": "material",
       "name": "石油",
       "category": "raw_material",
+      "updated_at": "2026-03-19T20:46:08.164208",
       "id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
       "type": "material",
       "name": "煤炭",
       "category": "raw_material",
+      "updated_at": "2026-03-19T20:46:08.164215",
       "id": "845b4dfd-f9b3-4422-a476-686f9809322b"
     },
     {
       "type": "material",
       "name": "锰",
       "category": "raw_material",
+      "updated_at": "2026-03-19T20:46:08.164218",
       "id": "1e3226d9-2be7-40e9-b945-ba62201b81ec"
     },
     {
@@ -136,42 +153,49 @@
       "name": "雄韬股份",
       "industry": "电池",
       "zjh_industry": "制造业-电气机械和器材制造业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "87c47001-28f8-4d79-b802-8e086cc3ab50"
     },
     {
       "type": "material",
       "name": "锌",
       "category": "raw_material",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "b3824adb-71ab-4101-a360-4d1a5aeef0b7"
     },
     {
       "type": "material",
       "name": "动力电池",
       "category": "product",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "d99d9619-6385-41af-8a11-927efade46ca"
     },
     {
       "type": "sector",
       "name": "输配电气",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "a820950c-d51e-4ccf-aa00-784f0751233c"
     },
     {
       "type": "material",
       "name": "电动汽车",
       "category": "product",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "b9586e31-c867-46f9-8d64-be8ccda7afa9"
     },
     {
       "type": "material",
       "name": "机器人",
       "category": "product",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5"
     },
     {
       "type": "material",
       "name": "无人机",
       "category": "product",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "2615eb8e-e008-444f-bc9f-da0cc73c8c5b"
     },
     {
@@ -180,18 +204,21 @@
       "name": "厦门钨业",
       "industry": "小金属",
       "zjh_industry": "制造业-有色金属冶炼和压延加工业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "81c2b740-cf0b-4ba0-8417-b79c28f8f0d7"
     },
     {
       "type": "sector",
       "name": "小金属",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "012015b4-5053-48ba-9122-9c150328395f"
     },
     {
       "type": "material",
       "name": "稀土",
       "category": "raw_material",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "0df250c0-5398-4dc5-9046-0b13559d09de"
     },
     {
@@ -214,12 +241,14 @@
       "type": "sector",
       "name": "交运设备",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "7f11854f-96e6-477c-afbe-bc823c620ee2"
     },
     {
       "type": "material",
       "name": "新能源汽车",
       "category": "product",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "f5f94418-f967-4944-b909-98bb93015f82"
     },
     {
@@ -228,6 +257,7 @@
       "name": "亿纬锂能",
       "industry": "电池",
       "zjh_industry": "制造业-电气机械和器材制造业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "69ea7554-1649-4b18-82cb-8bdca81cc66f"
     },
     {
@@ -276,12 +306,14 @@
       "name": "洲际油气",
       "industry": "石油行业",
       "zjh_industry": "采矿业-石油和天然气开采业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c"
     },
     {
       "type": "sector",
       "name": "石油行业",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "83f99713-cb7d-448a-ba61-64df686e26a4"
     },
     {
@@ -290,12 +322,14 @@
       "name": "金正大",
       "industry": "化肥行业",
       "zjh_industry": "制造业-化学原料和化学制品制造业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "931ef567-8f43-40a3-86ec-f2c866d28369"
     },
     {
       "type": "sector",
       "name": "化肥行业",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "e24fb955-1d85-44b9-86d1-40ca37357d16"
     },
     {
@@ -304,12 +338,14 @@
       "name": "同花顺",
       "industry": "软件服务",
       "zjh_industry": "金融业-其他金融业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "88f2a71e-e589-4814-b3bf-0bfafbb5769b"
     },
     {
       "type": "sector",
       "name": "软件服务",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "761b036e-dafb-458b-ba39-be5267d87d15"
     },
     {
@@ -318,18 +354,21 @@
       "name": "中泰股份",
       "industry": "燃气",
       "zjh_industry": "电力、热力、燃气及水生产和供应业-燃气生产和供应业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "7ecedd0b-48e2-42ba-b035-0aa20d6cee14"
     },
     {
       "type": "sector",
       "name": "燃气",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "f0f9d112-7ada-4a6d-902f-b115282fa791"
     },
     {
       "type": "material",
       "name": "铝",
       "category": "raw_material",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "45c20b80-fcc9-482d-ab8b-fc3e1d6558b3"
     },
     {
@@ -338,12 +377,14 @@
       "name": "601233",
       "industry": "化纤行业",
       "zjh_industry": "制造业-化学纤维制造业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "c254d1b1-ca89-43ef-bed6-f4bb20d8d064"
     },
     {
       "type": "sector",
       "name": "化纤行业",
       "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb"
     },
     {
@@ -352,6 +393,7 @@
       "name": "002064",
       "industry": "化纤行业",
       "zjh_industry": "制造业-化学纤维制造业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "3d2e8043-42e6-4ae9-bc78-d12313250c4b"
     },
     {
@@ -360,87 +402,116 @@
       "name": "顺钠股份",
       "industry": "输配电气",
       "zjh_industry": "制造业-电气机械和器材制造业",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "f548f1ed-abc4-4842-89cd-17ae314cda97"
     },
     {
       "type": "material",
       "name": "医疗器械",
       "category": "product",
+      "updated_at": "2000-01-01T00:00:00",
       "id": "65f7f099-69b1-4dac-9cb2-fc70eb5b9afb"
     },
     {
-      "id": "5100dba5-1ed3-4f5a-88d5-6c1e3cfac364",
       "type": "stock",
       "code": "002270",
       "name": "华明装备",
       "industry": "电网设备",
-      "zjh_industry": "制造业-电气机械和器材制造业"
+      "zjh_industry": "制造业-电气机械和器材制造业",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "5100dba5-1ed3-4f5a-88d5-6c1e3cfac364"
     },
     {
-      "id": "d58a0058-20d8-43b2-86f2-8d9f76e8ca1f",
       "type": "sector",
       "name": "电网设备",
-      "category": "industry"
+      "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "d58a0058-20d8-43b2-86f2-8d9f76e8ca1f"
     },
     {
-      "id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
       "type": "stock",
       "code": "002202",
       "name": "金风科技",
       "industry": "风电设备",
-      "zjh_industry": "制造业-通用设备制造业"
+      "zjh_industry": "制造业-通用设备制造业",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f"
     },
     {
-      "id": "2ceb5ef7-2ee0-457a-a803-9be26daf750b",
       "type": "sector",
       "name": "风电设备",
-      "category": "industry"
+      "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "2ceb5ef7-2ee0-457a-a803-9be26daf750b"
     },
     {
-      "id": "472ffef7-9a6b-4125-908d-11792a6a62cd",
       "type": "material",
       "name": "风电",
-      "category": "product"
+      "category": "product",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "472ffef7-9a6b-4125-908d-11792a6a62cd"
     },
     {
-      "id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40",
       "type": "material",
       "name": "风力发电",
-      "category": "product"
+      "category": "product",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40"
     },
     {
-      "id": "f01ae1d2-cdbf-4a14-9eeb-4cbeca39864e",
       "type": "stock",
       "code": "600309",
       "name": "万华化学",
       "industry": "化工行业",
-      "zjh_industry": "制造业-化学原料和化学制品制造业"
+      "zjh_industry": "制造业-化学原料和化学制品制造业",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "f01ae1d2-cdbf-4a14-9eeb-4cbeca39864e"
     },
     {
-      "id": "754e6d9f-2fc4-408c-80f5-c98287f0be98",
       "type": "sector",
       "name": "化工行业",
-      "category": "industry"
+      "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "754e6d9f-2fc4-408c-80f5-c98287f0be98"
     },
     {
-      "id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
       "type": "stock",
       "code": "600860",
       "name": "京城股份",
       "industry": "机械行业",
-      "zjh_industry": "制造业-专用设备制造业"
+      "zjh_industry": "制造业-专用设备制造业",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "af7a073c-93aa-4215-a12f-dd3cad32e572"
     },
     {
-      "id": "95e82c60-3ad2-4568-af97-44a9b0bdb32c",
       "type": "sector",
       "name": "机械行业",
-      "category": "industry"
+      "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "95e82c60-3ad2-4568-af97-44a9b0bdb32c"
     },
     {
-      "id": "95c4dd97-ac8d-4092-a692-97be0960fce9",
       "type": "material",
       "name": "隔膜",
-      "category": "raw_material"
+      "category": "raw_material",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "95c4dd97-ac8d-4092-a692-97be0960fce9"
+    },
+    {
+      "type": "stock",
+      "code": "000815",
+      "name": "美利云",
+      "industry": "通信服务",
+      "zjh_industry": "制造业-造纸和纸制品业",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "512f3851-9a9a-43ac-add5-7758f1fe46f9"
+    },
+    {
+      "type": "sector",
+      "name": "通信服务",
+      "category": "industry",
+      "updated_at": "2000-01-01T00:00:00",
+      "id": "4751cf07-5192-4a30-abd7-2c39c23290b2"
     }
   ],
   "edges": [
@@ -795,74 +866,88 @@
       "target_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80"
     },
     {
-      "source_id": "5100dba5-1ed3-4f5a-88d5-6c1e3cfac364",
-      "target_id": "d58a0058-20d8-43b2-86f2-8d9f76e8ca1f",
       "relation": "belongs_to",
       "reason": "华明装备属于电网设备行业",
-      "timestamp": "2026-03-18T13:56:42.072226"
+      "timestamp": "2026-03-18T13:56:42.072226",
+      "source_id": "5100dba5-1ed3-4f5a-88d5-6c1e3cfac364",
+      "target_id": "d58a0058-20d8-43b2-86f2-8d9f76e8ca1f"
     },
     {
-      "source_id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
-      "target_id": "2ceb5ef7-2ee0-457a-a803-9be26daf750b",
       "relation": "belongs_to",
       "reason": "金风科技属于风电设备行业",
-      "timestamp": "2026-03-18T14:00:13.281575"
+      "timestamp": "2026-03-18T14:00:13.281575",
+      "source_id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
+      "target_id": "2ceb5ef7-2ee0-457a-a803-9be26daf750b"
     },
     {
-      "source_id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
-      "target_id": "472ffef7-9a6b-4125-908d-11792a6a62cd",
       "relation": "supplies",
       "reason": "金风科技生产风电",
-      "timestamp": "2026-03-18T14:00:13.281830"
+      "timestamp": "2026-03-18T14:00:13.281830",
+      "source_id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
+      "target_id": "472ffef7-9a6b-4125-908d-11792a6a62cd"
     },
     {
-      "source_id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
-      "target_id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40",
       "relation": "supplies",
       "reason": "金风科技生产风力发电",
-      "timestamp": "2026-03-18T14:00:13.281969"
+      "timestamp": "2026-03-18T14:00:13.281969",
+      "source_id": "c4eabf33-d1a0-4870-9832-f1f748b9a59f",
+      "target_id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40"
     },
     {
-      "source_id": "f01ae1d2-cdbf-4a14-9eeb-4cbeca39864e",
-      "target_id": "754e6d9f-2fc4-408c-80f5-c98287f0be98",
       "relation": "belongs_to",
       "reason": "万华化学属于化工行业行业",
-      "timestamp": "2026-03-18T14:09:53.493479"
+      "timestamp": "2026-03-18T14:09:53.493479",
+      "source_id": "f01ae1d2-cdbf-4a14-9eeb-4cbeca39864e",
+      "target_id": "754e6d9f-2fc4-408c-80f5-c98287f0be98"
     },
     {
-      "source_id": "f01ae1d2-cdbf-4a14-9eeb-4cbeca39864e",
-      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
       "relation": "consumes",
       "reason": "万华化学使用石油",
-      "timestamp": "2026-03-18T14:09:53.493685"
+      "timestamp": "2026-03-18T14:09:53.493685",
+      "source_id": "f01ae1d2-cdbf-4a14-9eeb-4cbeca39864e",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
-      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
-      "target_id": "95e82c60-3ad2-4568-af97-44a9b0bdb32c",
       "relation": "belongs_to",
       "reason": "京城股份属于机械行业行业",
-      "timestamp": "2026-03-18T14:23:14.406917"
+      "timestamp": "2026-03-18T14:23:14.406917",
+      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
+      "target_id": "95e82c60-3ad2-4568-af97-44a9b0bdb32c"
     },
     {
-      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
-      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991",
       "relation": "consumes",
       "reason": "京城股份使用石油",
-      "timestamp": "2026-03-18T14:23:14.407112"
+      "timestamp": "2026-03-18T14:23:14.407112",
+      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
-      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
-      "target_id": "95c4dd97-ac8d-4092-a692-97be0960fce9",
       "relation": "consumes",
       "reason": "京城股份使用隔膜",
-      "timestamp": "2026-03-18T14:23:14.407274"
+      "timestamp": "2026-03-18T14:23:14.407274",
+      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
+      "target_id": "95c4dd97-ac8d-4092-a692-97be0960fce9"
     },
     {
-      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
-      "target_id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5",
       "relation": "supplies",
       "reason": "京城股份生产机器人",
-      "timestamp": "2026-03-18T14:23:14.407339"
+      "timestamp": "2026-03-18T14:23:14.407339",
+      "source_id": "af7a073c-93aa-4215-a12f-dd3cad32e572",
+      "target_id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5"
+    },
+    {
+      "relation": "belongs_to",
+      "reason": "美利云属于通信服务行业",
+      "timestamp": "2026-03-19T19:48:13.956404",
+      "source_id": "512f3851-9a9a-43ac-add5-7758f1fe46f9",
+      "target_id": "4751cf07-5192-4a30-abd7-2c39c23290b2"
+    },
+    {
+      "relation": "supplies",
+      "reason": "美利云生产风力发电",
+      "timestamp": "2026-03-19T19:48:13.956520",
+      "source_id": "512f3851-9a9a-43ac-add5-7758f1fe46f9",
+      "target_id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40"
     }
   ]
 }

@@ -154,7 +154,8 @@ class KnowledgeGraph:
         if entity_matched == 0:
             is_market_query = any(kw in message for kw in FUZZY_MARKET_KEYWORDS)
 
-            # 4a: 近期活跃节点召回 — 按 updated_at/created_at 排序，取最近交互的股票/行业
+            # 4a: 近期活跃节点召回 — 按 updated_at 排序，取最近交互的股票/行业
+            #     多样性约束：同行业 stock 最多2个，避免同一行业霸占所有召回位
             recent_entity_nodes: list[tuple[str, str]] = []  # (node_id, timestamp)
             for node_id in self.graph.nodes():
                 data = self.graph.nodes[node_id]
@@ -164,8 +165,22 @@ class KnowledgeGraph:
                     recent_entity_nodes.append((node_id, ts))
             # 按时间倒排
             recent_entity_nodes.sort(key=lambda x: x[1], reverse=True)
-            for node_id, _ in recent_entity_nodes[:5]:
+            industry_count: dict[str, int] = {}  # industry_name → 已召回数
+            added_recent = 0
+            for node_id, _ in recent_entity_nodes:
+                if added_recent >= 5:
+                    break
+                data = self.graph.nodes[node_id]
+                ntype = data.get("type")
+                if ntype == "stock":
+                    ind = data.get("industry", "")
+                    if ind:
+                        cnt = industry_count.get(ind, 0)
+                        if cnt >= 2:
+                            continue  # 同行业已有2个，跳过
+                        industry_count[ind] = cnt + 1
                 matched_ids.add(node_id)
+                added_recent += 1
 
             # 4b: 市场类问题 — 额外召回高置信度信念（即使没有精确关键词命中）
             if is_market_query and not has_belief_keyword:
@@ -185,24 +200,48 @@ class KnowledgeGraph:
 
         # Step 5: 1-hop 扩展 — 仅扩展实体节点（stock/sector/material/region）的邻居
         #   不扩展 belief/stance/event，避免召回大量无关节点
+        #   每个种子节点最多扩展 MAX_HOP_PER_SEED 个邻居，避免密集共享节点拉入整个集群
         EXPANDABLE_TYPES = {"stock", "sector", "material", "region"}
+        MAX_HOP_PER_SEED = 3
         hop_ids: set[str] = set()
         for node_id in list(matched_ids):
             node_type = self.graph.nodes[node_id].get("type", "")
             if node_type not in EXPANDABLE_TYPES:
                 continue
+            seed_hops = 0
             for neighbor in self.graph.successors(node_id):
+                if seed_hops >= MAX_HOP_PER_SEED:
+                    break
                 hop_ids.add(neighbor)
+                seed_hops += 1
             for neighbor in self.graph.predecessors(node_id):
+                if seed_hops >= MAX_HOP_PER_SEED:
+                    break
                 hop_ids.add(neighbor)
+                seed_hops += 1
         matched_ids.update(hop_ids)
 
-        # Step 6: 按节点类型优先级排序，截取前10个
+        # Step 6: 按节点类型优先级排序 + 行业多样性约束，截取前10个
+        #   同行业 stock 最多3个，避免单一行业霸占所有结果位
         def priority(node_id: str) -> int:
             t = self.graph.nodes[node_id].get("type", "")
             return NODE_PRIORITY.get(t, 99)
 
-        sorted_ids = sorted(matched_ids, key=priority)[:10]
+        sorted_candidates = sorted(matched_ids, key=priority)
+        sorted_ids: list[str] = []
+        industry_final_count: dict[str, int] = {}
+        for node_id in sorted_candidates:
+            if len(sorted_ids) >= 10:
+                break
+            data = self.graph.nodes[node_id]
+            if data.get("type") == "stock":
+                ind = data.get("industry", "")
+                if ind:
+                    cnt = industry_final_count.get(ind, 0)
+                    if cnt >= 3:
+                        continue
+                    industry_final_count[ind] = cnt + 1
+            sorted_ids.append(node_id)
 
         result = []
         for node_id in sorted_ids:
@@ -301,10 +340,17 @@ class KnowledgeGraph:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
+        # 需要 updated_at 字段的节点类型（数据迁移兼容）
+        NEEDS_UPDATED_AT = {"stock", "sector", "material", "region"}
+        DEFAULT_TS = "2000-01-01T00:00:00"  # 旧数据给极早时间，不影响排序
+
         self.graph.clear()
         for node_data in data.get("nodes", []):
             node_data = dict(node_data)
             node_id = node_data.pop("id")
+            # 兼容旧数据：补 updated_at
+            if node_data.get("type") in NEEDS_UPDATED_AT and "updated_at" not in node_data:
+                node_data["updated_at"] = DEFAULT_TS
             self.graph.add_node(node_id, **node_data)
 
         for edge_data in data.get("edges", []):

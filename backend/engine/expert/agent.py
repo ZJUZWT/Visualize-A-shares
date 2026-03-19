@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -1062,6 +1063,7 @@ class ExpertAgent:
         added_sectors = []
         added_edges = []
         added_materials = []
+        updated_existing = False  # 是否更新了已有节点的 updated_at
 
         for code, name in candidates.items():
             profile = profiles.get(code, {})
@@ -1069,9 +1071,12 @@ class ExpertAgent:
             zjh_industry = profile.get("zjh_industry", "")
             scope = profile.get("scope", "")
 
-            # ── Step 1: 创建 StockNode ──
+            # ── Step 1: 创建 StockNode（或更新已有节点的 updated_at） ──
             if code in existing_stocks:
                 stock_node_id = existing_stocks[code]
+                # 更新 updated_at — 让模糊召回的时间排序反映真实活跃度
+                self._graph.graph.nodes[stock_node_id]["updated_at"] = datetime.now().isoformat()
+                updated_existing = True
             else:
                 stock_node = StockNode(
                     code=code, name=name,
@@ -1086,6 +1091,9 @@ class ExpertAgent:
             if industry:
                 if industry in existing_sectors:
                     sector_node_id = existing_sectors[industry]
+                    # 更新 updated_at
+                    self._graph.graph.nodes[sector_node_id]["updated_at"] = datetime.now().isoformat()
+                    updated_existing = True
                 else:
                     sector_node = SectorNode(name=industry, category="industry")
                     await self._graph.add_node(sector_node)
@@ -1110,6 +1118,9 @@ class ExpertAgent:
                 for mat_name, mat_category in materials[:5]:  # 每家公司最多5个
                     if mat_name in existing_materials:
                         mat_node_id = existing_materials[mat_name]
+                        # 更新 updated_at
+                        self._graph.graph.nodes[mat_node_id]["updated_at"] = datetime.now().isoformat()
+                        updated_existing = True
                     else:
                         mat_node = MaterialNode(name=mat_name, category=mat_category)
                         await self._graph.add_node(mat_node)
@@ -1161,7 +1172,7 @@ class ExpertAgent:
                         added_edges.append(f"{name_a}→competes_with→{name_b}")
 
         # ── 持久化 ──
-        has_changes = added_stocks or added_sectors or added_edges or added_materials
+        has_changes = added_stocks or added_sectors or added_edges or added_materials or updated_existing
         if has_changes:
             await self._graph.save()
             parts = []

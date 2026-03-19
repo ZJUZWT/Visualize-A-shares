@@ -1292,13 +1292,15 @@ class ChainAgent:
                     except Exception as e:
                         logger.warning(f"ChainAgent build depth={depth}: links 兜底也失败: {e}")
 
-                # ── 孤立节点清理：如果本层有新节点但完全没有新 links，回滚这些孤立节点 ──
-                if streamed_nodes and not streamed_links:
-                    # 检查兜底是否补上了 links
+                # ── 孤立节点清理：检查本层每个新节点是否至少有一条边连接 ──
+                # 关键：即使 streamed_links 非空，也可能有部分节点漏掉了 links
+                # （LLM 输出截断 / 名称不匹配 / links 被部分解析）
+                if streamed_nodes:
                     current_link_keys = {(l.source, l.target) for l in all_links}
                     orphan_nodes = [
                         n for n in streamed_nodes
                         if not any(n in (s, t) for s, t in current_link_keys)
+                        and n not in (known_nodes or [])  # 已知节点不算孤立（它们在前端已有边）
                     ]
                     if orphan_nodes:
                         logger.warning(
@@ -1307,7 +1309,8 @@ class ChainAgent:
                         )
                         for orphan in orphan_nodes:
                             all_nodes.pop(orphan, None)
-                            streamed_nodes.remove(orphan)
+                            if orphan in streamed_nodes:
+                                streamed_nodes.remove(orphan)
                         # 通知前端移除这些孤立节点
                         if orphan_nodes:
                             yield {
