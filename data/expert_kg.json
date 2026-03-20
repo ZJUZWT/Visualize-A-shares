@@ -22,7 +22,7 @@
       "name": "国电南瑞",
       "industry": "",
       "zjh_industry": "",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T16:38:18.318095",
       "id": "b6d87c06-6a06-489b-a249-6ddc914fdf80"
     },
     {
@@ -52,14 +52,14 @@
       "type": "material",
       "name": "电池",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T20:03:35.900994",
       "id": "951d6bbe-9130-435b-878b-a61faecc5e14"
     },
     {
       "type": "material",
       "name": "储能",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T16:38:18.318163",
       "id": "3179130f-c22b-48f0-832b-28b2668e288a"
     },
     {
@@ -116,35 +116,35 @@
       "name": "中泰化学",
       "industry": "化学原料",
       "zjh_industry": "制造业-化学原料和化学制品制造业",
-      "updated_at": "2026-03-19T20:46:08.164111",
+      "updated_at": "2026-03-20T16:55:25.515221",
       "id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc"
     },
     {
       "type": "sector",
       "name": "化学原料",
       "category": "industry",
-      "updated_at": "2026-03-19T20:46:08.164123",
+      "updated_at": "2026-03-20T16:55:25.515235",
       "id": "15150ef1-7265-484b-bc7f-acf750726155"
     },
     {
       "type": "material",
       "name": "石油",
       "category": "raw_material",
-      "updated_at": "2026-03-19T20:46:08.164208",
+      "updated_at": "2026-03-20T16:55:25.515309",
       "id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
       "type": "material",
       "name": "煤炭",
       "category": "raw_material",
-      "updated_at": "2026-03-19T20:46:08.164215",
+      "updated_at": "2026-03-20T16:55:25.515314",
       "id": "845b4dfd-f9b3-4422-a476-686f9809322b"
     },
     {
       "type": "material",
       "name": "锰",
       "category": "raw_material",
-      "updated_at": "2026-03-19T20:46:08.164218",
+      "updated_at": "2026-03-20T16:55:25.515316",
       "id": "1e3226d9-2be7-40e9-b945-ba62201b81ec"
     },
     {
@@ -174,28 +174,28 @@
       "type": "sector",
       "name": "输配电气",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T16:38:18.318098",
       "id": "a820950c-d51e-4ccf-aa00-784f0751233c"
     },
     {
       "type": "material",
       "name": "电动汽车",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T16:38:18.318166",
       "id": "b9586e31-c867-46f9-8d64-be8ccda7afa9"
     },
     {
       "type": "material",
       "name": "机器人",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T16:55:25.516447",
       "id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5"
     },
     {
       "type": "material",
       "name": "无人机",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T16:38:18.318171",
       "id": "2615eb8e-e008-444f-bc9f-da0cc73c8c5b"
     },
     {
@@ -306,14 +306,14 @@
       "name": "洲际油气",
       "industry": "石油行业",
       "zjh_industry": "采矿业-石油和天然气开采业",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T12:05:35.523781",
       "id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c"
     },
     {
       "type": "sector",
       "name": "石油行业",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T14:57:34.011230",
       "id": "83f99713-cb7d-448a-ba61-64df686e26a4"
     },
     {
@@ -338,14 +338,14 @@
       "name": "同花顺",
       "industry": "软件服务",
       "zjh_industry": "金融业-其他金融业",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T12:18:09.055708",
       "id": "88f2a71e-e589-4814-b3bf-0bfafbb5769b"
     },
     {
       "type": "sector",
       "name": "软件服务",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T12:18:09.055719",
       "id": "761b036e-dafb-458b-ba39-be5267d87d15"
     },
     {
@@ -377,14 +377,14 @@
       "name": "601233",
       "industry": "化纤行业",
       "zjh_industry": "制造业-化学纤维制造业",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T15:17:36.195957",
       "id": "c254d1b1-ca89-43ef-bed6-f4bb20d8d064"
     },
     {
       "type": "sector",
       "name": "化纤行业",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T15:17:36.195964",
       "id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb"
     },
     {
@@ -409,7 +409,7 @@
       "type": "material",
       "name": "医疗器械",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T16:55:25.515948",
       "id": "65f7f099-69b1-4dac-9cb2-fc70eb5b9afb"
     },
     {
@@ -455,7 +455,7 @@
       "type": "material",
       "name": "风力发电",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T16:38:18.318245",
       "id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40"
     },
     {
@@ -487,7 +487,7 @@
       "type": "sector",
       "name": "机械行业",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T16:55:25.515699",
       "id": "95e82c60-3ad2-4568-af97-44a9b0bdb32c"
     },
     {
@@ -512,6 +512,145 @@
       "category": "industry",
       "updated_at": "2000-01-01T00:00:00",
       "id": "4751cf07-5192-4a30-abd7-2c39c23290b2"
+    },
+    {
+      "type": "stock",
+      "code": "002221",
+      "name": "东华能源",
+      "industry": "石油行业",
+      "zjh_industry": "批发和零售业-批发业",
+      "updated_at": "2026-03-20T14:45:12.132066",
+      "id": "6c0ff7b1-f2b3-42cc-a990-d8af5abfe700"
+    },
+    {
+      "type": "stock",
+      "code": "600875",
+      "name": "东方电气",
+      "industry": "电源设备",
+      "zjh_industry": "制造业-通用设备制造业",
+      "updated_at": "2026-03-20T16:38:18.318179",
+      "id": "65eff91a-0d68-4a05-a6b1-bc0ab7007179"
+    },
+    {
+      "type": "sector",
+      "name": "电源设备",
+      "category": "industry",
+      "updated_at": "2026-03-20T16:38:18.318181",
+      "id": "bb89a590-b597-4fe6-bb88-b710a8fcde75"
+    },
+    {
+      "type": "stock",
+      "code": "600938",
+      "name": "中国海油",
+      "industry": "石油行业",
+      "zjh_industry": "采矿业-石油和天然气开采业",
+      "updated_at": "2026-03-20T14:57:34.011218",
+      "id": "ede2f56d-0964-42e0-91a4-bfc2ad729617"
+    },
+    {
+      "type": "stock",
+      "code": "000677",
+      "name": "恒天海龙",
+      "industry": "化纤行业",
+      "zjh_industry": "制造业-化学纤维制造业",
+      "updated_at": "2026-03-20T12:34:13.168788",
+      "id": "2128c021-4354-4ed1-b53e-4e2af9045d1f"
+    },
+    {
+      "type": "material",
+      "name": "水泥",
+      "category": "product",
+      "updated_at": "2026-03-20T12:34:13.169718",
+      "id": "4b700bcb-e9ff-4ec7-896e-3dbd871cffc7"
+    },
+    {
+      "id": "0899b5d0-7632-4020-895e-a6993ff5323d",
+      "type": "stock",
+      "code": "002460",
+      "name": "赣锋锂业",
+      "industry": "能源金属",
+      "zjh_industry": "制造业-有色金属冶炼和压延加工业",
+      "updated_at": "2026-03-20T13:02:55.876212"
+    },
+    {
+      "id": "dc9af91c-7e35-461c-b18a-d9d2e324ddfc",
+      "type": "sector",
+      "name": "能源金属",
+      "category": "industry",
+      "updated_at": "2026-03-20T13:02:55.876491"
+    },
+    {
+      "id": "4e11fa45-50ae-4457-ac3e-4d2d90475ca8",
+      "type": "stock",
+      "code": "002823",
+      "name": "凯中精密",
+      "industry": "电机",
+      "zjh_industry": "制造业-电气机械和器材制造业",
+      "updated_at": "2026-03-20T20:03:35.900930"
+    },
+    {
+      "id": "e96a6842-3572-4d4f-9b24-70d37e85e98f",
+      "type": "sector",
+      "name": "电机",
+      "category": "industry",
+      "updated_at": "2026-03-20T20:03:35.900948"
+    },
+    {
+      "id": "21f4539a-f763-41ab-9077-4da77367bd00",
+      "type": "stock",
+      "code": "603989",
+      "name": "艾华集团",
+      "industry": "电子元件",
+      "zjh_industry": "制造业-计算机、通信和其他电子设备制造业",
+      "updated_at": "2026-03-20T15:39:08.533368"
+    },
+    {
+      "id": "77c5b06b-f3d8-412c-a222-f84c1111bde9",
+      "type": "sector",
+      "name": "电子元件",
+      "category": "industry",
+      "updated_at": "2026-03-20T15:39:08.533533"
+    },
+    {
+      "id": "f6f05866-875b-4a26-8c6c-18e0cb12373f",
+      "type": "stock",
+      "code": "605555",
+      "name": "德昌股份",
+      "industry": "家电行业",
+      "zjh_industry": "制造业-电气机械和器材制造业",
+      "updated_at": "2026-03-20T15:39:08.533841"
+    },
+    {
+      "id": "1f882610-1834-46dc-a807-d3bdcefb6511",
+      "type": "sector",
+      "name": "家电行业",
+      "category": "industry",
+      "updated_at": "2026-03-20T15:39:08.533972"
+    },
+    {
+      "id": "c0323753-bfa7-430a-850e-44255a2c44ce",
+      "type": "stock",
+      "code": "002498",
+      "name": "汉缆股份",
+      "industry": "输配电气",
+      "zjh_industry": "制造业-电气机械和器材制造业",
+      "updated_at": "2026-03-20T16:38:18.317801"
+    },
+    {
+      "id": "a86926af-6d3a-49d3-92b8-5dec0ec99cce",
+      "type": "stock",
+      "code": "300024",
+      "name": "机器人",
+      "industry": "机械行业",
+      "zjh_industry": "制造业-通用设备制造业",
+      "updated_at": "2026-03-20T16:55:25.515422"
+    },
+    {
+      "id": "ea3f56db-aaf5-4cfd-a294-fe2470ac5919",
+      "type": "material",
+      "name": "核电",
+      "category": "product",
+      "updated_at": "2026-03-20T16:55:25.516162"
     }
   ],
   "edges": [
@@ -782,6 +921,13 @@
       "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
     },
     {
+      "relation": "competes_with",
+      "reason": "同属石油行业行业",
+      "timestamp": "2026-03-20T12:05:35.524275",
+      "source_id": "1bb3ca03-cec5-48a6-8b47-ed3690959c3c",
+      "target_id": "ede2f56d-0964-42e0-91a4-bfc2ad729617"
+    },
+    {
       "relation": "belongs_to",
       "reason": "金正大属于化肥行业行业",
       "timestamp": "2026-03-17T16:54:44.055173",
@@ -948,6 +1094,167 @@
       "timestamp": "2026-03-19T19:48:13.956520",
       "source_id": "512f3851-9a9a-43ac-add5-7758f1fe46f9",
       "target_id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40"
+    },
+    {
+      "relation": "belongs_to",
+      "reason": "东华能源属于石油行业行业",
+      "timestamp": "2026-03-20T12:04:27.568445",
+      "source_id": "6c0ff7b1-f2b3-42cc-a990-d8af5abfe700",
+      "target_id": "83f99713-cb7d-448a-ba61-64df686e26a4"
+    },
+    {
+      "relation": "consumes",
+      "reason": "东华能源使用石油",
+      "timestamp": "2026-03-20T12:04:27.568660",
+      "source_id": "6c0ff7b1-f2b3-42cc-a990-d8af5abfe700",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
+    },
+    {
+      "relation": "belongs_to",
+      "reason": "东方电气属于电源设备行业",
+      "timestamp": "2026-03-20T12:04:27.569078",
+      "source_id": "65eff91a-0d68-4a05-a6b1-bc0ab7007179",
+      "target_id": "bb89a590-b597-4fe6-bb88-b710a8fcde75"
+    },
+    {
+      "relation": "consumes",
+      "reason": "东方电气使用石油",
+      "timestamp": "2026-03-20T12:04:27.569204",
+      "source_id": "65eff91a-0d68-4a05-a6b1-bc0ab7007179",
+      "target_id": "05aeb735-3af7-4167-92b4-4cbcdd6a5991"
+    },
+    {
+      "relation": "supplies",
+      "reason": "东方电气生产风力发电",
+      "timestamp": "2026-03-20T12:04:27.569305",
+      "source_id": "65eff91a-0d68-4a05-a6b1-bc0ab7007179",
+      "target_id": "5aa74b64-3e7d-4e5b-b9ca-53c321917a40"
+    },
+    {
+      "relation": "belongs_to",
+      "reason": "中国海油属于石油行业行业",
+      "timestamp": "2026-03-20T12:05:35.524181",
+      "source_id": "ede2f56d-0964-42e0-91a4-bfc2ad729617",
+      "target_id": "83f99713-cb7d-448a-ba61-64df686e26a4"
+    },
+    {
+      "relation": "belongs_to",
+      "reason": "恒天海龙属于化纤行业行业",
+      "timestamp": "2026-03-20T12:34:13.169152",
+      "source_id": "2128c021-4354-4ed1-b53e-4e2af9045d1f",
+      "target_id": "c269a158-7b5a-4922-87c8-5e52dde0b6fb"
+    },
+    {
+      "relation": "consumes",
+      "reason": "恒天海龙使用煤炭",
+      "timestamp": "2026-03-20T12:34:13.169485",
+      "source_id": "2128c021-4354-4ed1-b53e-4e2af9045d1f",
+      "target_id": "845b4dfd-f9b3-4422-a476-686f9809322b"
+    },
+    {
+      "relation": "supplies",
+      "reason": "恒天海龙生产水泥",
+      "timestamp": "2026-03-20T12:34:13.169863",
+      "source_id": "2128c021-4354-4ed1-b53e-4e2af9045d1f",
+      "target_id": "4b700bcb-e9ff-4ec7-896e-3dbd871cffc7"
+    },
+    {
+      "source_id": "0899b5d0-7632-4020-895e-a6993ff5323d",
+      "target_id": "dc9af91c-7e35-461c-b18a-d9d2e324ddfc",
+      "relation": "belongs_to",
+      "reason": "赣锋锂业属于能源金属行业",
+      "timestamp": "2026-03-20T13:02:55.876635"
+    },
+    {
+      "source_id": "0899b5d0-7632-4020-895e-a6993ff5323d",
+      "target_id": "951d6bbe-9130-435b-878b-a61faecc5e14",
+      "relation": "supplies",
+      "reason": "赣锋锂业生产电池",
+      "timestamp": "2026-03-20T13:02:55.876794"
+    },
+    {
+      "source_id": "4e11fa45-50ae-4457-ac3e-4d2d90475ca8",
+      "target_id": "e96a6842-3572-4d4f-9b24-70d37e85e98f",
+      "relation": "belongs_to",
+      "reason": "凯中精密属于电机行业",
+      "timestamp": "2026-03-20T15:39:08.532896"
+    },
+    {
+      "source_id": "4e11fa45-50ae-4457-ac3e-4d2d90475ca8",
+      "target_id": "951d6bbe-9130-435b-878b-a61faecc5e14",
+      "relation": "supplies",
+      "reason": "凯中精密生产电池",
+      "timestamp": "2026-03-20T15:39:08.533114"
+    },
+    {
+      "source_id": "21f4539a-f763-41ab-9077-4da77367bd00",
+      "target_id": "77c5b06b-f3d8-412c-a222-f84c1111bde9",
+      "relation": "belongs_to",
+      "reason": "艾华集团属于电子元件行业",
+      "timestamp": "2026-03-20T15:39:08.533662"
+    },
+    {
+      "source_id": "f6f05866-875b-4a26-8c6c-18e0cb12373f",
+      "target_id": "1f882610-1834-46dc-a807-d3bdcefb6511",
+      "relation": "belongs_to",
+      "reason": "德昌股份属于家电行业行业",
+      "timestamp": "2026-03-20T15:39:08.534079"
+    },
+    {
+      "source_id": "f6f05866-875b-4a26-8c6c-18e0cb12373f",
+      "target_id": "951d6bbe-9130-435b-878b-a61faecc5e14",
+      "relation": "supplies",
+      "reason": "德昌股份生产电池",
+      "timestamp": "2026-03-20T15:39:08.534358"
+    },
+    {
+      "source_id": "f6f05866-875b-4a26-8c6c-18e0cb12373f",
+      "target_id": "65f7f099-69b1-4dac-9cb2-fc70eb5b9afb",
+      "relation": "supplies",
+      "reason": "德昌股份生产医疗器械",
+      "timestamp": "2026-03-20T15:39:08.534694"
+    },
+    {
+      "source_id": "c0323753-bfa7-430a-850e-44255a2c44ce",
+      "target_id": "a820950c-d51e-4ccf-aa00-784f0751233c",
+      "relation": "belongs_to",
+      "reason": "汉缆股份属于输配电气行业",
+      "timestamp": "2026-03-20T16:38:18.317971"
+    },
+    {
+      "source_id": "c0323753-bfa7-430a-850e-44255a2c44ce",
+      "target_id": "b6d87c06-6a06-489b-a249-6ddc914fdf80",
+      "relation": "competes_with",
+      "reason": "同属输配电气行业",
+      "timestamp": "2026-03-20T16:38:18.318264"
+    },
+    {
+      "source_id": "a86926af-6d3a-49d3-92b8-5dec0ec99cce",
+      "target_id": "95e82c60-3ad2-4568-af97-44a9b0bdb32c",
+      "relation": "belongs_to",
+      "reason": "机器人属于机械行业行业",
+      "timestamp": "2026-03-20T16:55:25.515730"
+    },
+    {
+      "source_id": "a86926af-6d3a-49d3-92b8-5dec0ec99cce",
+      "target_id": "65f7f099-69b1-4dac-9cb2-fc70eb5b9afb",
+      "relation": "supplies",
+      "reason": "机器人生产医疗器械",
+      "timestamp": "2026-03-20T16:55:25.515966"
+    },
+    {
+      "source_id": "a86926af-6d3a-49d3-92b8-5dec0ec99cce",
+      "target_id": "ea3f56db-aaf5-4cfd-a294-fe2470ac5919",
+      "relation": "supplies",
+      "reason": "机器人生产核电",
+      "timestamp": "2026-03-20T16:55:25.516322"
+    },
+    {
+      "source_id": "a86926af-6d3a-49d3-92b8-5dec0ec99cce",
+      "target_id": "f03707f9-61d1-4b7a-841f-144f6dccf8b5",
+      "relation": "supplies",
+      "reason": "机器人生产机器人",
+      "timestamp": "2026-03-20T16:55:25.516457"
     }
   ]
 }
