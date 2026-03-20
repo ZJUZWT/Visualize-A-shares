@@ -9,6 +9,7 @@ from pydantic import BaseModel
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 DB_PATH = DATA_DIR / "stockterrain.duckdb"
+AGENT_DB_PATH = DATA_DIR / "agent.duckdb"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
