@@ -32,6 +32,7 @@ from engine.info.routes import router as info_router
 from engine.expert.routes import router as expert_router, _init_db as expert_init_db
 from engine.industry.routes import router as industry_router
 from engine.sector.routes import router as sector_router
+from engine.agent.routes import create_agent_router
 
 # ─── 配置日志 ──────────────────────────────────────────
 logger.remove()
@@ -95,6 +96,7 @@ app.include_router(info_router)
 app.include_router(expert_router)
 app.include_router(industry_router)
 app.include_router(sector_router)
+app.include_router(create_agent_router(), prefix="/api/v1/agent")
 
 
 # ─── 启动/关闭事件 ────────────────────────────────────
@@ -138,6 +140,14 @@ async def startup():
     except Exception as e:
         logger.warning(f"⚠️ 投资专家 Agent 初始化失败: {e}")
 
+    # 初始化 Main Agent 数据库
+    try:
+        from engine.agent.db import AgentDB
+        AgentDB.init_instance()
+        logger.info("   Main Agent DB: 已初始化")
+    except Exception as e:
+        logger.warning(f"⚠️ Main Agent DB 初始化失败: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -161,6 +171,13 @@ async def shutdown():
         store.close()
     except Exception as e:
         logger.warning(f"DuckDB 关闭异常: {e}")
+
+    # 关闭 Main Agent DB
+    try:
+        from engine.agent.db import AgentDB
+        AgentDB.get_instance().close()
+    except Exception:
+        pass
 
     logger.info("🌄  StockScape Engine 关闭")
 
