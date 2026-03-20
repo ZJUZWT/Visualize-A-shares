@@ -124,3 +124,53 @@ class Portfolio(BaseModel):
     total_pnl: float
     total_pnl_pct: float
     positions: list[Position]
+
+
+# ── 交易计划备忘录 ────────────────────────────────────
+
+class TradePlan(BaseModel):
+    id: str
+    stock_code: str
+    stock_name: str
+    current_price: float | None = None
+    direction: Literal["buy", "sell"]
+    entry_price: float | None = None
+    entry_method: str | None = None
+    position_pct: float | None = None
+    take_profit: float | None = None
+    take_profit_method: str | None = None
+    stop_loss: float | None = None
+    stop_loss_method: str | None = None
+    reasoning: str
+    risk_note: str | None = None
+    invalidation: str | None = None
+    valid_until: str | None = None
+    status: Literal["pending", "executing", "completed", "expired", "ignored"] = "pending"
+    source_type: Literal["expert", "agent", "manual"] = "expert"
+    source_conversation_id: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class TradePlanInput(BaseModel):
+    stock_code: str
+    stock_name: str
+    current_price: float | None = None
+    direction: Literal["buy", "sell"]
+    entry_price: float | None = None
+    entry_method: str | None = None
+    position_pct: float | None = None
+    take_profit: float | None = None
+    take_profit_method: str | None = None
+    stop_loss: float | None = None
+    stop_loss_method: str | None = None
+    reasoning: str
+    risk_note: str | None = None
+    invalidation: str | None = None
+    valid_until: str | None = None
+    source_type: Literal["expert", "agent", "manual"] = "expert"
+    source_conversation_id: str | None = None
+
+
+class TradePlanUpdate(BaseModel):
+    status: Literal["pending", "executing", "completed", "expired", "ignored"] | None = None

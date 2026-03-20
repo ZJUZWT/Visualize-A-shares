@@ -402,3 +402,76 @@ class AgentService:
             "SELECT * FROM agent.position_strategies WHERE position_id = ? ORDER BY version DESC",
             [position_id],
         )
+
+    # ── Plans CRUD ────────────────────────────────────
+
+    async def create_plan(self, plan_input) -> dict:
+        """创建交易计划"""
+        plan_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+
+        await self.db.execute_write(
+            """INSERT INTO agent.trade_plans
+               (id, stock_code, stock_name, current_price, direction,
+                entry_price, entry_method, position_pct,
+                take_profit, take_profit_method, stop_loss, stop_loss_method,
+                reasoning, risk_note, invalidation, valid_until,
+                status, source_type, source_conversation_id,
+                created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)""",
+            [plan_id, plan_input.stock_code, plan_input.stock_name,
+             plan_input.current_price, plan_input.direction,
+             plan_input.entry_price, plan_input.entry_method, plan_input.position_pct,
+             plan_input.take_profit, plan_input.take_profit_method,
+             plan_input.stop_loss, plan_input.stop_loss_method,
+             plan_input.reasoning, plan_input.risk_note, plan_input.invalidation,
+             plan_input.valid_until,
+             plan_input.source_type, plan_input.source_conversation_id,
+             now, now],
+        )
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.trade_plans WHERE id = ?", [plan_id]
+        )
+        return rows[0]
+
+    async def list_plans(
+        self, status: str | None = None, stock_code: str | None = None
+    ) -> list[dict]:
+        """列出交易计划"""
+        sql = "SELECT * FROM agent.trade_plans WHERE 1=1"
+        params = []
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        if stock_code:
+            sql += " AND stock_code = ?"
+            params.append(stock_code)
+        sql += " ORDER BY created_at DESC"
+        return await self.db.execute_read(sql, params if params else None)
+
+    async def get_plan(self, plan_id: str) -> dict:
+        """获取单个交易计划"""
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.trade_plans WHERE id = ?", [plan_id]
+        )
+        if not rows:
+            raise ValueError(f"交易计划 {plan_id} 不存在")
+        return rows[0]
+
+    async def update_plan(self, plan_id: str, updates: dict) -> dict:
+        """更新交易计划"""
+        await self.get_plan(plan_id)  # 确认存在
+        now = datetime.now().isoformat()
+        if "status" in updates and updates["status"]:
+            await self.db.execute_write(
+                "UPDATE agent.trade_plans SET status = ?, updated_at = ? WHERE id = ?",
+                [updates["status"], now, plan_id],
+            )
+        return await self.get_plan(plan_id)
+
+    async def delete_plan(self, plan_id: str):
+        """删除交易计划"""
+        await self.get_plan(plan_id)  # 确认存在
+        await self.db.execute_write(
+            "DELETE FROM agent.trade_plans WHERE id = ?", [plan_id]
+        )
