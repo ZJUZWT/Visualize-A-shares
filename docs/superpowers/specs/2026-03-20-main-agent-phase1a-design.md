@@ -31,6 +31,7 @@ backend/engine/agent/          ← 新建目录
 ```python
 class Position(BaseModel):
     id: str                                     # UUID
+    portfolio_id: str                           # 关联账户 ("live" / "train_01")
     stock_code: str                             # "600519"
     stock_name: str                             # "贵州茅台"
     direction: Literal["long"] = "long"         # 虚拟盘只做多
@@ -89,6 +90,7 @@ class PositionStrategy(BaseModel):
 class Trade(BaseModel):
     id: str
     position_id: str                             # buy 时由 service 层创建 Position 后回填
+    portfolio_id: str                            # 关联账户
     action: Literal["buy", "sell", "add", "reduce"]
     stock_code: str
     stock_name: str
@@ -123,6 +125,7 @@ class Trade(BaseModel):
 ```python
 class TradeGroup(BaseModel):
     id: str
+    portfolio_id: str                           # 关联账户
     position_id: str | None = None              # rebalance 组跨多个持仓时为 None
     group_type: Literal[
         "build_position",       # 建仓组（可能分多天完成）
@@ -158,29 +161,47 @@ class TradeGroup(BaseModel):
 
 ### 2.5 虚拟账户
 
-不单独建表，用一条配置记录表示：
+支持两种运行模式，数据按账户隔离，AI 认知全局共享：
+
+- **虚拟盘（live）**：用当天实时行情，模拟真实交易。只能有一个。
+- **训练场（training）**：用历史数据，AI 在过去的行情里练习。可以有多个。
+
+**隔离的**（按 portfolio_id 分开）：positions、trades、trade_groups
+**共享的**（全局唯一）：AI 的策略认知、反思、决策日志（Phase 1B+ 的表）、llm_calls
 
 ```python
+class PortfolioConfig(BaseModel):
+    """虚拟账户配置"""
+    id: str                                     # "live" 或 "train_01" 等
+    mode: Literal["live", "training"]
+    initial_capital: float                      # 初始资金（固定，不可追加）
+    cash_balance: float                         # 当前现金（每笔交易事务性更新）
+    sim_start_date: str | None = None           # training 模式的模拟起始日期
+    sim_current_date: str | None = None         # training 模式的当前模拟日期
+    created_at: str                             # 账户诞生日
+
 class Portfolio(BaseModel):
-    """虚拟账户 — 持仓市值实时计算，现金余额事务性维护"""
-    initial_capital: float          # 初始资金（固定，不可追加）
-    cash_balance: float             # 当前现金（每笔交易事务性更新）
-    total_asset: float              # 总资产 = cash_balance + 持仓市值
-    total_pnl: float                # 总盈亏
-    total_pnl_pct: float            # 总收益率
-    positions: list[Position]       # 当前持仓
-    created_at: str                 # 账户诞生日（成长时间线起点）
+    """虚拟账户概览 — API 返回结构"""
+    config: PortfolioConfig
+    cash_balance: float
+    total_asset: float                          # cash_balance + 持仓市值
+    total_pnl: float
+    total_pnl_pct: float
+    positions: list[Position]
 ```
 
 ```sql
 CREATE TABLE agent.portfolio_config (
-    id VARCHAR PRIMARY KEY DEFAULT 'default',
+    id VARCHAR PRIMARY KEY,                     -- 'live' 或 'train_01' 等
+    mode VARCHAR NOT NULL DEFAULT 'live',       -- live/training
     initial_capital DOUBLE NOT NULL,
-    cash_balance DOUBLE NOT NULL,           -- 当前现金余额（每笔交易事务性更新）
+    cash_balance DOUBLE NOT NULL,               -- 每笔交易事务性更新
+    sim_start_date DATE,                        -- training 模式起始日期
+    sim_current_date DATE,                      -- training 模式当前日期
     created_at TIMESTAMP DEFAULT now()
 );
--- cash_balance 在每笔交易时事务性更新，避免每次 get_portfolio 全表扫描 trades。
--- 初始化时 cash_balance = initial_capital。
+-- live 账户只能有一个（id='live'），training 账户可以有多个。
+-- cash_balance 初始化时 = initial_capital，每笔交易事务性更新。
 ```
 
 ---
@@ -195,15 +216,19 @@ CREATE SCHEMA IF NOT EXISTS agent;
 
 -- 虚拟账户配置
 CREATE TABLE agent.portfolio_config (
-    id VARCHAR PRIMARY KEY DEFAULT 'default',
+    id VARCHAR PRIMARY KEY,                     -- 'live' 或 'train_01' 等
+    mode VARCHAR NOT NULL DEFAULT 'live',       -- live/training
     initial_capital DOUBLE NOT NULL,
     cash_balance DOUBLE NOT NULL,               -- 每笔交易事务性更新
+    sim_start_date DATE,                        -- training 模式起始日期
+    sim_current_date DATE,                      -- training 模式当前日期
     created_at TIMESTAMP DEFAULT now()
 );
 
 -- 持仓
 CREATE TABLE agent.positions (
     id VARCHAR PRIMARY KEY,
+    portfolio_id VARCHAR NOT NULL,              -- 关联账户
     stock_code VARCHAR NOT NULL,
     stock_name VARCHAR NOT NULL,
     direction VARCHAR DEFAULT 'long',
@@ -236,6 +261,7 @@ CREATE TABLE agent.position_strategies (
 -- 交易记录
 CREATE TABLE agent.trades (
     id VARCHAR PRIMARY KEY,
+    portfolio_id VARCHAR NOT NULL,              -- 关联账户
     position_id VARCHAR NOT NULL,
     action VARCHAR NOT NULL,                -- buy/sell/add/reduce
     stock_code VARCHAR NOT NULL,
@@ -261,6 +287,7 @@ CREATE TABLE agent.trades (
 -- 操作组
 CREATE TABLE agent.trade_groups (
     id VARCHAR PRIMARY KEY,
+    portfolio_id VARCHAR NOT NULL,              -- 关联账户
     position_id VARCHAR,                       -- rebalance 组跨持仓时为 NULL
     group_type VARCHAR NOT NULL,
     trade_ids JSON NOT NULL,                -- ["trade_id_1", "trade_id_2"]
@@ -421,46 +448,54 @@ class AgentService:
         self.db = db
         self.validator = validator
 
-    async def init_portfolio(self, initial_capital: float) -> dict:
-        """初始化虚拟账户（只能调用一次）"""
+    async def create_portfolio(self, portfolio_id: str, mode: str, initial_capital: float, sim_start_date: str = None) -> dict:
+        """创建虚拟账户（live 只能有一个，training 可以多个）"""
 
-    async def get_portfolio(self) -> dict:
+    async def list_portfolios(self) -> list[dict]:
+        """列出所有账户"""
+
+    async def get_portfolio(self, portfolio_id: str) -> dict:
         """
-        获取当前持仓概览
-        - 从 portfolio_config 读取 cash_balance（已事务性维护）
-        - 从 positions 表读取 open 持仓
-        - 调用 DataEngine 获取最新价格计算持仓市值
+        获取账户概览
+        - 从 portfolio_config 读取 cash_balance
+        - 从 positions 表读取该账户的 open 持仓
+        - live 模式：调用 DataEngine.get_realtime_quotes() 获取最新价格
+        - training 模式：调用 DataEngine.get_daily_history() 获取 sim_current_date 的收盘价
         - total_asset = cash_balance + 持仓市值
         - 返回 Portfolio 结构
         """
 
-    async def get_positions(self) -> list[dict]:
+    async def get_positions(self, portfolio_id: str, status: str = "open") -> list[dict]:
         """持仓列表（含策略详情）"""
 
-    async def get_position(self, position_id: str) -> dict:
+    async def get_position(self, portfolio_id: str, position_id: str) -> dict:
         """单个持仓详情"""
 
-    async def get_trades(self, position_id: str = None, limit: int = 50) -> list[dict]:
+    async def get_trades(self, portfolio_id: str, position_id: str = None, limit: int = 50) -> list[dict]:
         """交易记录（可按持仓过滤）"""
 
-    async def execute_trade(self, trade_input: TradeInput) -> dict:
+    async def execute_trade(self, portfolio_id: str, trade_input: TradeInput) -> dict:
         """
         执行交易 — 核心方法
 
         流程：
         1. 通过 DataEngine.get_profiles() 解析 stock_code → stock_name（缓存命中）
-        2. TradeValidator.validate() 校验
-        3. 计算实际成交价（含滑点）和手续费
-        4. 事务性写入（单个事务，保证原子性）：
+        2. 根据 portfolio mode 获取行情数据：
+           - live: DataEngine.get_realtime_quotes()
+           - training: DataEngine.get_daily_history(code, sim_current_date)
+        3. TradeValidator.validate() 校验
+        4. 计算实际成交价（含滑点）和手续费
+        5. 事务性写入（单个事务，保证原子性）：
            a. buy 操作：先 INSERT positions → 拿到 position_id → INSERT trades
            b. add 操作：UPDATE positions（重算均价和数量）→ INSERT trades
            c. sell/reduce 操作：UPDATE positions（减少数量）→ INSERT trades
            d. sell 且 current_qty == 0：UPDATE positions status='closed'
-           e. 归入 TradeGroup（匹配现有 executing 组或创建新组）
-        5. 返回交易结果（含实际成交价、手续费、更新后的持仓状态）
+           e. UPDATE portfolio_config.cash_balance
+           f. 归入 TradeGroup（匹配现有 executing 组或创建新组）
+        6. 返回交易结果（含实际成交价、手续费、更新后的持仓状态）
         """
 
-    async def create_strategy(self, position_id: str, strategy_input: dict) -> dict:
+    async def create_strategy(self, portfolio_id: str, position_id: str, strategy_input: dict) -> dict:
         """
         为持仓创建/更新操作策略
 
@@ -494,21 +529,24 @@ class TradeInput(BaseModel):
 
 注册路径：`/api/v1/agent/*`，在 `backend/main.py` 中挂载。
 
+所有持仓/交易操作通过 `portfolio_id` 路径参数指定账户，默认 `live`。
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/agent/portfolio/init` | 初始化虚拟账户，body: `{initial_capital: float}` |
-| GET | `/agent/portfolio` | 当前持仓概览（持仓 + 现金 + 总资产 + 盈亏） |
-| GET | `/agent/positions` | 持仓列表（含策略），支持 `?status=open\|closed` |
-| GET | `/agent/positions/{id}` | 单个持仓详情（含策略 + 关联交易） |
-| GET | `/agent/trades` | 交易记录，支持 `?position_id=xxx&limit=50` |
-| POST | `/agent/trades` | 录入交易，body: TradeInput |
-| POST | `/agent/positions/{id}/strategy` | 创建/更新持仓策略 |
-| GET | `/agent/positions/{id}/strategy` | 查看持仓策略（含历史版本） |
+| POST | `/agent/portfolio` | 创建账户，body: `{id, mode, initial_capital, sim_start_date?}` |
+| GET | `/agent/portfolio` | 列出所有账户 |
+| GET | `/agent/portfolio/{portfolio_id}` | 账户概览（持仓 + 现金 + 总资产 + 盈亏） |
+| GET | `/agent/portfolio/{portfolio_id}/positions` | 持仓列表（含策略），支持 `?status=open\|closed` |
+| GET | `/agent/portfolio/{portfolio_id}/positions/{id}` | 单个持仓详情（含策略 + 关联交易） |
+| GET | `/agent/portfolio/{portfolio_id}/trades` | 交易记录，支持 `?position_id=xxx&limit=50` |
+| POST | `/agent/portfolio/{portfolio_id}/trades` | 录入交易，body: TradeInput |
+| POST | `/agent/portfolio/{portfolio_id}/positions/{id}/strategy` | 创建/更新持仓策略 |
+| GET | `/agent/portfolio/{portfolio_id}/positions/{id}/strategy` | 查看持仓策略（含历史版本） |
 
 **错误响应**：
 - 400: 校验失败（TradeValidator 拒绝，附原因）
-- 404: 持仓不存在
-- 409: 账户已初始化（重复 init）
+- 404: 账户/持仓不存在
+- 409: 账户 ID 已存在（重复创建）
 
 ---
 
