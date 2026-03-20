@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Mountain, Scale, BrainCircuit, TrendingUp, ClipboardList, GitBranch } from "lucide-react";
+import { Mountain, Scale, BrainCircuit, TrendingUp, ClipboardList, GitBranch, FileText } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/", icon: Mountain, label: "地形图" },
   { href: "/debate", icon: Scale, label: "专家辩论" },
   { href: "/expert", icon: BrainCircuit, label: "投资专家" },
+  { href: "/plans", icon: FileText, label: "交易计划" },
   { href: "/tasks", icon: ClipboardList, label: "事务管理" },
   { href: "/sector", icon: TrendingUp, label: "板块研究" },
   { href: "/chain", icon: GitBranch, label: "产业链图谱" },
