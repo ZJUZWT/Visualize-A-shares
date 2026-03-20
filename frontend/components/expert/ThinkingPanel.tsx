@@ -23,6 +23,8 @@ import { KLinePreview } from "./KLinePreview";
 interface ThinkingPanelProps {
   thinking: ThinkingItem[];
   color?: string;
+  /** 是否默认展开（流式消息 true，历史消息 false） */
+  defaultOpen?: boolean;
 }
 
 /** 精简版 Markdown 渲染（用于专家回复详情） */
@@ -217,8 +219,9 @@ function HoverKLineIcon({
 export function ThinkingPanel({
   thinking,
   color = "var(--accent)",
+  defaultOpen = true,
 }: ThinkingPanelProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
   if (thinking.length === 0) return null;
 
   // 计算错误数

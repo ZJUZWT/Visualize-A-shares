@@ -45,7 +45,7 @@
       "type": "material",
       "name": "锂",
       "category": "raw_material",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.511996",
       "id": "8480f145-b8e2-4d2f-b1b4-ed21954c34e0"
     },
     {
@@ -75,7 +75,7 @@
       "type": "sector",
       "name": "电池",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.511896",
       "id": "c5038974-b5a8-4a11-9351-845b173dd97b"
     },
     {
@@ -153,21 +153,21 @@
       "name": "雄韬股份",
       "industry": "电池",
       "zjh_industry": "制造业-电气机械和器材制造业",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.511893",
       "id": "87c47001-28f8-4d79-b802-8e086cc3ab50"
     },
     {
       "type": "material",
       "name": "锌",
       "category": "raw_material",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.511999",
       "id": "b3824adb-71ab-4101-a360-4d1a5aeef0b7"
     },
     {
       "type": "material",
       "name": "动力电池",
       "category": "product",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:51:55.512006",
       "id": "d99d9619-6385-41af-8a11-927efade46ca"
     },
     {
@@ -211,14 +211,14 @@
       "type": "sector",
       "name": "小金属",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-19T22:04:45.008843",
       "id": "012015b4-5053-48ba-9122-9c150328395f"
     },
     {
       "type": "material",
       "name": "稀土",
       "category": "raw_material",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-19T22:04:45.008927",
       "id": "0df250c0-5398-4dc5-9046-0b13559d09de"
     },
     {
@@ -503,14 +503,14 @@
       "name": "美利云",
       "industry": "通信服务",
       "zjh_industry": "制造业-造纸和纸制品业",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:49:06.235116",
       "id": "512f3851-9a9a-43ac-add5-7758f1fe46f9"
     },
     {
       "type": "sector",
       "name": "通信服务",
       "category": "industry",
-      "updated_at": "2000-01-01T00:00:00",
+      "updated_at": "2026-03-20T00:49:06.235130",
       "id": "4751cf07-5192-4a30-abd7-2c39c23290b2"
     },
     {
@@ -800,6 +800,13 @@
       "timestamp": "2026-03-16T19:35:12.905140",
       "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
       "target_id": "1e3226d9-2be7-40e9-b945-ba62201b81ec"
+    },
+    {
+      "relation": "competes_with",
+      "reason": "同属化学原料行业",
+      "timestamp": "2026-03-19T21:30:41.591751",
+      "source_id": "97e0443b-2303-42d9-bdcb-55ddd6e142bc",
+      "target_id": "eeb78204-b45d-4046-8f2b-b5516f3525f8"
     },
     {
       "relation": "belongs_to",

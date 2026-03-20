@@ -10,10 +10,13 @@ LLM Provider 统一抽象层
 所有 Provider 都支持：
 1. 同步对话: chat()
 2. 流式对话: chat_stream()  (SSE 流式输出)
+3. 工具调用: chat_with_tools() (原生 Function Calling)
 """
 
 from abc import ABC, abstractmethod
+import json as _json
 import time
+from dataclasses import dataclass, field
 from typing import AsyncGenerator
 
 import httpx
@@ -24,14 +27,45 @@ from .config import LLMConfig
 
 # ─── 消息格式 ────────────────────────────────────────
 class ChatMessage:
-    """统一消息格式"""
+    """统一消息格式 — 支持纯文本和 tool_calls / tool 结果"""
 
-    def __init__(self, role: str, content: str):
-        self.role = role      # "system" | "user" | "assistant"
+    def __init__(
+        self,
+        role: str,
+        content: str = "",
+        *,
+        tool_calls: list[dict] | None = None,
+        tool_call_id: str | None = None,
+        name: str | None = None,
+    ):
+        self.role = role      # "system" | "user" | "assistant" | "tool"
         self.content = content
+        self.tool_calls = tool_calls      # assistant 消息中 LLM 返回的工具调用
+        self.tool_call_id = tool_call_id  # tool 消息中对应的 tool_call id
+        self.name = name                  # tool 消息中的函数名
 
     def to_dict(self) -> dict:
-        return {"role": self.role, "content": self.content}
+        d: dict = {"role": self.role}
+        if self.content:
+            d["content"] = self.content
+        elif self.role != "assistant":
+            # 非 assistant 角色需要 content 字段
+            d["content"] = self.content
+        if self.tool_calls:
+            d["tool_calls"] = self.tool_calls
+        if self.tool_call_id:
+            d["tool_call_id"] = self.tool_call_id
+        if self.name:
+            d["name"] = self.name
+        return d
+
+
+@dataclass
+class ToolCallResult:
+    """原生 Tool Use 的返回结构"""
+    content: str = ""                              # LLM 的文本回复（可能为空）
+    tool_calls: list[dict] = field(default_factory=list)  # [{id, type, function: {name, arguments}}]
+    raw_message: dict = field(default_factory=dict)       # 完整的 assistant message（用于多轮对话）
 
 
 # ─── 抽象基类 ────────────────────────────────────────
@@ -55,6 +89,23 @@ class BaseLLMProvider(ABC):
     async def health_check(self) -> bool:
         """检查连接是否正常"""
         ...
+
+    async def chat_with_tools(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict] | None = None,
+    ) -> ToolCallResult:
+        """带工具定义的对话 — 原生 Function Calling
+
+        子类可覆盖。默认实现抛 NotImplementedError，
+        调用方应先检查 supports_tool_use 属性。
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} 不支持原生 tool use")
+
+    @property
+    def supports_tool_use(self) -> bool:
+        """是否支持原生 Function Calling / Tool Use"""
+        return False
 
 
 # ─── OpenAI 兼容 Provider ────────────────────────────
@@ -140,6 +191,69 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         finally:
             elapsed = time.monotonic() - t0
             logger.info(f"⏱️ LLM stream ({self.config.model}) 耗时 {elapsed:.1f}s, {token_count} chunks")
+
+    async def chat_with_tools(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict] | None = None,
+    ) -> ToolCallResult:
+        """原生 Function Calling — 通过 OpenAI tools 参数让模型结构化返回工具调用
+
+        支持 OpenAI / MiniMax / DeepSeek / 通义 等兼容 OpenAI tools 协议的厂商。
+        """
+        t0 = time.monotonic()
+        url = f"{self.config.base_url.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload: dict = {
+            "model": self.config.model,
+            "messages": [m.to_dict() for m in messages],
+            "temperature": self.config.temperature,
+            "max_tokens": self.config.max_tokens,
+            "stream": False,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        async with httpx.AsyncClient(timeout=self._TIMEOUT) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        choice = data["choices"][0]
+        msg = choice.get("message", {})
+        content = msg.get("content") or ""
+        raw_tool_calls = msg.get("tool_calls") or []
+        elapsed = time.monotonic() - t0
+
+        # 标准化 tool_calls
+        tool_calls = []
+        for tc in raw_tool_calls:
+            tool_calls.append({
+                "id": tc.get("id", ""),
+                "type": tc.get("type", "function"),
+                "function": {
+                    "name": tc.get("function", {}).get("name", ""),
+                    "arguments": tc.get("function", {}).get("arguments", "{}"),
+                },
+            })
+
+        logger.info(
+            f"⏱️ LLM chat_with_tools ({self.config.model}) 耗时 {elapsed:.1f}s, "
+            f"content={len(content)}字, tool_calls={len(tool_calls)}个"
+        )
+        return ToolCallResult(
+            content=content,
+            tool_calls=tool_calls,
+            raw_message=msg,
+        )
+
+    @property
+    def supports_tool_use(self) -> bool:
+        return True
 
     async def health_check(self) -> bool:
         try:

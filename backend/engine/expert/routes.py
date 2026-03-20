@@ -409,6 +409,7 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
     async def event_stream():
         full_reply = ""
         tools_used = []
+        thinking_items = []
         try:
             async for event in expert.chat(
                 req.message, history=history,
@@ -419,6 +420,28 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
                     full_reply = event["data"].get("full_text", "")
                 elif evt_type == "tool_call":
                     tools_used.append(event["data"].get("action", ""))
+                    thinking_items.append({"type": "tool_call", "data": event["data"], "status": "pending"})
+                elif evt_type == "tool_result":
+                    # 将 tool_result 合并到对应的 tool_call 上（更新 status）
+                    result_data = event["data"]
+                    matched = False
+                    for ti in reversed(thinking_items):
+                        if (ti["type"] == "tool_call"
+                            and ti.get("status") == "pending"
+                            and ti["data"].get("engine") == result_data.get("engine")
+                            and ti["data"].get("action") == result_data.get("action")):
+                            ti["status"] = "error" if result_data.get("hasError") else "done"
+                            ti["result"] = result_data
+                            matched = True
+                            break
+                    if not matched:
+                        thinking_items.append({"type": "tool_result", "data": result_data})
+                elif evt_type == "graph_recall":
+                    thinking_items.append({"type": "graph_recall", "data": event["data"]})
+                elif evt_type == "thinking_round":
+                    thinking_items.append({"type": "thinking_round", "data": event["data"]})
+                elif evt_type == "belief_updated":
+                    thinking_items.append({"type": "belief_updated", "data": event["data"]})
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"{expert_type} expert chat 错误: {e}")
@@ -427,7 +450,7 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
 
         # 存入 session 消息（用户消息已由前端 save-user 接口写入，此处只存 expert 回复）
         if session_id:
-            _save_message(session_id, "expert", full_reply)
+            _save_message(session_id, "expert", full_reply, thinking_items)
             _auto_title(session_id, req.message)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -460,9 +483,22 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
                     full_reply = event["data"].get("full_text", "")
                 elif evt_type == "tool_call":
                     tools_used.append(event["data"].get("action", ""))
-                    thinking_items.append({"type": "tool_call", "data": event["data"]})
+                    thinking_items.append({"type": "tool_call", "data": event["data"], "status": "pending"})
                 elif evt_type == "tool_result":
-                    thinking_items.append({"type": "tool_result", "data": event["data"]})
+                    # 将 tool_result 合并到对应的 tool_call 上（更新 status）
+                    result_data = event["data"]
+                    matched = False
+                    for ti in reversed(thinking_items):
+                        if (ti["type"] == "tool_call"
+                            and ti.get("status") == "pending"
+                            and ti["data"].get("engine") == result_data.get("engine")
+                            and ti["data"].get("action") == result_data.get("action")):
+                            ti["status"] = "error" if result_data.get("hasError") else "done"
+                            ti["result"] = result_data
+                            matched = True
+                            break
+                    if not matched:
+                        thinking_items.append({"type": "tool_result", "data": result_data})
                 elif evt_type == "belief_updated":
                     belief_changes.append(event["data"])
                     thinking_items.append({"type": "belief_updated", "data": event["data"]})
