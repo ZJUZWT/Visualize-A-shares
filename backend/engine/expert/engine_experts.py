@@ -1004,6 +1004,11 @@ class EngineExpert:
                 return None
 
             data = json.loads(text)
+            # LLM 可能返回 list 而非 dict，如 [{...}]
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            if not isinstance(data, dict):
+                return None
             if data.get("action") == "none":
                 return None
 
