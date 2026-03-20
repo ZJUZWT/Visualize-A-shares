@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useSectorStore } from "@/stores/useSectorStore";
-import { createChart, type IChartApi } from "lightweight-charts";
+import { createChart, CandlestickSeries, HistogramSeries, type IChartApi } from "lightweight-charts";
 
 /** 将各种日期格式统一为 YYYY-MM-DD */
 function normalizeDate(raw: string): string {
@@ -60,7 +60,7 @@ export function SectorTrendChart() {
       chartRef.current = chart;
 
       // K 线 — 确保日期格式正确、排序、去重
-      const candleSeries = chart.addCandlestickSeries({
+      const candleSeries = chart.addSeries(CandlestickSeries, {
         upColor: "#ef4444",
         downColor: "#22c55e",
         borderUpColor: "#ef4444",
@@ -88,7 +88,7 @@ export function SectorTrendChart() {
 
       // 资金流柱状图（如果有数据）
       if (fundFlowHistory.length > 0) {
-        const volumeSeries = chart.addHistogramSeries({
+        const volumeSeries = chart.addSeries(HistogramSeries, {
           priceFormat: { type: "volume" },
           priceScaleId: "flow",
         });
