@@ -174,3 +174,47 @@ class TradePlanInput(BaseModel):
 
 class TradePlanUpdate(BaseModel):
     status: Literal["pending", "executing", "completed", "expired", "ignored"] | None = None
+
+
+# ── 关注列表 ──────────────────────────────────────────
+
+class WatchlistItem(BaseModel):
+    id: str
+    stock_code: str
+    stock_name: str
+    reason: str | None = None
+    added_by: Literal["manual", "agent"] = "manual"
+    created_at: str
+
+
+class WatchlistInput(BaseModel):
+    stock_code: str
+    stock_name: str
+    reason: str | None = None
+
+
+# ── Agent Brain ───────────────────────────────────────
+
+class BrainRun(BaseModel):
+    id: str
+    portfolio_id: str
+    run_type: Literal["scheduled", "manual"] = "scheduled"
+    status: Literal["running", "completed", "failed"] = "running"
+    candidates: list[dict] | None = None
+    analysis_results: list[dict] | None = None
+    decisions: list[dict] | None = None
+    plan_ids: list[str] | None = None
+    trade_ids: list[str] | None = None
+    error_message: str | None = None
+    llm_tokens_used: int = 0
+    started_at: str
+    completed_at: str | None = None
+
+
+class BrainConfig(BaseModel):
+    enable_debate: bool = False
+    max_candidates: int = 30
+    quant_top_n: int = 20
+    max_position_count: int = 10
+    single_position_pct: float = 0.15
+    schedule_time: str = "15:30"

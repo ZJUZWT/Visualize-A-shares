@@ -148,6 +148,15 @@ async def startup():
     except Exception as e:
         logger.warning(f"⚠️ Main Agent DB 初始化失败: {e}")
 
+    # 启动 Agent Brain 调度器
+    try:
+        from engine.agent.scheduler import AgentScheduler
+        agent_scheduler = AgentScheduler.get_instance()
+        agent_scheduler.start()
+        logger.info("   Agent Brain 调度器: 已启动")
+    except Exception as e:
+        logger.warning(f"⚠️ Agent Brain 调度器启动失败: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -176,6 +185,13 @@ async def shutdown():
     try:
         from engine.agent.db import AgentDB
         AgentDB.get_instance().close()
+    except Exception:
+        pass
+
+    # 关闭 Agent Brain 调度器
+    try:
+        from engine.agent.scheduler import AgentScheduler
+        AgentScheduler.get_instance().shutdown()
     except Exception:
         pass
 

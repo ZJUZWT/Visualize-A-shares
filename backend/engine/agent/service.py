@@ -475,3 +475,117 @@ class AgentService:
         await self.db.execute_write(
             "DELETE FROM agent.trade_plans WHERE id = ?", [plan_id]
         )
+
+    # ── Watchlist CRUD ─────────────────────────────────
+
+    async def add_watchlist(self, item_input) -> dict:
+        """添加关注"""
+        item_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        await self.db.execute_write(
+            """INSERT INTO agent.watchlist (id, stock_code, stock_name, reason, added_by, created_at)
+               VALUES (?, ?, ?, ?, 'manual', ?)""",
+            [item_id, item_input.stock_code, item_input.stock_name,
+             item_input.reason, now],
+        )
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.watchlist WHERE id = ?", [item_id]
+        )
+        return rows[0]
+
+    async def list_watchlist(self) -> list[dict]:
+        """关注列表"""
+        return await self.db.execute_read(
+            "SELECT * FROM agent.watchlist ORDER BY created_at DESC"
+        )
+
+    async def remove_watchlist(self, item_id: str):
+        """取消关注"""
+        rows = await self.db.execute_read(
+            "SELECT id FROM agent.watchlist WHERE id = ?", [item_id]
+        )
+        if not rows:
+            raise ValueError(f"关注项 {item_id} 不存在")
+        await self.db.execute_write(
+            "DELETE FROM agent.watchlist WHERE id = ?", [item_id]
+        )
+
+    # ── BrainRuns CRUD ─────────────────────────────────
+
+    async def create_brain_run(self, portfolio_id: str, run_type: str = "scheduled") -> dict:
+        """创建运行记录"""
+        run_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        await self.db.execute_write(
+            """INSERT INTO agent.brain_runs (id, portfolio_id, run_type, status, started_at)
+               VALUES (?, ?, ?, 'running', ?)""",
+            [run_id, portfolio_id, run_type, now],
+        )
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.brain_runs WHERE id = ?", [run_id]
+        )
+        return rows[0]
+
+    async def get_brain_run(self, run_id: str) -> dict:
+        """获取运行记录"""
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.brain_runs WHERE id = ?", [run_id]
+        )
+        if not rows:
+            raise ValueError(f"运行记录 {run_id} 不存在")
+        return rows[0]
+
+    async def update_brain_run(self, run_id: str, updates: dict):
+        """更新运行记录"""
+        await self.get_brain_run(run_id)
+        sets = []
+        params = []
+        for key in ("status", "candidates", "analysis_results", "decisions",
+                     "plan_ids", "trade_ids", "error_message", "llm_tokens_used"):
+            if key in updates:
+                val = updates[key]
+                if isinstance(val, (list, dict)):
+                    val = json.dumps(val, ensure_ascii=False)
+                sets.append(f"{key} = ?")
+                params.append(val)
+        if "status" in updates and updates["status"] in ("completed", "failed"):
+            sets.append("completed_at = ?")
+            params.append(datetime.now().isoformat())
+        if sets:
+            sql = f"UPDATE agent.brain_runs SET {', '.join(sets)} WHERE id = ?"
+            params.append(run_id)
+            await self.db.execute_write(sql, params)
+
+    async def list_brain_runs(self, portfolio_id: str, limit: int = 50) -> list[dict]:
+        """运行记录列表"""
+        return await self.db.execute_read(
+            "SELECT * FROM agent.brain_runs WHERE portfolio_id = ? ORDER BY started_at DESC LIMIT ?",
+            [portfolio_id, limit],
+        )
+
+    # ── BrainConfig CRUD ───────────────────────────────
+
+    async def get_brain_config(self) -> dict:
+        """获取 Brain 配置"""
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.brain_config WHERE id = 'default'"
+        )
+        if not rows:
+            return {"enable_debate": False, "max_candidates": 30, "quant_top_n": 20,
+                    "max_position_count": 10, "single_position_pct": 0.15, "schedule_time": "15:30"}
+        return rows[0]
+
+    async def update_brain_config(self, updates: dict):
+        """更新 Brain 配置"""
+        sets = []
+        params = []
+        for key in ("enable_debate", "max_candidates", "quant_top_n",
+                     "max_position_count", "single_position_pct", "schedule_time"):
+            if key in updates:
+                sets.append(f"{key} = ?")
+                params.append(updates[key])
+        if sets:
+            sets.append("updated_at = ?")
+            params.append(datetime.now().isoformat())
+            sql = f"UPDATE agent.brain_config SET {', '.join(sets)} WHERE id = 'default'"
+            await self.db.execute_write(sql, params)

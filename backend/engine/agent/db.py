@@ -164,6 +164,49 @@ class AgentDB:
                 updated_at TIMESTAMP DEFAULT now()
             )
         """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.watchlist (
+                id VARCHAR PRIMARY KEY,
+                stock_code VARCHAR NOT NULL,
+                stock_name VARCHAR NOT NULL,
+                reason TEXT,
+                added_by VARCHAR DEFAULT 'manual',
+                created_at TIMESTAMP DEFAULT now()
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.brain_runs (
+                id VARCHAR PRIMARY KEY,
+                portfolio_id VARCHAR NOT NULL,
+                run_type VARCHAR DEFAULT 'scheduled',
+                status VARCHAR DEFAULT 'running',
+                candidates JSON,
+                analysis_results JSON,
+                decisions JSON,
+                plan_ids JSON,
+                trade_ids JSON,
+                error_message TEXT,
+                llm_tokens_used INTEGER DEFAULT 0,
+                started_at TIMESTAMP DEFAULT now(),
+                completed_at TIMESTAMP
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.brain_config (
+                id VARCHAR PRIMARY KEY DEFAULT 'default',
+                enable_debate BOOLEAN DEFAULT false,
+                max_candidates INTEGER DEFAULT 30,
+                quant_top_n INTEGER DEFAULT 20,
+                max_position_count INTEGER DEFAULT 10,
+                single_position_pct DOUBLE DEFAULT 0.15,
+                schedule_time VARCHAR DEFAULT '15:30',
+                updated_at TIMESTAMP DEFAULT now()
+            )
+        """)
+        self._conn.execute("""
+            INSERT INTO agent.brain_config (id) VALUES ('default')
+            ON CONFLICT (id) DO NOTHING
+        """)
 
     async def execute_read(self, sql: str, params=None) -> list[dict]:
         return await asyncio.to_thread(self._sync_read, sql, params)
