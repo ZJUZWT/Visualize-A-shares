@@ -124,9 +124,9 @@ export function MessageBubble({
       </div>
 
       <div className="flex-1 min-w-0 max-w-[80%]">
-        {/* 思考面板 */}
+        {/* 思考面板：历史消息默认折叠，流式消息默认展开 */}
         {message.thinking.length > 0 && (
-          <ThinkingPanel thinking={message.thinking} color={expertColor} />
+          <ThinkingPanel thinking={message.thinking} color={expertColor} defaultOpen={message.isStreaming} />
         )}
 
         {/* 正文 */}

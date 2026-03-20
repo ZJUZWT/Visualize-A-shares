@@ -257,7 +257,13 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           id: m.id,
           role: m.role as "user" | "expert",
           content: m.content,
-          thinking: m.thinking || [],
+          thinking: (m.thinking || []).map((t: ThinkingItem) => {
+            // 兼容旧数据：tool_call 缺少 status 字段时默认设为 "done"（历史数据肯定已完成）
+            if (t.type === "tool_call" && !t.status) {
+              return { ...t, status: "done" as const };
+            }
+            return t;
+          }),
           isStreaming: false,
         }));
         // 只有当 activeSession 还是这个 session 时才更新（防止用户快速切换导致数据错乱）
