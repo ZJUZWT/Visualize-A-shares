@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from engine.agent.db import AgentDB
-from engine.agent.models import TradeInput, TradePlanInput, TradePlanUpdate
+from engine.agent.models import TradeInput, TradePlanInput, TradePlanUpdate, WatchlistInput
 from engine.agent.service import AgentService
 from engine.agent.validator import TradeValidator
 
@@ -172,5 +172,63 @@ def create_agent_router() -> APIRouter:
             return {"ok": True}
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
+
+    # ── Watchlist ──
+
+    @router.post("/watchlist")
+    async def add_watchlist(req: WatchlistInput):
+        svc = _get_service()
+        return await svc.add_watchlist(req)
+
+    @router.get("/watchlist")
+    async def list_watchlist():
+        svc = _get_service()
+        return await svc.list_watchlist()
+
+    @router.delete("/watchlist/{item_id}")
+    async def remove_watchlist(item_id: str):
+        svc = _get_service()
+        try:
+            await svc.remove_watchlist(item_id)
+            return {"ok": True}
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    # ── Brain ──
+
+    @router.get("/brain/config")
+    async def get_brain_config():
+        svc = _get_service()
+        return await svc.get_brain_config()
+
+    @router.patch("/brain/config")
+    async def update_brain_config(req: dict):
+        svc = _get_service()
+        await svc.update_brain_config(req)
+        return await svc.get_brain_config()
+
+    @router.get("/brain/runs")
+    async def list_brain_runs(portfolio_id: str):
+        svc = _get_service()
+        return await svc.list_brain_runs(portfolio_id)
+
+    @router.get("/brain/runs/{run_id}")
+    async def get_brain_run(run_id: str):
+        svc = _get_service()
+        try:
+            return await svc.get_brain_run(run_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.post("/brain/run")
+    async def trigger_brain_run(portfolio_id: str):
+        """手动触发一次 Brain 运行"""
+        svc = _get_service()
+        run_record = await svc.create_brain_run(portfolio_id, "manual")
+        import asyncio
+        from engine.agent.brain import AgentBrain
+        brain = AgentBrain(portfolio_id)
+        asyncio.create_task(brain.execute(run_record["id"]))
+        return run_record
 
     return router
