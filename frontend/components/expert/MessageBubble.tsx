@@ -6,6 +6,8 @@ import { ThinkingPanel } from "./ThinkingPanel";
 import { AlertCircle, RotateCw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { splitByTradePlan, hasTradePlan } from "@/lib/parseTradePlan";
+import TradePlanCard from "@/components/plans/TradePlanCard";
 
 interface MessageBubbleProps {
   message: ExpertMessage;
@@ -132,7 +134,31 @@ export function MessageBubble({
         {/* 正文 */}
         <div className="text-sm text-[var(--text-primary)] leading-relaxed">
           {message.content ? (
-            <MarkdownContent content={message.content} />
+            hasTradePlan(message.content) ? (
+              splitByTradePlan(message.content).map((segment, i) =>
+                segment.type === "text" ? (
+                  <MarkdownContent key={i} content={segment.content} />
+                ) : segment.plan ? (
+                  <div key={i} className="my-3">
+                    <TradePlanCard
+                      plan={segment.plan}
+                      onSave={async (plan) => {
+                        const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+                        await fetch(`${API_BASE}/api/v1/agent/plans`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(plan),
+                        });
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <MarkdownContent key={i} content={segment.content} />
+                )
+              )
+            ) : (
+              <MarkdownContent content={message.content} />
+            )
           ) : message.isStreaming ? (
             <span className="inline-flex items-center gap-1.5 text-[var(--text-tertiary)] text-xs">
               <span className="inline-flex gap-[3px]" style={{ color: expertColor }}>
