@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from engine.agent.db import AgentDB
-from engine.agent.models import TradeInput
+from engine.agent.models import TradeInput, TradePlanInput, TradePlanUpdate
 from engine.agent.service import AgentService
 from engine.agent.validator import TradeValidator
 
@@ -130,6 +130,46 @@ def create_agent_router() -> APIRouter:
         svc = _get_service()
         try:
             return await svc.get_strategy(portfolio_id, position_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    # ── Plans ──
+
+    @router.post("/plans")
+    async def create_plan(req: TradePlanInput):
+        svc = _get_service()
+        return await svc.create_plan(req)
+
+    @router.get("/plans")
+    async def list_plans(
+        status: str | None = None,
+        stock_code: str | None = None,
+    ):
+        svc = _get_service()
+        return await svc.list_plans(status, stock_code)
+
+    @router.get("/plans/{plan_id}")
+    async def get_plan(plan_id: str):
+        svc = _get_service()
+        try:
+            return await svc.get_plan(plan_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.patch("/plans/{plan_id}")
+    async def update_plan(plan_id: str, req: TradePlanUpdate):
+        svc = _get_service()
+        try:
+            return await svc.update_plan(plan_id, req.model_dump(exclude_none=True))
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.delete("/plans/{plan_id}")
+    async def delete_plan(plan_id: str):
+        svc = _get_service()
+        try:
+            await svc.delete_plan(plan_id)
+            return {"ok": True}
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 

@@ -139,6 +139,31 @@ class AgentDB:
                 created_at TIMESTAMP DEFAULT now()
             )
         """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.trade_plans (
+                id VARCHAR PRIMARY KEY,
+                stock_code VARCHAR NOT NULL,
+                stock_name VARCHAR NOT NULL,
+                current_price DOUBLE,
+                direction VARCHAR NOT NULL,
+                entry_price DOUBLE,
+                entry_method TEXT,
+                position_pct DOUBLE,
+                take_profit DOUBLE,
+                take_profit_method TEXT,
+                stop_loss DOUBLE,
+                stop_loss_method TEXT,
+                reasoning TEXT NOT NULL,
+                risk_note TEXT,
+                invalidation TEXT,
+                valid_until DATE,
+                status VARCHAR DEFAULT 'pending',
+                source_type VARCHAR DEFAULT 'expert',
+                source_conversation_id VARCHAR,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now()
+            )
+        """)
 
     async def execute_read(self, sql: str, params=None) -> list[dict]:
         return await asyncio.to_thread(self._sync_read, sql, params)
