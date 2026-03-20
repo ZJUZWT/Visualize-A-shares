@@ -465,7 +465,171 @@ class DataHunger:
         # "基于你刚获取的新数据，你的策略需要调整吗？"
 ```
 
-#### 1.2.4 历史数据训练 — 让 AI 从历史中学习
+#### 1.2.5 信息免疫系统 — 怀疑消息面，信仰数据面
+
+> **核心问题**：市场上的信息天然带立场。券商研报有利益绑定，股吧小作文有庄家写手，
+> 甚至 AI 自身的训练数据里就埋着偏见（"茅台永远涨"、"银行股没前途"）。
+> 如果 AI 不加甄别地消化这些信息，本质上就是被投毒。
+>
+> **设计原则**：
+> - **消息面**（新闻/研报/舆情）→ 用**怀疑者心态**过滤，默认"这条信息想让我做什么？谁受益？"
+> - **数据面**（行情/财报/资金流）→ 用**理性框架**解读，必须锚定自己的策略体系去看
+> - **绝不因为一条消息改变策略** — 必须有数据交叉验证
+
+```
+信息流入 AI 的三道防线：
+
+┌─ 防线 1: 信息来源分级（InfoTrustLevel）──────────────────────┐
+│                                                                │
+│  每条信息进入 AI 视野前，先标记可信度等级：                     │
+│                                                                │
+│  🟢 Tier 1 — 客观数据（最高信任）                             │
+│     交易所行情、财报原文、北向资金净额、龙虎榜、大宗交易        │
+│     → 直接采信，但注意"数据本身不说话，解读才说话"             │
+│                                                                │
+│  🟡 Tier 2 — 有立场的分析（中等信任，需交叉验证）             │
+│     券商研报、机构评级、行业协会数据                           │
+│     → 提取事实部分采信，观点部分标记为"某机构观点"             │
+│     → 注意：券商"强烈推荐"可能是因为有承销关系                │
+│                                                                │
+│  🔴 Tier 3 — 噪音源（最低信任，高度怀疑）                    │
+│     股吧帖子、财经自媒体、"消息灵通人士"、小道消息            │
+│     → 仅作为情绪指标（"散户在恐慌/贪婪"），不作为决策依据     │
+│     → 多条 Tier 3 同方向 = 可能是有组织的信息投放              │
+│                                                                │
+│  ⚫ Tier 0 — AI 自身训练偏见（隐性风险，最难防）              │
+│     LLM 训练数据中的"常识"可能是过时的或有偏见的               │
+│     → "茅台是好公司" — 这是2020年的共识，现在还成立吗？       │
+│     → "新能源是未来" — 这是趋势判断还是信仰？                 │
+│     → 应对：AI 的每个"我认为"都必须锚定到 Tier 1 数据         │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+          │ 过滤后
+          ▼
+┌─ 防线 2: 策略锚定解读（不按心情看数据）──────────────────────┐
+│                                                                │
+│  AI 看到任何信息后，不是"这个信息说明什么"，                  │
+│  而是"这个信息对我当前策略意味着什么"：                       │
+│                                                                │
+│  ❌ 错误姿势：                                                │
+│     看到"XX公司获大订单" → "利好！加仓！"                    │
+│     （这是散户思维，被消息牵着鼻子走）                        │
+│                                                                │
+│  ✅ 正确姿势：                                                │
+│     我的策略是什么？→ "持有XX，等产能出清信号"                │
+│     这条消息和我的策略有关吗？→ "大订单≠产能出清，不改变策略" │
+│     这条消息会改变我的 invalidation 条件吗？→ "不会"          │
+│     结论：记录但不行动                                         │
+│                                                                │
+│  实现方式 — 在 DataHunger.execute_and_digest() 的 prompt 中    │
+│  强制 AI 按以下框架消化信息：                                  │
+│                                                                │
+│  对每条信息，AI 必须回答：                                     │
+│  ① 信息来源属于哪个 Tier？可信度如何？                        │
+│  ② 这条信息的"意图"是什么？谁在放这个消息？谁受益？          │
+│  ③ 这条信息和我当前策略的哪个环节相关？                       │
+│  ④ 有没有 Tier 1 数据可以交叉验证？                           │
+│  ⑤ 如果这条信息是假的/被夸大的，我会做什么不同？             │
+│  ⑥ 结论：采信/存疑/忽略，以及对策略的影响（无/微调/重评估）  │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+          │ 消化后
+          ▼
+┌─ 防线 3: 反共识检查（防止 AI 随大流）────────────────────────┐
+│                                                                │
+│  当 AI 的判断和"市场共识"高度一致时，反而要警惕：             │
+│                                                                │
+│  "所有人都看好 → 可能已经Price In"                            │
+│  "所有人都看空 → 可能是恐慌底部"                              │
+│                                                                │
+│  触发条件：                                                    │
+│  - 连续 3+ 条 Tier 2/3 信息指向同一方向                       │
+│  - AI 自己也倾向同一方向                                       │
+│                                                                │
+│  触发动作：                                                    │
+│  → AI 必须做一次"反方辩论"：假设当前共识是错的，理由是什么？  │
+│  → 检查自己是否因为"信息轰炸"而动摇了原本正确的策略          │
+│  → 决策日志中标记 "consensus_alert: true"                      │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**数据模型扩展**：
+
+```python
+class InfoDigest(BaseModel):
+    """AI 消化信息后的结构化记录 — 信息免疫系统的产出"""
+    id: str
+    source_info: str                     # 原始信息摘要
+    source_tier: Literal[0, 1, 2, 3]    # 可信度等级
+    source_type: str                     # "exchange_data" / "research_report" / "news" / "social_media"
+    
+    # ── 怀疑者三问 ──
+    cui_bono: str                        # "谁受益？" — 这条信息的潜在利益方
+    intent_analysis: str                 # "意图是什么？" — 信息发布者想达到什么效果
+    cross_validation: str | None         # "有什么 Tier 1 数据可以验证？"
+    
+    # ── 策略锚定 ──
+    strategy_relevance: str              # 和当前哪条策略相关
+    impact_assessment: Literal[          # 对策略的影响
+        "none",           # 无关，忽略
+        "noted",          # 记录但不行动
+        "minor_adjust",   # 微调（如调整止损位）
+        "reassess",       # 需要重新评估策略
+    ]
+    conclusion: str                      # AI 的结论
+    
+    # ── 元数据 ──
+    consensus_alert: bool = False        # 是否触发了反共识检查
+    created_at: str
+```
+
+```sql
+-- 新增表：信息消化记录（AI 如何处理每条关键信息的证据链）
+CREATE TABLE agent.info_digests (
+    id VARCHAR PRIMARY KEY,
+    decision_log_id VARCHAR,             -- 关联到哪次决策（如果有的话）
+    source_summary TEXT NOT NULL,         -- 原始信息摘要
+    source_tier INTEGER NOT NULL,         -- 0/1/2/3
+    source_type VARCHAR NOT NULL,
+    -- 怀疑者分析
+    cui_bono TEXT,                        -- 谁受益
+    intent_analysis TEXT,                 -- 信息意图
+    cross_validation TEXT,               -- 交叉验证结果
+    -- 策略锚定
+    strategy_relevance TEXT,
+    impact_assessment VARCHAR NOT NULL,   -- none/noted/minor_adjust/reassess
+    conclusion TEXT NOT NULL,
+    consensus_alert BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT now()
+);
+```
+
+**对现有设计的影响**：
+
+- [ ] **DecisionLog 扩展** — 新增 `info_digests: list[str]` 字段，关联本次决策消化了哪些信息
+- [ ] **DataHunger Prompt 改造** — `execute_and_digest()` 的 prompt 中强制植入信息免疫框架（上述 6 问）
+- [ ] **复盘增加"信息复盘"** — 每日复盘时回顾：今天有没有被某条消息误导？被 Tier 3 信息影响了决策吗？
+- [ ] **Agent System Prompt** — 在 Main Agent 的人格 prompt 中写入核心信条：
+
+```
+你是一个经验丰富的投资经理。你信奉以下原则：
+
+关于信息：
+- 消息面天然带立场，你的默认态度是怀疑。对每条消息先问"谁在放这个消息？谁受益？"
+- 只有交易所数据、财报原文、实际成交数据是高可信度信息。研报观点需要交叉验证，社交媒体言论仅作情绪参考。
+- 你自己的训练数据也可能有偏见。不要相信"常识"，相信数据。"茅台是好公司"不是分析，"茅台 ROE 连续 10 年 >25%"才是。
+- 永远不因为单条消息改变策略。改变策略需要 Tier 1 数据支撑 + 策略框架内的逻辑推演。
+
+关于数据：
+- 用你自己的策略框架去看数据，不是用"感觉"。
+- 数据异常时先怀疑数据本身（错误/滞后/统计口径变化），再考虑市场变化。
+- 当你的判断和"市场共识"一致时，要额外警惕——共识往往已经被定价。
+```
+
+**处理时机**：Phase 1B（Agent 对话 + System Prompt 设计时一并实现）
+
+#### 1.2.6 历史数据训练 — 让 AI 从历史中学习
 
 - [ ] **Backtesting Mode** — 回测训练模式
   - 给 AI 一段历史行情（比如 2024 年全年），让它按照自己的策略模拟操作
@@ -477,7 +641,7 @@ class DataHunger:
   - 让 AI 重新审视当时的决策："如果重来一次，你会怎么做不同？"
   - 对比新旧策略的模拟结果
 
-#### 1.2.5 DuckDB 表设计
+#### 1.2.7 DuckDB 表设计
 
 ```sql
 -- 虚拟持仓
@@ -610,9 +774,44 @@ CREATE TABLE agent.weekly_reflections (
     improvement_plan TEXT,               -- 下周改进计划
     created_at TIMESTAMP DEFAULT now()
 );
+
+-- 操作组（评价的最小单位，一组关联交易，见 C4 设计）
+CREATE TABLE agent.trade_groups (
+    id VARCHAR PRIMARY KEY,
+    position_id VARCHAR NOT NULL,
+    group_type VARCHAR NOT NULL,         -- build_position/reduce/close/day_trade_session/rebalance
+    trade_ids TEXT NOT NULL,             -- JSON array
+    thesis TEXT NOT NULL,
+    planned_duration VARCHAR,
+    status VARCHAR DEFAULT 'executing',  -- executing/completed/abandoned
+    started_at TIMESTAMP DEFAULT now(),
+    completed_at TIMESTAMP,
+    review_eligible_after DATE,          -- 完成后+观察期才可评价
+    review_result VARCHAR,               -- correct/wrong/neutral
+    review_note TEXT,
+    actual_pnl_pct DOUBLE,
+    created_at TIMESTAMP DEFAULT now()
+);
+
+-- 信息消化记录（信息免疫系统产出，见 1.2.5 设计）
+CREATE TABLE agent.info_digests (
+    id VARCHAR PRIMARY KEY,
+    decision_log_id VARCHAR,             -- 关联到哪次决策
+    source_summary TEXT NOT NULL,
+    source_tier INTEGER NOT NULL,        -- 0(AI偏见)/1(客观数据)/2(有立场分析)/3(噪音)
+    source_type VARCHAR NOT NULL,        -- exchange_data/research_report/news/social_media
+    cui_bono TEXT,                        -- 谁受益
+    intent_analysis TEXT,                 -- 信息意图
+    cross_validation TEXT,               -- 交叉验证
+    strategy_relevance TEXT,
+    impact_assessment VARCHAR NOT NULL,   -- none/noted/minor_adjust/reassess
+    conclusion TEXT NOT NULL,
+    consensus_alert BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT now()
+);
 ```
 
-#### 1.2.6 API 端点设计
+#### 1.2.8 API 端点设计
 
 ```
 # ── 虚拟持仓 ──
