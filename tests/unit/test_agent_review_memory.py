@@ -1,5 +1,6 @@
 """Agent Review/Memory 单元测试"""
 import sys
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "backend"))
@@ -7,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "backend"
 import asyncio
 import tempfile
 import duckdb
+import pytest
 from unittest.mock import patch
 
 
@@ -109,6 +111,22 @@ class TestMemoryManager:
         assert updated["confidence"] == 1.0
         assert updated["status"] == "active"
 
+    def test_list_rules_returns_json_safe_timestamps(self):
+        from engine.agent.memory import MemoryManager
+
+        mgr = MemoryManager(self.db)
+        run(
+            mgr.add_rules(
+                [{"rule_text": "等待回调再买", "category": "timing"}],
+                source_run_id="run-1",
+            )
+        )
+
+        rules = run(mgr.list_rules())
+
+        assert isinstance(rules[0]["created_at"], str)
+        json.dumps(rules)
+
     def test_update_verification_auto_retires_low_confidence_rule(self):
         from engine.agent.memory import MemoryManager
 
@@ -131,6 +149,25 @@ class TestMemoryManager:
         assert retired["confidence"] == 0.0
         assert retired["status"] == "retired"
         assert retired["retired_at"] is not None
+
+    def test_add_rules_is_atomic_when_rule_payload_invalid(self):
+        from engine.agent.memory import MemoryManager
+
+        mgr = MemoryManager(self.db)
+
+        with pytest.raises(KeyError, match="category"):
+            run(
+                mgr.add_rules(
+                    [
+                        {"rule_text": "第一条有效规则", "category": "timing"},
+                        {"rule_text": "第二条缺字段"},
+                    ],
+                    source_run_id="run-1",
+                )
+            )
+
+        rows = run(self.db.execute_read("SELECT * FROM agent.agent_memories"))
+        assert rows == []
 
 
 class TestReviewEngine:

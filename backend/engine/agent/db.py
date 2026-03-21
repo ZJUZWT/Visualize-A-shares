@@ -5,11 +5,35 @@ AgentDB — Main Agent 数据库单例
 from __future__ import annotations
 
 import asyncio
+import math
 
 import duckdb
 from loguru import logger
 
 from config import AGENT_DB_PATH
+
+
+def _normalize_read_value(value):
+    if isinstance(value, dict):
+        return {key: _normalize_read_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_read_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_normalize_read_value(item) for item in value]
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    if value.__class__.__name__ == "NaTType":
+        return None
+
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            return isoformat()
+        except ValueError:
+            return None
+    return value
 
 
 class AgentDB:
@@ -314,18 +338,12 @@ class AgentDB:
         return await asyncio.to_thread(self._sync_read, sql, params)
 
     def _sync_read(self, sql: str, params=None) -> list[dict]:
-        import math
         if params:
             result = self._conn.execute(sql, params).fetchdf()
         else:
             result = self._conn.execute(sql).fetchdf()
         records = result.to_dict("records")
-        # DuckDB fetchdf() 把 NULL DOUBLE 转成 NaN，这里统一转回 None
-        for row in records:
-            for k, v in row.items():
-                if isinstance(v, float) and math.isnan(v):
-                    row[k] = None
-        return records
+        return [_normalize_read_value(row) for row in records]
 
     async def execute_write(self, sql: str, params=None):
         async with self._write_lock:
