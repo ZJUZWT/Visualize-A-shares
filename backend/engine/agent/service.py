@@ -684,12 +684,32 @@ class AgentService:
 
     # ── Ledger Read Model ────────────────────────────
 
+    async def _list_ledger_plans(self, portfolio_id: str, status: str) -> list[dict]:
+        """读取与指定 portfolio 关联的 agent plans。
+
+        当前 trade_plans 没有 portfolio_id，因此 read model 通过 source_run_id
+        回连 brain_runs 做归属判定，避免串入其他组合的 agent 计划。
+        """
+        return await self.db.execute_read(
+            """
+            SELECT p.*
+            FROM agent.trade_plans p
+            JOIN agent.brain_runs r
+              ON p.source_run_id = r.id
+            WHERE p.status = ?
+              AND p.source_type = 'agent'
+              AND r.portfolio_id = ?
+            ORDER BY p.updated_at DESC
+            """,
+            [status, portfolio_id],
+        )
+
     async def get_ledger_overview(self, portfolio_id: str) -> dict:
         portfolio = await self.get_portfolio(portfolio_id)
         open_positions = await self.get_positions(portfolio_id, status="open")
         recent_trades = await self.get_trades(portfolio_id, limit=20)
-        pending_plans = await self.list_plans(status="pending")
-        executing_plans = await self.list_plans(status="executing")
+        pending_plans = await self._list_ledger_plans(portfolio_id, status="pending")
+        executing_plans = await self._list_ledger_plans(portfolio_id, status="executing")
 
         position_models = [_build_position_read_model(position) for position in open_positions]
         trade_models = [_build_trade_read_model(trade) for trade in recent_trades]

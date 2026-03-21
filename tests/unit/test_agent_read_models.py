@@ -100,11 +100,27 @@ class TestLedgerOverviewService:
         self.db.close()
 
     def test_get_ledger_overview_returns_stable_read_model(self):
-        pending_plan = run(self.svc.create_plan(_make_plan_input(), source_run_id="run-pending"))
+        other_portfolio = run(self.svc.create_portfolio("training", "training", 500000.0))
+        live_pending_run = run(self.svc.create_brain_run("live"))
+        live_executing_run = run(self.svc.create_brain_run("live"))
+        other_run = run(self.svc.create_brain_run(other_portfolio["id"]))
+
+        pending_plan = run(
+            self.svc.create_plan(
+                _make_plan_input(),
+                source_run_id=live_pending_run["id"],
+            )
+        )
         executing_plan = run(
             self.svc.create_plan(
                 _make_plan_input(stock_code="601318", stock_name="中国平安"),
-                source_run_id="run-executing",
+                source_run_id=live_executing_run["id"],
+            )
+        )
+        unrelated_plan = run(
+            self.svc.create_plan(
+                _make_plan_input(stock_code="000001", stock_name="平安银行"),
+                source_run_id=other_run["id"],
             )
         )
         run(self.svc.update_plan(executing_plan["id"], {"status": "executing"}))
@@ -195,6 +211,7 @@ class TestLedgerOverviewService:
         assert len(active_plans["executing"]) == 1
         assert active_plans["pending"][0]["id"] == pending_plan["id"]
         assert active_plans["executing"][0]["id"] == executing_plan["id"]
+        assert all(plan["id"] != unrelated_plan["id"] for plan in active_plans["pending"])
 
     def test_get_ledger_overview_raises_for_missing_portfolio(self):
         import pytest

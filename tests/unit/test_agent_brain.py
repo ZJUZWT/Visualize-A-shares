@@ -685,3 +685,24 @@ class TestAgentScheduler:
         assert "agent_review_daily" in job_ids
         assert "agent_review_weekly" in job_ids
         assert "scheduler_started" in job_ids
+
+        trigger_by_id = {
+            job["id"]: job["trigger"]
+            for job in created_jobs
+            if "trigger" in job
+        }
+        assert trigger_by_id["agent_brain_daily"] == {
+            "hour": 15,
+            "minute": 30,
+            "day_of_week": "mon-fri",
+        }
+        assert trigger_by_id["agent_review_daily"] == {
+            "hour": 15,
+            "minute": 45,
+            "day_of_week": "mon-fri",
+        }
+        assert trigger_by_id["agent_review_weekly"] == {
+            "hour": 16,
+            "minute": 0,
+            "day_of_week": "fri",
+        }
