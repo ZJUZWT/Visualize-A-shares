@@ -110,6 +110,57 @@ export interface LedgerOverview {
   recent_trades: LedgerTrade[];
 }
 
+export interface ReviewRecord {
+  id: string;
+  brain_run_id?: string | null;
+  trade_id?: string | null;
+  stock_code: string | null;
+  stock_name: string | null;
+  action: string | null;
+  decision_price?: number | null;
+  review_price?: number | null;
+  pnl_pct?: number | null;
+  holding_days?: number | null;
+  status: string | null;
+  review_date: string | null;
+  review_type: string | null;
+  created_at?: string | null;
+}
+
+export interface ReviewStats {
+  total_win_rate: number | null;
+  total_pnl_pct: number | null;
+  weekly_win_rate: number | null;
+  weekly_pnl_pct: number | null;
+  total_reviews: number | null;
+}
+
+export interface WeeklySummary {
+  id: string;
+  week_start: string | null;
+  week_end: string | null;
+  total_trades?: number | null;
+  win_count?: number | null;
+  loss_count?: number | null;
+  win_rate?: number | null;
+  total_pnl_pct?: number | null;
+  insights?: string | null;
+  created_at?: string | null;
+}
+
+export interface MemoryRule {
+  id: string;
+  rule_text: string;
+  category: string | null;
+  source_run_id?: string | null;
+  status: string | null;
+  confidence?: number | null;
+  verify_count?: number | null;
+  verify_win?: number | null;
+  created_at?: string | null;
+  retired_at?: string | null;
+}
+
 export interface WatchlistItem {
   id: string;
   stock_code: string;
@@ -118,3 +169,5 @@ export interface WatchlistItem {
   added_by: string;
   created_at: string;
 }
+
+export type AgentConsoleTab = "runs" | "reviews" | "memory";

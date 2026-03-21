@@ -6,10 +6,17 @@ import AgentRunFeed from "./components/AgentRunFeed";
 import AgentStatePanel from "./components/AgentStatePanel";
 import DecisionRunPanel from "./components/DecisionRunPanel";
 import ExecutionLedgerPanel from "./components/ExecutionLedgerPanel";
+import ReviewRecordsPanel from "./components/ReviewRecordsPanel";
+import MemoryRulesPanel from "./components/MemoryRulesPanel";
 import {
+  AgentConsoleTab,
   AgentState,
   BrainRun,
   LedgerOverview,
+  MemoryRule,
+  ReviewRecord,
+  ReviewStats,
+  WeeklySummary,
   WatchlistItem,
 } from "./types";
 
@@ -38,6 +45,18 @@ async function fetchJson<T>(url: string): Promise<T> {
     throw new Error(`${resp.status} ${resp.statusText}`);
   }
   return resp.json() as Promise<T>;
+}
+
+async function fetchFirstAvailable<T>(urls: string[]): Promise<T> {
+  let lastError: Error | null = null;
+  for (const url of urls) {
+    try {
+      return await fetchJson<T>(url);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+  throw lastError ?? new Error("No available endpoint");
 }
 
 function normalizeAgentState(portfolioId: string, raw: unknown): AgentState {
@@ -134,18 +153,144 @@ function buildLedgerFallback(portfolioId: string, portfolio: unknown, plans: unk
   };
 }
 
+function normalizeReviewRecords(raw: unknown): ReviewRecord[] {
+  const items = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.records)
+      ? raw.records
+      : isRecord(raw) && Array.isArray(raw.items)
+        ? raw.items
+        : isRecord(raw) && Array.isArray(raw.results)
+          ? raw.results
+          : [];
+
+  return items.map((item, index) => {
+    const data = isRecord(item) ? item : {};
+    return {
+      id: typeof data.id === "string" ? data.id : `review-${index}`,
+      brain_run_id: typeof data.brain_run_id === "string" ? data.brain_run_id : null,
+      trade_id: typeof data.trade_id === "string" ? data.trade_id : null,
+      stock_code: typeof data.stock_code === "string" ? data.stock_code : null,
+      stock_name: typeof data.stock_name === "string" ? data.stock_name : null,
+      action: typeof data.action === "string" ? data.action : null,
+      decision_price: toNumber(data.decision_price),
+      review_price: toNumber(data.review_price),
+      pnl_pct: toNumber(data.pnl_pct),
+      holding_days: toNumber(data.holding_days),
+      status: typeof data.status === "string" ? data.status : null,
+      review_date: typeof data.review_date === "string" ? data.review_date : null,
+      review_type: typeof data.review_type === "string" ? data.review_type : null,
+      created_at: typeof data.created_at === "string" ? data.created_at : null,
+    };
+  });
+}
+
+function normalizeReviewStats(raw: unknown, records: ReviewRecord[]): ReviewStats {
+  const data = isRecord(raw) ? raw : {};
+
+  const totalReviews = records.length;
+  const winCount = records.filter((record) => record.status === "win").length;
+  const weeklyRecords = records.filter((record) => record.review_type === "weekly");
+  const weeklyWinCount = weeklyRecords.filter((record) => record.status === "win").length;
+  const average = (values: number[]) => (values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length);
+
+  return {
+    total_win_rate:
+      toNumber(data.total_win_rate)
+      ?? toNumber(data.win_rate)
+      ?? (totalReviews > 0 ? (winCount / totalReviews) * 100 : null),
+    total_pnl_pct:
+      toNumber(data.total_pnl_pct)
+      ?? average(records.map((record) => record.pnl_pct).filter((value): value is number => value !== null && value !== undefined)),
+    weekly_win_rate:
+      toNumber(data.weekly_win_rate)
+      ?? (weeklyRecords.length > 0 ? (weeklyWinCount / weeklyRecords.length) * 100 : null),
+    weekly_pnl_pct:
+      toNumber(data.weekly_pnl_pct)
+      ?? average(weeklyRecords.map((record) => record.pnl_pct).filter((value): value is number => value !== null && value !== undefined)),
+    total_reviews: toNumber(data.total_reviews) ?? totalReviews,
+  };
+}
+
+function normalizeWeeklySummaries(raw: unknown): WeeklySummary[] {
+  const items = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.weekly_summaries)
+      ? raw.weekly_summaries
+      : isRecord(raw) && Array.isArray(raw.items)
+        ? raw.items
+        : isRecord(raw) && Array.isArray(raw.results)
+          ? raw.results
+          : [];
+
+  return items.map((item, index) => {
+    const data = isRecord(item) ? item : {};
+    return {
+      id: typeof data.id === "string" ? data.id : `weekly-${index}`,
+      week_start: typeof data.week_start === "string" ? data.week_start : null,
+      week_end: typeof data.week_end === "string" ? data.week_end : null,
+      total_trades: toNumber(data.total_trades),
+      win_count: toNumber(data.win_count),
+      loss_count: toNumber(data.loss_count),
+      win_rate: toNumber(data.win_rate),
+      total_pnl_pct: toNumber(data.total_pnl_pct),
+      insights: typeof data.insights === "string" ? data.insights : null,
+      created_at: typeof data.created_at === "string" ? data.created_at : null,
+    };
+  });
+}
+
+function normalizeMemoryRules(raw: unknown): MemoryRule[] {
+  const items = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.rules)
+      ? raw.rules
+      : isRecord(raw) && Array.isArray(raw.items)
+        ? raw.items
+        : isRecord(raw) && Array.isArray(raw.results)
+          ? raw.results
+          : [];
+
+  return items.map((item, index) => {
+    const data = isRecord(item) ? item : {};
+    return {
+      id: typeof data.id === "string" ? data.id : `rule-${index}`,
+      rule_text: typeof data.rule_text === "string" ? data.rule_text : "",
+      category: typeof data.category === "string" ? data.category : null,
+      source_run_id: typeof data.source_run_id === "string" ? data.source_run_id : null,
+      status: typeof data.status === "string" ? data.status : null,
+      confidence: toNumber(data.confidence),
+      verify_count: toNumber(data.verify_count),
+      verify_win: toNumber(data.verify_win),
+      created_at: typeof data.created_at === "string" ? data.created_at : null,
+      retired_at: typeof data.retired_at === "string" ? data.retired_at : null,
+    };
+  });
+}
+
 export default function AgentPage() {
   const [runs, setRuns] = useState<BrainRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<BrainRun | null>(null);
   const [agentState, setAgentState] = useState<AgentState | null>(null);
   const [ledgerOverview, setLedgerOverview] = useState<LedgerOverview | null>(null);
+  const [reviewRecords, setReviewRecords] = useState<ReviewRecord[]>([]);
+  const [reviewStats, setReviewStats] = useState<ReviewStats | null>(null);
+  const [weeklySummaries, setWeeklySummaries] = useState<WeeklySummary[]>([]);
+  const [memoryRules, setMemoryRules] = useState<MemoryRule[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [memoryLoading, setMemoryLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [portfolioId, setPortfolioId] = useState<string | null>(null);
   const [stateError, setStateError] = useState<string | null>(null);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
   const [ledgerSource, setLedgerSource] = useState<"overview" | "fallback" | "unavailable" | null>(null);
+  const [activeTab, setActiveTab] = useState<AgentConsoleTab>("runs");
+  const [reviewType, setReviewType] = useState<"all" | "daily" | "weekly">("all");
+  const [memoryStatus, setMemoryStatus] = useState<"all" | "active" | "retired">("all");
   const [newCode, setNewCode] = useState("");
   const [newName, setNewName] = useState("");
 
@@ -242,9 +387,74 @@ export default function AgentPage() {
     setLoading(false);
   }, [fetchAgentState, fetchLedgerOverview, fetchRuns, portfolioId]);
 
+  const fetchReviewData = useCallback(async () => {
+    if (!portfolioId) {
+      return;
+    }
+    setReviewLoading(true);
+    try {
+      const [recordsRaw, statsRaw, weeklyRaw] = await Promise.all([
+        fetchFirstAvailable<unknown>([
+          `${API_BASE}/api/v1/agent/review/records?portfolio_id=${portfolioId}`,
+          `${API_BASE}/api/v1/agent/reviews?days=30`,
+        ]),
+        fetchFirstAvailable<unknown>([
+          `${API_BASE}/api/v1/agent/review/stats?portfolio_id=${portfolioId}`,
+          `${API_BASE}/api/v1/agent/reviews/stats?days=30`,
+        ]),
+        fetchFirstAvailable<unknown>([
+          `${API_BASE}/api/v1/agent/review/weekly?portfolio_id=${portfolioId}&limit=10`,
+          `${API_BASE}/api/v1/agent/reviews/weekly?limit=10`,
+        ]),
+      ]);
+
+      const normalizedRecords = normalizeReviewRecords(recordsRaw);
+      setReviewRecords(normalizedRecords);
+      setReviewStats(normalizeReviewStats(statsRaw, normalizedRecords));
+      setWeeklySummaries(normalizeWeeklySummaries(weeklyRaw));
+      setReviewError(null);
+    } catch {
+      setReviewRecords([]);
+      setReviewStats(null);
+      setWeeklySummaries([]);
+      setReviewError("复盘读接口暂不可用，review records / stats / weekly summaries 尚未就绪。");
+    } finally {
+      setReviewLoading(false);
+    }
+  }, [portfolioId]);
+
+  const fetchMemoryData = useCallback(async () => {
+    setMemoryLoading(true);
+    try {
+      const raw = await fetchFirstAvailable<unknown>([
+        `${API_BASE}/api/v1/agent/review/memories`,
+        `${API_BASE}/api/v1/agent/memories?status=${memoryStatus}`,
+      ]);
+      setMemoryRules(normalizeMemoryRules(raw));
+      setMemoryError(null);
+    } catch {
+      setMemoryRules([]);
+      setMemoryError("经验规则读接口暂不可用，memory rules 端点尚未就绪。");
+    } finally {
+      setMemoryLoading(false);
+    }
+  }, [memoryStatus]);
+
   useEffect(() => {
     refreshConsole();
   }, [refreshConsole]);
+
+  useEffect(() => {
+    if (activeTab === "reviews" && portfolioId) {
+      fetchReviewData();
+    }
+  }, [activeTab, fetchReviewData, portfolioId]);
+
+  useEffect(() => {
+    if (activeTab === "memory") {
+      fetchMemoryData();
+    }
+  }, [activeTab, fetchMemoryData]);
 
   const fetchWatchlist = useCallback(async () => {
     const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist`);
@@ -311,6 +521,18 @@ export default function AgentPage() {
     failed: "bg-red-500/20 text-red-400",
   };
   const activeRun = selectedRun || runs[0] || null;
+  const filteredReviewRecords = reviewRecords.filter((record) => {
+    if (reviewType === "all") {
+      return true;
+    }
+    return record.review_type === reviewType;
+  });
+  const filteredMemoryRules = memoryRules.filter((rule) => {
+    if (memoryStatus === "all") {
+      return true;
+    }
+    return rule.status === memoryStatus;
+  });
 
   return (
     <div className="flex h-screen bg-[#0a0a0f] text-white">
@@ -394,26 +616,79 @@ export default function AgentPage() {
               <div className="grid h-full grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
                 <div className="overflow-y-auto border-r border-white/10 p-6">
                   <div className="space-y-6">
-                    <AgentStatePanel
-                      state={agentState}
-                      run={activeRun}
-                      loading={loading}
-                      error={stateError}
-                    />
-                    <DecisionRunPanel
-                      run={activeRun}
-                      loading={loading}
-                      statusColor={statusColor}
-                    />
+                    <div className="inline-flex rounded-xl border border-white/10 bg-white/5 p-1 text-sm">
+                      {([
+                        { key: "runs", label: "运行记录" },
+                        { key: "reviews", label: "复盘记录" },
+                        { key: "memory", label: "经验规则" },
+                      ] as const).map((tab) => (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          onClick={() => setActiveTab(tab.key)}
+                          className={`rounded-lg px-4 py-2 transition-colors ${
+                            activeTab === tab.key
+                              ? "bg-white/15 text-white"
+                              : "text-gray-400 hover:bg-white/10 hover:text-white"
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {activeTab === "runs" ? (
+                      <>
+                        <AgentStatePanel
+                          state={agentState}
+                          run={activeRun}
+                          loading={loading}
+                          error={stateError}
+                        />
+                        <DecisionRunPanel
+                          run={activeRun}
+                          loading={loading}
+                          statusColor={statusColor}
+                        />
+                      </>
+                    ) : activeTab === "reviews" ? (
+                      <ReviewRecordsPanel
+                        loading={reviewLoading}
+                        error={reviewError}
+                        records={filteredReviewRecords}
+                        stats={reviewStats}
+                        weeklySummaries={weeklySummaries}
+                        reviewType={reviewType}
+                        onReviewTypeChange={setReviewType}
+                      />
+                    ) : (
+                      <MemoryRulesPanel
+                        loading={memoryLoading}
+                        error={memoryError}
+                        rules={filteredMemoryRules}
+                        statusFilter={memoryStatus}
+                        onStatusFilterChange={setMemoryStatus}
+                      />
+                    )}
                   </div>
                 </div>
                 <div className="overflow-y-auto p-6">
-                  <ExecutionLedgerPanel
-                    overview={ledgerOverview}
-                    loading={loading}
-                    error={ledgerError}
-                    source={ledgerSource}
-                  />
+                  {activeTab === "runs" ? (
+                    <ExecutionLedgerPanel
+                      overview={ledgerOverview}
+                      loading={loading}
+                      error={ledgerError}
+                      source={ledgerSource}
+                    />
+                  ) : activeTab === "reviews" ? (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
+                      右栏保留给执行台账。当前 tab 聚焦复盘摘要、记录列表和 weekly summaries。
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
+                      经验规则 tab 为只读规则库视图，不展示执行台账。
+                    </div>
+                  )}
                 </div>
               </div>
             )}
