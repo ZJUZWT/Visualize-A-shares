@@ -60,6 +60,66 @@ def _normalize_brain_run(row: dict) -> dict:
     return normalized
 
 
+def _build_position_read_model(position: dict) -> dict:
+    market_value = round(position["entry_price"] * position["current_qty"], 2)
+    unrealized_pnl = round(market_value - position["cost_basis"], 2)
+    unrealized_pnl_pct = round(
+        (unrealized_pnl / position["cost_basis"] * 100) if position["cost_basis"] else 0.0,
+        2,
+    )
+    return {
+        "id": position["id"],
+        "stock_code": position["stock_code"],
+        "stock_name": position["stock_name"],
+        "holding_type": position["holding_type"],
+        "current_qty": position["current_qty"],
+        "entry_price": position["entry_price"],
+        "cost_basis": position["cost_basis"],
+        "entry_date": position["entry_date"],
+        "status": position["status"],
+        "market_value": market_value,
+        "unrealized_pnl": unrealized_pnl,
+        "unrealized_pnl_pct": unrealized_pnl_pct,
+    }
+
+
+def _build_trade_read_model(trade: dict) -> dict:
+    return {
+        "id": trade["id"],
+        "position_id": trade["position_id"],
+        "action": trade["action"],
+        "stock_code": trade["stock_code"],
+        "stock_name": trade["stock_name"],
+        "price": trade["price"],
+        "quantity": trade["quantity"],
+        "amount": trade["amount"],
+        "reason": trade["reason"],
+        "thesis": trade["thesis"],
+        "triggered_by": trade["triggered_by"],
+        "created_at": trade["created_at"],
+        "source_run_id": trade.get("source_run_id"),
+        "source_plan_id": trade.get("source_plan_id"),
+        "source_strategy_id": trade.get("source_strategy_id"),
+        "source_strategy_version": trade.get("source_strategy_version"),
+    }
+
+
+def _build_plan_read_model(plan: dict) -> dict:
+    return {
+        "id": plan["id"],
+        "stock_code": plan["stock_code"],
+        "stock_name": plan["stock_name"],
+        "direction": plan["direction"],
+        "status": plan["status"],
+        "entry_price": plan["entry_price"],
+        "current_price": plan["current_price"],
+        "position_pct": plan["position_pct"],
+        "created_at": plan["created_at"],
+        "updated_at": plan["updated_at"],
+        "source_run_id": plan.get("source_run_id"),
+    }
+
+
 class AgentService:
     """Main Agent 业务逻辑"""
 
@@ -621,6 +681,43 @@ class AgentService:
         source_run_id: str | None = None,
     ) -> dict:
         return await upsert_state(self.db, portfolio_id, updates, source_run_id)
+
+    # ── Ledger Read Model ────────────────────────────
+
+    async def get_ledger_overview(self, portfolio_id: str) -> dict:
+        portfolio = await self.get_portfolio(portfolio_id)
+        open_positions = await self.get_positions(portfolio_id, status="open")
+        recent_trades = await self.get_trades(portfolio_id, limit=20)
+        pending_plans = await self.list_plans(status="pending")
+        executing_plans = await self.list_plans(status="executing")
+
+        position_models = [_build_position_read_model(position) for position in open_positions]
+        trade_models = [_build_trade_read_model(trade) for trade in recent_trades]
+        pending_models = [_build_plan_read_model(plan) for plan in pending_plans]
+        executing_models = [_build_plan_read_model(plan) for plan in executing_plans]
+        position_value = round(sum(item["market_value"] for item in position_models), 2)
+
+        return {
+            "portfolio_id": portfolio_id,
+            "asset_summary": {
+                "initial_capital": portfolio["config"]["initial_capital"],
+                "cash_balance": portfolio["cash_balance"],
+                "position_value": position_value,
+                "total_asset": portfolio["total_asset"],
+                "total_pnl": portfolio["total_pnl"],
+                "total_pnl_pct": portfolio["total_pnl_pct"],
+                "open_position_count": len(position_models),
+                "recent_trade_count": len(trade_models),
+                "pending_plan_count": len(pending_models),
+                "executing_plan_count": len(executing_models),
+            },
+            "open_positions": position_models,
+            "recent_trades": trade_models,
+            "active_plans": {
+                "pending": pending_models,
+                "executing": executing_models,
+            },
+        }
 
     # ── BrainRuns CRUD ─────────────────────────────────
 
