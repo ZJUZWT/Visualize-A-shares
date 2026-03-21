@@ -175,6 +175,18 @@ class AgentDB:
             )
         """)
         self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.agent_state (
+                portfolio_id VARCHAR PRIMARY KEY,
+                market_view JSON,
+                position_level VARCHAR,
+                sector_preferences JSON,
+                risk_alerts JSON,
+                source_run_id VARCHAR,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now()
+            )
+        """)
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS agent.brain_runs (
                 id VARCHAR PRIMARY KEY,
                 portfolio_id VARCHAR NOT NULL,
@@ -190,6 +202,34 @@ class AgentDB:
                 started_at TIMESTAMP DEFAULT now(),
                 completed_at TIMESTAMP
             )
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.brain_runs
+            ADD COLUMN IF NOT EXISTS thinking_process JSON
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.trade_plans
+            ADD COLUMN IF NOT EXISTS source_run_id VARCHAR
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.position_strategies
+            ADD COLUMN IF NOT EXISTS source_run_id VARCHAR
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.trades
+            ADD COLUMN IF NOT EXISTS source_run_id VARCHAR
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.trades
+            ADD COLUMN IF NOT EXISTS source_plan_id VARCHAR
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.trades
+            ADD COLUMN IF NOT EXISTS source_strategy_id VARCHAR
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.trades
+            ADD COLUMN IF NOT EXISTS source_strategy_version INTEGER
         """)
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS agent.brain_config (
