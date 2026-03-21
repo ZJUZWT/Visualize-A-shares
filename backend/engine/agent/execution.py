@@ -43,6 +43,7 @@ class ExecutionCoordinator:
         action = decision.get("action", "")
         position_id = None
         holding_type = decision.get("holding_type", "mid_term")
+        existing_strategy = None
 
         if action in ("sell", "reduce", "add"):
             positions = await self.service.get_positions(self.portfolio_id, "open")
@@ -52,7 +53,12 @@ class ExecutionCoordinator:
                     holding_type = position.get("holding_type", holding_type)
                     break
 
+        if position_id:
+            strategies = await self.service.get_strategy(self.portfolio_id, position_id)
+            existing_strategy = strategies[0] if strategies else None
+
         if action in ("sell", "reduce") and not position_id:
+            await self.service.update_plan(plan_id, {"status": "ignored"})
             logger.warning(f"🧾 跳过 {action} {decision['stock_code']}：未找到持仓")
             return {
                 "plan_id": plan_id,
@@ -90,7 +96,15 @@ class ExecutionCoordinator:
         position = trade_result.get("position")
         strategy_id = None
 
-        if position and self._should_write_strategy(decision):
+        if action in ("sell", "reduce"):
+            if trade and existing_strategy:
+                await self.service.update_trade_sources(
+                    trade["id"],
+                    source_strategy_id=existing_strategy["id"],
+                    source_strategy_version=existing_strategy["version"],
+                )
+                strategy_id = existing_strategy["id"]
+        elif position and self._should_write_strategy(decision):
             strategy = await self.service.create_strategy(
                 self.portfolio_id,
                 position["id"],
