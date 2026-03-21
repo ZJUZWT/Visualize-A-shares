@@ -231,6 +231,42 @@ class TestServiceBrainRuns:
         assert result["max_candidates"] == 50
 
 
+class TestServiceAgentState:
+    def setup_method(self):
+        self._tmp = tempfile.mkdtemp()
+        self.db, self.svc = _make_service(self._tmp)
+        run(self.svc.create_portfolio("portfolio_1", "live", 1000000))
+
+    def teardown_method(self):
+        self.db.close()
+
+    def test_get_agent_state_creates_default_snapshot(self):
+        result = run(self.svc.get_agent_state("portfolio_1"))
+        assert result["portfolio_id"] == "portfolio_1"
+        assert result["market_view"] is None
+        assert result["position_level"] is None
+        assert result["sector_preferences"] is None
+        assert result["risk_alerts"] is None
+        assert result["source_run_id"] is None
+
+    def test_update_agent_state_fields(self):
+        result = run(self.svc.update_agent_state(
+            "portfolio_1",
+            {
+                "market_view": {"bias": "bullish"},
+                "position_level": "medium",
+                "sector_preferences": ["白酒", "银行"],
+                "risk_alerts": ["估值偏高"],
+            },
+            source_run_id="run-1",
+        ))
+        assert result["market_view"] == {"bias": "bullish"}
+        assert result["position_level"] == "medium"
+        assert result["sector_preferences"] == ["白酒", "银行"]
+        assert result["risk_alerts"] == ["估值偏高"]
+        assert result["source_run_id"] == "run-1"
+
+
 # ═══════════════════════════════════════════════════════
 # Task 3: FastAPI Routes
 # ═══════════════════════════════════════════════════════
@@ -312,6 +348,36 @@ class TestBrainRoutes:
         resp = self.client.get("/api/v1/agent/brain/runs?portfolio_id=p1")
         assert resp.status_code == 200
         assert len(resp.json()) == 0
+
+    def test_get_agent_state(self):
+        self.client.post("/api/v1/agent/portfolio", json={
+            "id": "p1", "mode": "live", "initial_capital": 1000000
+        })
+        resp = self.client.get("/api/v1/agent/state?portfolio_id=p1")
+        assert resp.status_code == 200
+        assert resp.json()["portfolio_id"] == "p1"
+        assert resp.json()["market_view"] is None
+
+    def test_patch_agent_state(self):
+        self.client.post("/api/v1/agent/portfolio", json={
+            "id": "p1", "mode": "live", "initial_capital": 1000000
+        })
+        resp = self.client.patch(
+            "/api/v1/agent/state?portfolio_id=p1",
+            json={
+                "market_view": {"bias": "neutral"},
+                "position_level": "low",
+                "sector_preferences": ["家电"],
+                "risk_alerts": ["波动放大"],
+                "source_run_id": "run-2",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["market_view"] == {"bias": "neutral"}
+        assert resp.json()["position_level"] == "low"
+        assert resp.json()["sector_preferences"] == ["家电"]
+        assert resp.json()["risk_alerts"] == ["波动放大"]
+        assert resp.json()["source_run_id"] == "run-2"
 
 
 # ═══════════════════════════════════════════════════════

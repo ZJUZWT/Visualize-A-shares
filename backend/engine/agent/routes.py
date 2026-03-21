@@ -194,6 +194,25 @@ def create_agent_router() -> APIRouter:
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
+    # ── Agent State ──
+
+    @router.get("/state")
+    async def get_agent_state(portfolio_id: str):
+        svc = _get_service()
+        try:
+            return await svc.get_agent_state(portfolio_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.patch("/state")
+    async def update_agent_state(portfolio_id: str, req: dict):
+        svc = _get_service()
+        source_run_id = req.pop("source_run_id", None)
+        try:
+            return await svc.update_agent_state(portfolio_id, req, source_run_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
     # ── Brain ──
 
     @router.get("/brain/config")
