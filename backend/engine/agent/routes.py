@@ -223,6 +223,43 @@ def create_agent_router() -> APIRouter:
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
+    # ── Review / Memory Read Models ──
+
+    @router.get("/reviews")
+    async def get_reviews(
+        portfolio_id: str,
+        days: int = Query(30, ge=1, le=3650),
+        type: str | None = Query(None, pattern="^(daily|weekly)$"),
+    ):
+        svc = _get_service()
+        try:
+            return await svc.list_review_records(portfolio_id, days=days, review_type=type)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.get("/reviews/stats")
+    async def get_review_stats(
+        portfolio_id: str,
+        days: int = Query(30, ge=1, le=3650),
+    ):
+        svc = _get_service()
+        try:
+            return await svc.get_review_stats(portfolio_id, days=days)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.get("/reviews/weekly")
+    async def get_weekly_summaries(limit: int = Query(10, ge=1, le=100)):
+        svc = _get_service()
+        return await svc.list_weekly_summaries(limit=limit)
+
+    @router.get("/memories")
+    async def get_memories(
+        status: str = Query("active", pattern="^(active|retired|all)$"),
+    ):
+        svc = _get_service()
+        return await svc.list_memories(status=status)
+
     # ── Brain ──
 
     @router.get("/brain/config")
