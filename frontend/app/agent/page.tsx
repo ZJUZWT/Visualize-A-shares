@@ -2,31 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import NavSidebar from "@/components/ui/NavSidebar";
-
-interface BrainRun {
-  id: string;
-  portfolio_id: string;
-  run_type: string;
-  status: string;
-  candidates: any[] | null;
-  analysis_results: any[] | null;
-  decisions: any[] | null;
-  plan_ids: string[] | null;
-  trade_ids: string[] | null;
-  error_message: string | null;
-  llm_tokens_used: number;
-  started_at: string;
-  completed_at: string | null;
-}
-
-interface WatchlistItem {
-  id: string;
-  stock_code: string;
-  stock_name: string;
-  reason: string | null;
-  added_by: string;
-  created_at: string;
-}
+import AgentRunFeed from "./components/AgentRunFeed";
+import AgentStatePanel from "./components/AgentStatePanel";
+import DecisionRunPanel from "./components/DecisionRunPanel";
+import ExecutionLedgerPanel from "./components/ExecutionLedgerPanel";
+import { BrainRun, WatchlistItem } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -158,37 +138,13 @@ export default function AgentPage() {
         <div className="flex-1 flex overflow-hidden">
           {/* 左侧：运行记录 + 关注列表 */}
           <div className="w-72 border-r border-white/10 flex flex-col">
-            <div className="flex-1 overflow-y-auto">
-              <div className="p-3 text-xs text-gray-400 font-medium">运行记录</div>
-              {loading ? (
-                <div className="text-gray-500 text-center py-4 text-sm">加载中...</div>
-              ) : runs.length === 0 ? (
-                <div className="text-gray-500 text-center py-4 text-sm">暂无运行记录</div>
-              ) : (
-                runs.map((run) => (
-                  <button
-                    key={run.id}
-                    onClick={() => setSelectedRun(run)}
-                    className={`w-full text-left px-3 py-2 text-sm border-b border-white/5 transition-colors ${
-                      selectedRun?.id === run.id ? "bg-white/10" : "hover:bg-white/5"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-300">
-                        {new Date(run.started_at).toLocaleDateString()}
-                      </span>
-                      <span className={`px-1.5 py-0.5 rounded text-xs ${statusColor[run.status] || ""}`}>
-                        {run.status}
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {run.run_type === "manual" ? "手动" : "定时"}
-                      {run.decisions && ` · ${run.decisions.length} 个决策`}
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
+            <AgentRunFeed
+              loading={loading}
+              runs={runs}
+              selectedRunId={selectedRun?.id || null}
+              onSelectRun={setSelectedRun}
+              statusColor={statusColor}
+            />
 
             {/* 关注列表 */}
             <div className="border-t border-white/10">
@@ -232,112 +188,9 @@ export default function AgentPage() {
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="flex items-center gap-4 text-sm text-gray-400">
-                  <span>开始: {new Date(selectedRun.started_at).toLocaleString()}</span>
-                  {selectedRun.completed_at && (
-                    <span>完成: {new Date(selectedRun.completed_at).toLocaleString()}</span>
-                  )}
-                  {selectedRun.llm_tokens_used > 0 && (
-                    <span>Token: {selectedRun.llm_tokens_used}</span>
-                  )}
-                </div>
-
-                {selectedRun.error_message && (
-                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-400">
-                    {selectedRun.error_message}
-                  </div>
-                )}
-
-                {selectedRun.candidates && selectedRun.candidates.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-300 mb-2">
-                      候选标的 ({selectedRun.candidates.length})
-                    </h3>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedRun.candidates.map((c: any, i: number) => (
-                        <span key={i} className="px-2 py-1 rounded text-xs bg-white/5 border border-white/10">
-                          <span className="font-mono text-white">{c.stock_code}</span>
-                          <span className="text-gray-400 ml-1">{c.stock_name}</span>
-                          <span className={`ml-1 ${
-                            c.source === "position" ? "text-blue-400" :
-                            c.source === "watchlist" ? "text-yellow-400" : "text-green-400"
-                          }`}>
-                            ({c.source})
-                          </span>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {selectedRun.decisions && selectedRun.decisions.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-300 mb-2">
-                      决策 ({selectedRun.decisions.length})
-                    </h3>
-                    <div className="space-y-2">
-                      {selectedRun.decisions.map((d: any, i: number) => {
-                        const isBuy = d.action === "buy" || d.action === "add";
-                        return (
-                          <div key={i} className={`rounded-lg border p-3 ${
-                            isBuy ? "bg-green-500/5 border-green-500/20" : "bg-red-500/5 border-red-500/20"
-                          }`}>
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-mono font-bold text-white">{d.stock_code}</span>
-                              <span className="text-gray-300">{d.stock_name}</span>
-                              <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
-                                isBuy ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-                              }`}>
-                                {d.action}
-                              </span>
-                              {d.confidence && (
-                                <span className="text-xs text-gray-500">信心: {(d.confidence * 100).toFixed(0)}%</span>
-                              )}
-                            </div>
-                            <div className="text-sm text-gray-300 grid grid-cols-2 md:grid-cols-4 gap-2">
-                              {d.price && <div>价格: <span className="text-white">{d.price}</span></div>}
-                              {d.quantity && <div>数量: <span className="text-white">{d.quantity}</span></div>}
-                              {d.take_profit && <div>止盈: <span className="text-green-400">{d.take_profit}</span></div>}
-                              {d.stop_loss && <div>止损: <span className="text-red-400">{d.stop_loss}</span></div>}
-                            </div>
-                            {d.reasoning && (
-                              <div className="text-xs text-gray-400 mt-1">{d.reasoning}</div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {selectedRun.plan_ids && selectedRun.plan_ids.length > 0 && (
-                  <div className="text-sm text-gray-400">
-                    生成 {selectedRun.plan_ids.length} 个交易计划，
-                    执行 {selectedRun.trade_ids?.length || 0} 笔交易
-                  </div>
-                )}
-
-                {selectedRun.analysis_results && selectedRun.analysis_results.length > 0 && (
-                  <details className="group">
-                    <summary className="text-sm font-medium text-gray-300 cursor-pointer hover:text-white">
-                      分析详情 ({selectedRun.analysis_results.length} 只) ▸
-                    </summary>
-                    <div className="mt-2 space-y-2 max-h-96 overflow-y-auto">
-                      {selectedRun.analysis_results.map((a: any, i: number) => (
-                        <div key={i} className="bg-white/5 rounded p-2 text-xs">
-                          <div className="font-mono text-white mb-1">{a.stock_code} {a.stock_name}</div>
-                          {a.error ? (
-                            <div className="text-red-400">{a.error}</div>
-                          ) : (
-                            <pre className="text-gray-400 whitespace-pre-wrap overflow-hidden max-h-32">
-                              {typeof a.daily === "string" ? a.daily.slice(0, 300) : JSON.stringify(a.daily, null, 1)?.slice(0, 300)}
-                            </pre>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                )}
+                <AgentStatePanel run={selectedRun} />
+                <DecisionRunPanel run={selectedRun} />
+                <ExecutionLedgerPanel run={selectedRun} />
               </div>
             )}
           </div>
