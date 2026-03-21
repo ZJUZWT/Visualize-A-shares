@@ -260,6 +260,24 @@ def create_agent_router() -> APIRouter:
         svc = _get_service()
         return await svc.list_memories(status=status)
 
+    @router.get("/strategy/history")
+    async def get_strategy_history(
+        portfolio_id: str,
+        limit: int = Query(20, ge=1, le=200),
+    ):
+        svc = _get_service()
+        try:
+            return await svc.list_strategy_history(portfolio_id, limit=limit)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.get("/reflections")
+    async def get_reflections(
+        limit: int = Query(20, ge=1, le=200),
+    ):
+        svc = _get_service()
+        return await svc.list_reflections(limit=limit)
+
     # ── Brain ──
 
     @router.get("/brain/config")

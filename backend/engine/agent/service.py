@@ -129,6 +129,68 @@ def _build_plan_read_model(plan: dict) -> dict:
     }
 
 
+def _build_strategy_history_item(run: dict) -> dict:
+    state_after = run.get("state_after") or {}
+    execution_summary = run.get("execution_summary") or {}
+    return {
+        "run_id": run["id"],
+        "occurred_at": run.get("completed_at") or run.get("started_at"),
+        "market_view": state_after.get("market_view"),
+        "position_level": state_after.get("position_level"),
+        "sector_preferences": state_after.get("sector_preferences") or [],
+        "risk_alerts": state_after.get("risk_alerts") or [],
+        "candidate_count": execution_summary.get("candidate_count", 0),
+        "analysis_count": execution_summary.get("analysis_count", 0),
+        "decision_count": execution_summary.get("decision_count", 0),
+        "plan_count": execution_summary.get("plan_count", 0),
+        "trade_count": execution_summary.get("trade_count", 0),
+    }
+
+
+def _build_daily_reflection_item(row: dict) -> dict:
+    return {
+        "id": row["id"],
+        "kind": "daily",
+        "date": row["review_date"],
+        "summary": row.get("summary") or "",
+        "created_at": row.get("created_at"),
+        "metrics": {
+            "total_trades": row.get("total_trades", 0),
+            "win_count": row.get("win_count", 0),
+            "loss_count": row.get("loss_count", 0),
+            "holding_count": row.get("holding_count", 0),
+            "win_rate": row.get("win_rate", 0.0),
+            "avg_pnl_pct": row.get("avg_pnl_pct", 0.0),
+            "total_pnl_pct": row.get("total_pnl_pct", 0.0),
+        },
+        "details": {
+            "portfolio_id": row.get("portfolio_id"),
+            "notes": row.get("notes"),
+        },
+    }
+
+
+def _build_weekly_reflection_item(row: dict) -> dict:
+    return {
+        "id": row["id"],
+        "kind": "weekly",
+        "date": row["week_end"],
+        "summary": row.get("summary") or "",
+        "created_at": row.get("created_at"),
+        "metrics": {
+            "total_trades": row.get("total_trades", 0),
+            "win_count": row.get("win_count", 0),
+            "loss_count": row.get("loss_count", 0),
+            "win_rate": row.get("win_rate", 0.0),
+            "total_pnl_pct": row.get("total_pnl_pct", 0.0),
+        },
+        "details": {
+            "week_start": row.get("week_start"),
+            "week_end": row.get("week_end"),
+        },
+    }
+
+
 class AgentService:
     """Main Agent 业务逻辑"""
 
@@ -836,6 +898,55 @@ class AgentService:
                 [status],
             )
         return [_normalize_record(row) for row in rows]
+
+    async def list_strategy_history(self, portfolio_id: str, limit: int = 20) -> list[dict]:
+        await self.get_portfolio(portfolio_id)
+        rows = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.brain_runs
+            WHERE portfolio_id = ? AND status = 'completed'
+            ORDER BY completed_at DESC, started_at DESC
+            LIMIT ?
+            """,
+            [portfolio_id, limit],
+        )
+        normalized_runs = [_normalize_brain_run(row) for row in rows]
+        return [_build_strategy_history_item(row) for row in normalized_runs]
+
+    async def list_reflections(self, limit: int = 20) -> list[dict]:
+        daily_rows = await self._safe_reflection_query(
+            """
+            SELECT *
+            FROM agent.daily_reviews
+            ORDER BY review_date DESC, created_at DESC
+            LIMIT ?
+            """,
+            [limit],
+        )
+        weekly_rows = await self._safe_reflection_query(
+            """
+            SELECT *
+            FROM agent.weekly_reflections
+            ORDER BY week_end DESC, created_at DESC
+            LIMIT ?
+            """,
+            [limit],
+        )
+        items = (
+            [_build_daily_reflection_item(_normalize_record(row)) for row in daily_rows]
+            + [_build_weekly_reflection_item(_normalize_record(row)) for row in weekly_rows]
+        )
+        items.sort(key=lambda item: (item["date"], item.get("created_at") or ""), reverse=True)
+        return items[:limit]
+
+    async def _safe_reflection_query(self, sql: str, params: list) -> list[dict]:
+        try:
+            return await self.db.execute_read(sql, params)
+        except Exception as exc:
+            if "does not exist" in str(exc):
+                return []
+            raise
 
     # ── BrainRuns CRUD ─────────────────────────────────
 
