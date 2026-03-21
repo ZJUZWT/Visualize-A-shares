@@ -45,20 +45,26 @@ class MemoryManager:
         )
 
     async def add_rules(self, rules: list[dict], source_run_id: str) -> list[str]:
-        created_ids: list[str] = []
+        prepared_rules: list[tuple[str, str, str]] = []
         for rule in rules:
             rule_id = str(uuid.uuid4())
-            created_ids.append(rule_id)
-            await self.db.execute_write(
+            prepared_rules.append((rule_id, rule["rule_text"], rule["category"]))
+
+        queries: list[tuple[str, list]] = []
+        for rule_id, rule_text, category in prepared_rules:
+            queries.append((
                 """
                 INSERT INTO agent.agent_memories (
                     id, rule_text, category, source_run_id, status, confidence, verify_count, verify_win
                 )
                 VALUES (?, ?, ?, ?, 'active', 0.5, 0, 0)
                 """,
-                [rule_id, rule["rule_text"], rule["category"], source_run_id],
-            )
-        return created_ids
+                [rule_id, rule_text, category, source_run_id],
+            ))
+
+        if queries:
+            await self.db.execute_transaction(queries)
+        return [rule_id for rule_id, _, _ in prepared_rules]
 
     async def update_verification(self, rule_id: str, validated: bool):
         rows = await self.db.execute_read(
