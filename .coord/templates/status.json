@@ -1,0 +1,8 @@
+{
+  "worker": "worker-a",
+  "state": "pending",
+  "phase": "not_started",
+  "summary": "",
+  "blocker": "",
+  "updated_at": ""
+}
