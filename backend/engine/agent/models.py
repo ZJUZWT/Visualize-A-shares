@@ -259,6 +259,34 @@ class AgentMemory(BaseModel):
     retired_at: str | None = None
 
 
+# ── Reflection Journals ──────────────────────────────
+
+class DailyReview(BaseModel):
+    id: str
+    review_date: str
+    total_reviews: int = 0
+    win_count: int = 0
+    loss_count: int = 0
+    holding_count: int = 0
+    total_pnl_pct: float = 0.0
+    summary: str | None = None
+    created_at: str
+
+
+class WeeklyReflection(BaseModel):
+    id: str
+    week_start: str
+    week_end: str
+    total_reviews: int = 0
+    win_count: int = 0
+    loss_count: int = 0
+    holding_count: int = 0
+    win_rate: float = 0.0
+    total_pnl_pct: float = 0.0
+    summary: str | None = None
+    created_at: str
+
+
 # ── Agent Brain ───────────────────────────────────────
 
 class BrainRun(BaseModel):

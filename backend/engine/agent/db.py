@@ -318,6 +318,36 @@ class AgentDB:
             )
         """)
         self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.daily_reviews (
+                id VARCHAR PRIMARY KEY,
+                review_date DATE NOT NULL,
+                total_reviews INTEGER DEFAULT 0,
+                win_count INTEGER DEFAULT 0,
+                loss_count INTEGER DEFAULT 0,
+                holding_count INTEGER DEFAULT 0,
+                total_pnl_pct DOUBLE DEFAULT 0.0,
+                summary TEXT,
+                created_at TIMESTAMP DEFAULT now(),
+                UNIQUE (review_date)
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.weekly_reflections (
+                id VARCHAR PRIMARY KEY,
+                week_start DATE NOT NULL,
+                week_end DATE NOT NULL,
+                total_reviews INTEGER DEFAULT 0,
+                win_count INTEGER DEFAULT 0,
+                loss_count INTEGER DEFAULT 0,
+                holding_count INTEGER DEFAULT 0,
+                win_rate DOUBLE DEFAULT 0.0,
+                total_pnl_pct DOUBLE DEFAULT 0.0,
+                summary TEXT,
+                created_at TIMESTAMP DEFAULT now(),
+                UNIQUE (week_start)
+            )
+        """)
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS agent.brain_config (
                 id VARCHAR PRIMARY KEY DEFAULT 'default',
                 enable_debate BOOLEAN DEFAULT false,

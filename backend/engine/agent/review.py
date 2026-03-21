@@ -86,6 +86,31 @@ class ReviewEngine:
                     "pnl_pct": pnl_pct,
                 }
             )
+            await self._backfill_trade_review(
+                trade_id=trade_id,
+                review_status=review_status,
+                review_day=review_day,
+                pnl_pct=pnl_pct,
+            )
+
+        existing_records = await self.db.execute_read(
+            """
+            SELECT trade_id, status, pnl_pct
+            FROM agent.review_records
+            WHERE review_date = ? AND review_type = 'daily'
+            ORDER BY created_at, trade_id
+            """,
+            [review_day.isoformat()],
+        )
+        for record in existing_records:
+            await self._backfill_trade_review(
+                trade_id=record["trade_id"],
+                review_status=record["status"],
+                review_day=review_day,
+                pnl_pct=float(record.get("pnl_pct") or 0.0),
+            )
+
+        daily_review_id = await self._ensure_daily_review_journal(review_day)
 
         if records_created > 0:
             active_rules = await self.memory_mgr.get_active_rules()
@@ -100,6 +125,7 @@ class ReviewEngine:
             "review_type": "daily",
             "review_date": review_day.isoformat(),
             "records_created": records_created,
+            "daily_review_id": daily_review_id,
         }
 
     async def weekly_review(self, as_of_date: str | None = None) -> dict:
@@ -111,16 +137,6 @@ class ReviewEngine:
             "SELECT * FROM agent.weekly_summaries WHERE week_start = ?",
             [week_start.isoformat()],
         )
-        if existing:
-            return {
-                "status": "completed",
-                "review_type": "weekly",
-                "week_start": week_start.isoformat(),
-                "week_end": week_end.isoformat(),
-                "new_rules": [],
-                "retired_rules": [],
-                "summary_id": existing[0]["id"],
-            }
 
         records = await self.db.execute_read(
             """
@@ -143,51 +159,68 @@ class ReviewEngine:
         worst_trade = min(records, key=lambda record: record.get("pnl_pct") or 0.0) if records else None
 
         new_rules: list[dict] = []
-        if loss_count > win_count:
-            new_rules.append(
-                {
-                    "rule_text": "本周亏损交易偏多，优先控制仓位并减少逆势买入",
-                    "category": "risk",
-                }
-            )
+        retired_rules: list[str] = []
+        if not existing:
+            if loss_count > win_count:
+                new_rules.append(
+                    {
+                        "rule_text": "本周亏损交易偏多，优先控制仓位并减少逆势买入",
+                        "category": "risk",
+                    }
+                )
 
-        retired_rules = [
-            rule["id"]
-            for rule in await self.memory_mgr.get_active_rules(limit=100)
-            if (rule.get("verify_count") or 0) >= 3 and (rule.get("confidence") or 0.0) < 0.5
-        ]
+            retired_rules = [
+                rule["id"]
+                for rule in await self.memory_mgr.get_active_rules(limit=100)
+                if (rule.get("verify_count") or 0) >= 3 and (rule.get("confidence") or 0.0) < 0.5
+            ]
 
-        if new_rules:
-            await self.memory_mgr.add_rules(new_rules, source_run_id=f"weekly:{week_start.isoformat()}")
-        if retired_rules:
-            await self.memory_mgr.retire_rules(retired_rules)
+            if new_rules:
+                await self.memory_mgr.add_rules(new_rules, source_run_id=f"weekly:{week_start.isoformat()}")
+            if retired_rules:
+                await self.memory_mgr.retire_rules(retired_rules)
 
         insights = (
             f"本周共复盘 {total_trades} 笔交易，胜 {win_count} 笔，负 {loss_count} 笔，"
             f"总收益率 {round(total_pnl_pct * 100, 2)}%。"
         )
-        summary_id = str(uuid.uuid4())
-        await self.db.execute_write(
-            """
-            INSERT INTO agent.weekly_summaries (
-                id, week_start, week_end, total_trades, win_count, loss_count,
-                win_rate, total_pnl_pct, best_trade_id, worst_trade_id, insights
+        if existing:
+            summary_id = existing[0]["id"]
+        else:
+            summary_id = str(uuid.uuid4())
+            await self.db.execute_write(
+                """
+                INSERT INTO agent.weekly_summaries (
+                    id, week_start, week_end, total_trades, win_count, loss_count,
+                    win_rate, total_pnl_pct, best_trade_id, worst_trade_id, insights
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    summary_id,
+                    week_start.isoformat(),
+                    week_end.isoformat(),
+                    total_trades,
+                    win_count,
+                    loss_count,
+                    win_rate,
+                    total_pnl_pct,
+                    best_trade["trade_id"] if best_trade else None,
+                    worst_trade["trade_id"] if worst_trade else None,
+                    insights,
+                ],
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                summary_id,
-                week_start.isoformat(),
-                week_end.isoformat(),
-                total_trades,
-                win_count,
-                loss_count,
-                win_rate,
-                total_pnl_pct,
-                best_trade["trade_id"] if best_trade else None,
-                worst_trade["trade_id"] if worst_trade else None,
-                insights,
-            ],
+
+        reflection_id = await self._ensure_weekly_reflection(
+            week_start=week_start,
+            week_end=week_end,
+            total_trades=total_trades,
+            win_count=win_count,
+            loss_count=loss_count,
+            holding_count=len([record for record in records if record["status"] == "holding"]),
+            win_rate=win_rate,
+            total_pnl_pct=total_pnl_pct,
+            summary=insights,
         )
 
         return {
@@ -198,6 +231,7 @@ class ReviewEngine:
             "new_rules": new_rules,
             "retired_rules": retired_rules,
             "summary_id": summary_id,
+            "reflection_id": reflection_id,
         }
 
     @staticmethod
@@ -254,3 +288,115 @@ class ReviewEngine:
             if trade_id in (parsed or []):
                 return run["id"]
         return None
+
+    async def _backfill_trade_review(
+        self,
+        trade_id: str,
+        review_status: str,
+        review_day: date,
+        pnl_pct: float,
+    ):
+        review_note = (
+            f"daily review {review_day.isoformat()}: status={review_status}, "
+            f"pnl_pct={round(pnl_pct * 100, 2)}%"
+        )
+        await self.db.execute_write(
+            """
+            UPDATE agent.trades
+            SET review_result = ?, review_note = ?, review_date = ?, pnl_at_review = ?
+            WHERE id = ?
+            """,
+            [review_status, review_note, review_day.isoformat(), pnl_pct, trade_id],
+        )
+
+    async def _ensure_daily_review_journal(self, review_day: date) -> str:
+        existing = await self.db.execute_read(
+            "SELECT id FROM agent.daily_reviews WHERE review_date = ?",
+            [review_day.isoformat()],
+        )
+        if existing:
+            return existing[0]["id"]
+
+        records = await self.db.execute_read(
+            """
+            SELECT status, pnl_pct
+            FROM agent.review_records
+            WHERE review_date = ? AND review_type = 'daily'
+            ORDER BY created_at, trade_id
+            """,
+            [review_day.isoformat()],
+        )
+        total_reviews = len(records)
+        win_count = sum(1 for record in records if record["status"] == "win")
+        loss_count = sum(1 for record in records if record["status"] == "loss")
+        holding_count = sum(1 for record in records if record["status"] == "holding")
+        total_pnl_pct = sum(float(record.get("pnl_pct") or 0.0) for record in records)
+        summary = (
+            f"当日复盘 {total_reviews} 笔，胜 {win_count} 笔，负 {loss_count} 笔，"
+            f"持有中 {holding_count} 笔，总收益率 {round(total_pnl_pct * 100, 2)}%。"
+        )
+
+        daily_review_id = str(uuid.uuid4())
+        await self.db.execute_write(
+            """
+            INSERT INTO agent.daily_reviews (
+                id, review_date, total_reviews, win_count, loss_count,
+                holding_count, total_pnl_pct, summary
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                daily_review_id,
+                review_day.isoformat(),
+                total_reviews,
+                win_count,
+                loss_count,
+                holding_count,
+                total_pnl_pct,
+                summary,
+            ],
+        )
+        return daily_review_id
+
+    async def _ensure_weekly_reflection(
+        self,
+        week_start: date,
+        week_end: date,
+        total_trades: int,
+        win_count: int,
+        loss_count: int,
+        holding_count: int,
+        win_rate: float,
+        total_pnl_pct: float,
+        summary: str,
+    ) -> str:
+        existing = await self.db.execute_read(
+            "SELECT id FROM agent.weekly_reflections WHERE week_start = ?",
+            [week_start.isoformat()],
+        )
+        if existing:
+            return existing[0]["id"]
+
+        reflection_id = str(uuid.uuid4())
+        await self.db.execute_write(
+            """
+            INSERT INTO agent.weekly_reflections (
+                id, week_start, week_end, total_reviews, win_count, loss_count,
+                holding_count, win_rate, total_pnl_pct, summary
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                reflection_id,
+                week_start.isoformat(),
+                week_end.isoformat(),
+                total_trades,
+                win_count,
+                loss_count,
+                holding_count,
+                win_rate,
+                total_pnl_pct,
+                summary,
+            ],
+        )
+        return reflection_id
