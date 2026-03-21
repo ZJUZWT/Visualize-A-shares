@@ -213,6 +213,16 @@ def create_agent_router() -> APIRouter:
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
+    # ── Ledger Read Model ──
+
+    @router.get("/ledger/overview")
+    async def get_ledger_overview(portfolio_id: str):
+        svc = _get_service()
+        try:
+            return await svc.get_ledger_overview(portfolio_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
     # ── Brain ──
 
     @router.get("/brain/config")
