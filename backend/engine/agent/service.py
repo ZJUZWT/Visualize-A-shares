@@ -194,6 +194,10 @@ class AgentService:
         trade_date: str,
         position_id: str | None = None,
         stock_name: str | None = None,
+        source_run_id: str | None = None,
+        source_plan_id: str | None = None,
+        source_strategy_id: str | None = None,
+        source_strategy_version: int | None = None,
     ) -> dict:
         """
         执行交易 — 核心方法
@@ -257,7 +261,11 @@ class AgentService:
                      trade_input.reason, now],
                 ),
                 self._insert_trade_sql(
-                    portfolio_id, pos_id, trade_input, exec_price, amount, name, now
+                    portfolio_id, pos_id, trade_input, exec_price, amount, name, now,
+                    source_run_id=source_run_id,
+                    source_plan_id=source_plan_id,
+                    source_strategy_id=source_strategy_id,
+                    source_strategy_version=source_strategy_version,
                 ),
                 (
                     "UPDATE agent.portfolio_config SET cash_balance = cash_balance - ? WHERE id = ?",
@@ -299,7 +307,11 @@ class AgentService:
                     [round(new_avg_price, 4), total_qty, round(total_cost, 2), position_id],
                 ),
                 self._insert_trade_sql(
-                    portfolio_id, position_id, trade_input, exec_price, amount, name, now
+                    portfolio_id, position_id, trade_input, exec_price, amount, name, now,
+                    source_run_id=source_run_id,
+                    source_plan_id=source_plan_id,
+                    source_strategy_id=source_strategy_id,
+                    source_strategy_version=source_strategy_version,
                 ),
                 (
                     "UPDATE agent.portfolio_config SET cash_balance = cash_balance - ? WHERE id = ?",
@@ -336,7 +348,11 @@ class AgentService:
 
             queries = [
                 self._insert_trade_sql(
-                    portfolio_id, position_id, trade_input, exec_price, amount, name, now
+                    portfolio_id, position_id, trade_input, exec_price, amount, name, now,
+                    source_run_id=source_run_id,
+                    source_plan_id=source_plan_id,
+                    source_strategy_id=source_strategy_id,
+                    source_strategy_version=source_strategy_version,
                 ),
                 (
                     "UPDATE agent.portfolio_config SET cash_balance = cash_balance + ? WHERE id = ?",
@@ -376,6 +392,10 @@ class AgentService:
     def _insert_trade_sql(
         self, portfolio_id, position_id, ti: TradeInput,
         exec_price, amount, stock_name, now,
+        source_run_id: str | None = None,
+        source_plan_id: str | None = None,
+        source_strategy_id: str | None = None,
+        source_strategy_version: int | None = None,
     ) -> tuple[str, list]:
         """生成 INSERT trade 的 SQL + params"""
         trade_id = str(uuid.uuid4())
@@ -383,18 +403,24 @@ class AgentService:
             """INSERT INTO agent.trades
                (id, portfolio_id, position_id, action, stock_code, stock_name,
                 price, quantity, amount, reason, thesis, data_basis,
-                risk_note, invalidation, triggered_by, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                risk_note, invalidation, triggered_by, created_at,
+                source_run_id, source_plan_id, source_strategy_id, source_strategy_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [trade_id, portfolio_id, position_id, ti.action, ti.stock_code,
              stock_name, exec_price, ti.quantity, round(amount, 2),
              ti.reason, ti.thesis, json.dumps(ti.data_basis, ensure_ascii=False),
-             ti.risk_note, ti.invalidation, ti.triggered_by, now],
+             ti.risk_note, ti.invalidation, ti.triggered_by, now,
+             source_run_id, source_plan_id, source_strategy_id, source_strategy_version],
         )
 
     # ── Strategy CRUD ─────────────────────────────────
 
     async def create_strategy(
-        self, portfolio_id: str, position_id: str, strategy_input: dict
+        self,
+        portfolio_id: str,
+        position_id: str,
+        strategy_input: dict,
+        source_run_id: str | None = None,
     ) -> dict:
         """创建/更新持仓策略（version 自增）"""
         pos_rows = await self.db.execute_read(
@@ -419,13 +445,13 @@ class AgentService:
         await self.db.execute_write(
             """INSERT INTO agent.position_strategies
                (id, position_id, holding_type, take_profit, stop_loss,
-                reasoning, details, version, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                reasoning, details, version, source_run_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [strategy_id, position_id, position["holding_type"],
              strategy_input.get("take_profit"), strategy_input.get("stop_loss"),
              strategy_input.get("reasoning", ""),
              json.dumps(details, ensure_ascii=False) if details else None,
-             new_version, now, now],
+             new_version, source_run_id, now, now],
         )
 
         rows = await self.db.execute_read(
@@ -451,7 +477,7 @@ class AgentService:
 
     # ── Plans CRUD ────────────────────────────────────
 
-    async def create_plan(self, plan_input) -> dict:
+    async def create_plan(self, plan_input, source_run_id: str | None = None) -> dict:
         """创建交易计划"""
         plan_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
@@ -462,9 +488,9 @@ class AgentService:
                 entry_price, entry_method, position_pct,
                 take_profit, take_profit_method, stop_loss, stop_loss_method,
                 reasoning, risk_note, invalidation, valid_until,
-                status, source_type, source_conversation_id,
+                status, source_type, source_conversation_id, source_run_id,
                 created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
             [plan_id, plan_input.stock_code, plan_input.stock_name,
              plan_input.current_price, plan_input.direction,
              plan_input.entry_price, plan_input.entry_method, plan_input.position_pct,
@@ -472,7 +498,7 @@ class AgentService:
              plan_input.stop_loss, plan_input.stop_loss_method,
              plan_input.reasoning, plan_input.risk_note, plan_input.invalidation,
              plan_input.valid_until,
-             plan_input.source_type, plan_input.source_conversation_id,
+             plan_input.source_type, plan_input.source_conversation_id, source_run_id,
              now, now],
         )
         rows = await self.db.execute_read(
@@ -514,6 +540,33 @@ class AgentService:
                 [updates["status"], now, plan_id],
             )
         return await self.get_plan(plan_id)
+
+    async def update_trade_sources(
+        self,
+        trade_id: str,
+        source_strategy_id: str | None = None,
+        source_strategy_version: int | None = None,
+    ) -> dict:
+        """补写交易与策略的引用关系"""
+        sets = []
+        params = []
+        if source_strategy_id is not None:
+            sets.append("source_strategy_id = ?")
+            params.append(source_strategy_id)
+        if source_strategy_version is not None:
+            sets.append("source_strategy_version = ?")
+            params.append(source_strategy_version)
+        if sets:
+            params.append(trade_id)
+            await self.db.execute_write(
+                f"UPDATE agent.trades SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.trades WHERE id = ?",
+            [trade_id],
+        )
+        return rows[0]
 
     async def delete_plan(self, plan_id: str):
         """删除交易计划"""
