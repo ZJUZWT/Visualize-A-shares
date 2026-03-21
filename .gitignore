@@ -27,6 +27,7 @@ data/chromadb_rag/
 # Superpowers 工作目录
 .superpowers/
 .coord/runtime/
+.coord/active-batch.json
 
 # 预计算数据 — 纳入版本控制，部署时直接使用
 # data/precomputed/
