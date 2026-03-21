@@ -51,9 +51,20 @@ class AgentBrain:
             logger.info(f"🧠 候选标的: {len(candidates)} 只")
 
             if not candidates:
+                elapsed = time.monotonic() - start
+                state_after = await self.service.get_agent_state(self.portfolio_id)
                 await self.service.update_brain_run(run_id, {
                     "status": "completed",
                     "decisions": [],
+                    "state_after": state_after,
+                    "execution_summary": {
+                        "candidate_count": 0,
+                        "analysis_count": 0,
+                        "decision_count": 0,
+                        "plan_count": 0,
+                        "trade_count": 0,
+                        "elapsed_seconds": round(elapsed, 4),
+                    },
                 })
                 return
 

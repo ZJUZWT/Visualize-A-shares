@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from loguru import logger
 
@@ -37,10 +37,26 @@ def _decode_json_value(value):
         return value
 
 
+def _normalize_json_safe(value):
+    if isinstance(value, dict):
+        return {key: _normalize_json_safe(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_normalize_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_normalize_json_safe(item) for item in value]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return isoformat()
+    return value
+
+
 def _normalize_brain_run(row: dict) -> dict:
-    normalized = dict(row)
+    normalized = _normalize_json_safe(dict(row))
     for field in BRAIN_RUN_JSON_FIELDS:
         normalized[field] = _decode_json_value(normalized.get(field))
+        normalized[field] = _normalize_json_safe(normalized[field])
     return normalized
 
 
@@ -588,7 +604,7 @@ class AgentService:
                      "state_before", "state_after", "execution_summary",
                      "error_message", "llm_tokens_used"):
             if key in updates:
-                val = updates[key]
+                val = _normalize_json_safe(updates[key])
                 if isinstance(val, (list, dict)):
                     val = json.dumps(val, ensure_ascii=False)
                 sets.append(f"{key} = ?")
