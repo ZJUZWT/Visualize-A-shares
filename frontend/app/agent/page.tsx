@@ -56,17 +56,30 @@ function normalizeAgentState(portfolioId: string, raw: unknown): AgentState {
 
 function normalizeLedgerOverview(portfolioId: string, raw: unknown): LedgerOverview {
   const data = isRecord(raw) ? raw : {};
+  const assetSummary = isRecord(data.asset_summary) ? data.asset_summary : null;
+  const activePlans = isRecord(data.active_plans) ? data.active_plans : null;
   const accountSource = isRecord(data.account)
     ? data.account
-    : isRecord(data.summary)
-      ? data.summary
-      : data;
-  const positions = Array.isArray(data.positions) ? data.positions : [];
+    : assetSummary
+      ? assetSummary
+      : isRecord(data.summary)
+        ? data.summary
+        : data;
+  const positions = Array.isArray(data.positions)
+    ? data.positions
+    : Array.isArray(data.open_positions)
+      ? data.open_positions
+      : [];
   const pendingPlans = Array.isArray(data.pending_plans)
     ? data.pending_plans
     : Array.isArray(data.plans)
       ? data.plans
-      : [];
+      : activePlans
+        ? [
+            ...(Array.isArray(activePlans.pending) ? activePlans.pending : []),
+            ...(Array.isArray(activePlans.executing) ? activePlans.executing : []),
+          ]
+        : [];
   const recentTrades = Array.isArray(data.recent_trades)
     ? data.recent_trades
     : Array.isArray(data.trades)
@@ -80,9 +93,15 @@ function normalizeLedgerOverview(portfolioId: string, raw: unknown): LedgerOverv
       total_asset: toNumber(accountSource.total_asset),
       total_pnl: toNumber(accountSource.total_pnl),
       total_pnl_pct: toNumber(accountSource.total_pnl_pct),
-      position_count: toNumber(accountSource.position_count) ?? positions.length,
+      position_count:
+        toNumber(accountSource.position_count)
+        ?? toNumber(accountSource.open_position_count)
+        ?? positions.length,
       pending_plan_count: toNumber(accountSource.pending_plan_count) ?? pendingPlans.length,
-      trade_count: toNumber(accountSource.trade_count) ?? recentTrades.length,
+      trade_count:
+        toNumber(accountSource.trade_count)
+        ?? toNumber(accountSource.recent_trade_count)
+        ?? recentTrades.length,
     },
     positions: positions as LedgerOverview["positions"],
     pending_plans: pendingPlans as LedgerOverview["pending_plans"],
