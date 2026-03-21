@@ -86,6 +86,56 @@ class TestExecutionCoordinator:
         plan_after = run(self.svc.get_plan(plan["id"]))
         assert plan_after["status"] == "executing"
 
+    def test_sell_uses_existing_strategy_version_instead_of_creating_exit_strategy(self):
+        from engine.agent.execution import ExecutionCoordinator
+
+        execution = ExecutionCoordinator("live", self.svc)
+
+        buy_plan = run(execution.create_plan_from_decision("run-buy", _make_decision()))
+        buy_result = run(execution.execute_plan("run-buy", buy_plan["id"], _make_decision()))
+        position_id = buy_result["position_id"]
+
+        run(self.db.execute_write(
+            "UPDATE agent.positions SET entry_date = ? WHERE id = ?",
+            ["2026-03-20", position_id],
+        ))
+
+        sell_decision = _make_decision(
+            action="sell",
+            quantity=100,
+            price=1810.0,
+            reasoning="exit thesis",
+        )
+        sell_plan = run(execution.create_plan_from_decision("run-sell", sell_decision))
+        sell_result = run(execution.execute_plan("run-sell", sell_plan["id"], sell_decision))
+
+        trade = run(self.svc.get_trades("live", limit=1))[0]
+        strategies = run(self.svc.get_strategy("live", position_id))
+
+        assert sell_result["strategy_id"] == buy_result["strategy_id"]
+        assert trade["source_strategy_id"] == buy_result["strategy_id"]
+        assert trade["source_strategy_version"] == 1
+        assert len(strategies) == 1
+        assert strategies[0]["reasoning"] == "景气度改善"
+
+    def test_skip_path_closes_plan_as_ignored(self):
+        from engine.agent.execution import ExecutionCoordinator
+
+        execution = ExecutionCoordinator("live", self.svc)
+        sell_decision = _make_decision(
+            action="sell",
+            quantity=100,
+            price=1810.0,
+            reasoning="no position exit",
+        )
+        plan = run(execution.create_plan_from_decision("run-skip", sell_decision))
+
+        result = run(execution.execute_plan("run-skip", plan["id"], sell_decision))
+
+        assert result["skipped"] is True
+        plan_after = run(self.svc.get_plan(plan["id"]))
+        assert plan_after["status"] == "ignored"
+
 
 class TestBrainExecutionDelegation:
     def test_execute_decisions_uses_execution_coordinator(self):
