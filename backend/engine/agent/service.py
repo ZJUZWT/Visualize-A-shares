@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from loguru import logger
 
@@ -57,6 +57,15 @@ def _normalize_brain_run(row: dict) -> dict:
     for field in BRAIN_RUN_JSON_FIELDS:
         normalized[field] = _decode_json_value(normalized.get(field))
         normalized[field] = _normalize_json_safe(normalized[field])
+    return normalized
+
+
+def _normalize_record(row: dict) -> dict:
+    normalized = _normalize_json_safe(dict(row))
+    for field in ("review_date", "week_start", "week_end"):
+        value = normalized.get(field)
+        if isinstance(value, str) and "T" in value:
+            normalized[field] = value.split("T", 1)[0]
     return normalized
 
 
@@ -738,6 +747,95 @@ class AgentService:
                 "executing": executing_models,
             },
         }
+
+    # ── Review / Memory Read Models ──────────────────
+
+    async def list_review_records(
+        self,
+        portfolio_id: str,
+        days: int = 30,
+        review_type: str | None = None,
+    ) -> list[dict]:
+        await self.get_portfolio(portfolio_id)
+
+        cutoff_date = (date.today() - timedelta(days=max(days - 1, 0))).isoformat()
+        sql = """
+            SELECT rr.*, br.portfolio_id
+            FROM agent.review_records rr
+            JOIN agent.brain_runs br
+              ON rr.brain_run_id = br.id
+            WHERE br.portfolio_id = ?
+              AND rr.review_date >= ?
+        """
+        params: list = [portfolio_id, cutoff_date]
+        if review_type:
+            sql += " AND rr.review_type = ?"
+            params.append(review_type)
+        sql += " ORDER BY rr.review_date DESC, rr.created_at DESC"
+
+        rows = await self.db.execute_read(sql, params)
+        return [_normalize_record(row) for row in rows]
+
+    async def get_review_stats(self, portfolio_id: str, days: int = 30) -> dict:
+        records = await self.list_review_records(portfolio_id, days=days)
+        total_reviews = len(records)
+        win_count = sum(1 for row in records if row.get("status") == "win")
+        loss_count = sum(1 for row in records if row.get("status") == "loss")
+        holding_count = sum(1 for row in records if row.get("status") == "holding")
+        pnl_values = [float(row["pnl_pct"]) for row in records if row.get("pnl_pct") is not None]
+        total_pnl_pct = round(sum(pnl_values), 4) if pnl_values else 0.0
+        avg_pnl_pct = round(total_pnl_pct / len(pnl_values), 4) if pnl_values else 0.0
+        win_rate = round((win_count / total_reviews), 4) if total_reviews else 0.0
+
+        best_review = max(records, key=lambda row: row.get("pnl_pct", float("-inf")), default=None)
+        worst_review = min(records, key=lambda row: row.get("pnl_pct", float("inf")), default=None)
+
+        return {
+            "portfolio_id": portfolio_id,
+            "days": days,
+            "total_reviews": total_reviews,
+            "win_count": win_count,
+            "loss_count": loss_count,
+            "holding_count": holding_count,
+            "win_rate": win_rate,
+            "total_pnl_pct": total_pnl_pct,
+            "avg_pnl_pct": avg_pnl_pct,
+            "best_review": best_review,
+            "worst_review": worst_review,
+        }
+
+    async def list_weekly_summaries(self, limit: int = 10) -> list[dict]:
+        rows = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.weekly_summaries
+            ORDER BY week_start DESC, created_at DESC
+            LIMIT ?
+            """,
+            [limit],
+        )
+        return [_normalize_record(row) for row in rows]
+
+    async def list_memories(self, status: str = "active") -> list[dict]:
+        if status == "all":
+            rows = await self.db.execute_read(
+                """
+                SELECT *
+                FROM agent.agent_memories
+                ORDER BY created_at DESC
+                """
+            )
+        else:
+            rows = await self.db.execute_read(
+                """
+                SELECT *
+                FROM agent.agent_memories
+                WHERE status = ?
+                ORDER BY created_at DESC
+                """,
+                [status],
+            )
+        return [_normalize_record(row) for row in rows]
 
     # ── BrainRuns CRUD ─────────────────────────────────
 
