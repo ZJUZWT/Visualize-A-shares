@@ -230,6 +230,20 @@ class TestServiceBrainRuns:
         assert result["enable_debate"] is True
         assert result["max_candidates"] == 50
 
+    def test_decision_run_returns_complete_structure(self):
+        created = run(self.svc.create_brain_run("portfolio_1"))
+        run(self.svc.update_brain_run(created["id"], {
+            "thinking_process": {"prompt": "test"},
+            "state_before": {"position_level": "low"},
+            "state_after": {"position_level": "medium"},
+            "execution_summary": {"plan_count": 1, "trade_count": 1},
+        }))
+        result = run(self.svc.get_brain_run(created["id"]))
+        assert result["thinking_process"] == {"prompt": "test"}
+        assert result["state_before"] == {"position_level": "low"}
+        assert result["state_after"] == {"position_level": "medium"}
+        assert result["execution_summary"] == {"plan_count": 1, "trade_count": 1}
+
 
 class TestServiceAgentState:
     def setup_method(self):
@@ -406,3 +420,101 @@ class TestBrainCandidates:
         assert "000858" in codes
         assert "601888" in codes
         assert codes.count("600519") == 1
+
+
+class TestBrainDecisionRuns:
+    def test_make_decisions_persists_thinking_process(self):
+        from engine.agent.brain import AgentBrain
+
+        class FakeService:
+            def __init__(self):
+                self.updates = []
+
+            async def update_brain_run(self, run_id, updates):
+                self.updates.append((run_id, updates))
+
+        class FakeLLM:
+            async def chat_stream(self, messages):
+                yield '[{"stock_code":"600519","stock_name":"贵州茅台","action":"buy","price":1750.0,"quantity":100}]'
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain.portfolio_id = "p1"
+        brain.service = FakeService()
+
+        with patch("llm.LLMProviderFactory.create", return_value=FakeLLM()):
+            decisions = run(brain._make_decisions(
+                [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}],
+                {
+                    "cash_balance": 1000000.0,
+                    "total_asset": 1000000.0,
+                    "positions": [],
+                },
+                {"single_position_pct": 0.15, "max_position_count": 10},
+                run_id="run-1",
+            ))
+
+        assert len(decisions) == 1
+        assert brain.service.updates[0][0] == "run-1"
+        assert brain.service.updates[0][1]["thinking_process"]["raw_output"].startswith("[")
+
+    def test_execute_updates_state_before_and_after(self):
+        from engine.agent.brain import AgentBrain
+
+        class FakeService:
+            def __init__(self):
+                self.updates = []
+                self.state_reads = 0
+
+            async def get_brain_config(self):
+                return {"single_position_pct": 0.15, "max_position_count": 10}
+
+            async def update_brain_run(self, run_id, updates):
+                self.updates.append((run_id, updates))
+
+            async def get_agent_state(self, portfolio_id):
+                self.state_reads += 1
+                if self.state_reads == 1:
+                    return {"portfolio_id": portfolio_id, "position_level": "low"}
+                return {"portfolio_id": portfolio_id, "position_level": "medium"}
+
+            async def get_portfolio(self, portfolio_id):
+                return {
+                    "cash_balance": 1000000.0,
+                    "total_asset": 1000000.0,
+                    "positions": [],
+                }
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain.portfolio_id = "p1"
+        brain.service = FakeService()
+
+        async def fake_select_candidates(config):
+            return [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}]
+
+        async def fake_analyze_candidates(candidates, config):
+            return [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}]
+
+        async def fake_make_decisions(analysis_results, portfolio, config, run_id):
+            return [{"stock_code": "600519", "action": "buy", "quantity": 100}]
+
+        async def fake_execute_decisions(decisions):
+            return ["plan-1"], ["trade-1"]
+
+        brain._select_candidates = fake_select_candidates
+        brain._analyze_candidates = fake_analyze_candidates
+        brain._make_decisions = fake_make_decisions
+        brain._execute_decisions = fake_execute_decisions
+
+        run(brain.execute("run-1"))
+
+        assert brain.service.updates[0][1]["state_before"] == {
+            "portfolio_id": "p1", "position_level": "low"
+        }
+        final_update = brain.service.updates[-1][1]
+        assert final_update["status"] == "completed"
+        assert final_update["state_after"] == {
+            "portfolio_id": "p1", "position_level": "medium"
+        }
+        assert final_update["execution_summary"]["decision_count"] == 1
+        assert final_update["execution_summary"]["plan_count"] == 1
+        assert final_update["execution_summary"]["trade_count"] == 1

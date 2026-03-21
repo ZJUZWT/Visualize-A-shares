@@ -225,6 +225,9 @@ class BrainRun(BaseModel):
     plan_ids: list[str] | None = None
     trade_ids: list[str] | None = None
     thinking_process: dict[str, Any] | list[Any] | str | None = None
+    state_before: dict[str, Any] | None = None
+    state_after: dict[str, Any] | None = None
+    execution_summary: dict[str, Any] | None = None
     error_message: str | None = None
     llm_tokens_used: int = 0
     started_at: str

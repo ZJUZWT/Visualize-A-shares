@@ -15,6 +15,35 @@ from engine.agent.state import get_state, upsert_state
 from engine.agent.validator import TradeValidator
 
 
+BRAIN_RUN_JSON_FIELDS = (
+    "candidates",
+    "analysis_results",
+    "decisions",
+    "plan_ids",
+    "trade_ids",
+    "thinking_process",
+    "state_before",
+    "state_after",
+    "execution_summary",
+)
+
+
+def _decode_json_value(value):
+    if value is None or not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def _normalize_brain_run(row: dict) -> dict:
+    normalized = dict(row)
+    for field in BRAIN_RUN_JSON_FIELDS:
+        normalized[field] = _decode_json_value(normalized.get(field))
+    return normalized
+
+
 class AgentService:
     """Main Agent 业务逻辑"""
 
@@ -538,7 +567,7 @@ class AgentService:
         rows = await self.db.execute_read(
             "SELECT * FROM agent.brain_runs WHERE id = ?", [run_id]
         )
-        return rows[0]
+        return _normalize_brain_run(rows[0])
 
     async def get_brain_run(self, run_id: str) -> dict:
         """获取运行记录"""
@@ -547,7 +576,7 @@ class AgentService:
         )
         if not rows:
             raise ValueError(f"运行记录 {run_id} 不存在")
-        return rows[0]
+        return _normalize_brain_run(rows[0])
 
     async def update_brain_run(self, run_id: str, updates: dict):
         """更新运行记录"""
@@ -555,7 +584,9 @@ class AgentService:
         sets = []
         params = []
         for key in ("status", "candidates", "analysis_results", "decisions",
-                     "plan_ids", "trade_ids", "error_message", "llm_tokens_used"):
+                     "plan_ids", "trade_ids", "thinking_process",
+                     "state_before", "state_after", "execution_summary",
+                     "error_message", "llm_tokens_used"):
             if key in updates:
                 val = updates[key]
                 if isinstance(val, (list, dict)):
@@ -572,10 +603,11 @@ class AgentService:
 
     async def list_brain_runs(self, portfolio_id: str, limit: int = 50) -> list[dict]:
         """运行记录列表"""
-        return await self.db.execute_read(
+        rows = await self.db.execute_read(
             "SELECT * FROM agent.brain_runs WHERE portfolio_id = ? ORDER BY started_at DESC LIMIT ?",
             [portfolio_id, limit],
         )
+        return [_normalize_brain_run(row) for row in rows]
 
     # ── BrainConfig CRUD ───────────────────────────────
 
