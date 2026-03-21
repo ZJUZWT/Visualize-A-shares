@@ -39,7 +39,22 @@ class TestAgentDB:
         conn.close()
         db.close()
 
-        expected = {"portfolio_config", "positions", "trades", "position_strategies", "trade_groups", "llm_calls", "trade_plans", "watchlist", "agent_state", "brain_runs", "brain_config"}
+        expected = {
+            "portfolio_config",
+            "positions",
+            "trades",
+            "position_strategies",
+            "trade_groups",
+            "llm_calls",
+            "trade_plans",
+            "watchlist",
+            "agent_state",
+            "brain_runs",
+            "brain_config",
+            "review_records",
+            "weekly_summaries",
+            "agent_memories",
+        }
         assert table_names == expected
 
     def test_get_instance_before_init_raises(self):
