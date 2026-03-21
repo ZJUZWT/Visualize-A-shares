@@ -11,6 +11,7 @@ from loguru import logger
 
 from engine.agent.db import AgentDB
 from engine.agent.models import TradeInput
+from engine.agent.state import get_state, upsert_state
 from engine.agent.validator import TradeValidator
 
 
@@ -509,6 +510,19 @@ class AgentService:
         await self.db.execute_write(
             "DELETE FROM agent.watchlist WHERE id = ?", [item_id]
         )
+
+    # ── Agent State ──────────────────────────────────
+
+    async def get_agent_state(self, portfolio_id: str) -> dict:
+        return await get_state(self.db, portfolio_id)
+
+    async def update_agent_state(
+        self,
+        portfolio_id: str,
+        updates: dict,
+        source_run_id: str | None = None,
+    ) -> dict:
+        return await upsert_state(self.db, portfolio_id, updates, source_run_id)
 
     # ── BrainRuns CRUD ─────────────────────────────────
 
