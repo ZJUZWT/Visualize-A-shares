@@ -212,6 +212,53 @@ class AgentState(BaseModel):
     updated_at: str
 
 
+# ── Review / Memory ──────────────────────────────────
+
+class ReviewRecord(BaseModel):
+    id: str
+    brain_run_id: str | None = None
+    trade_id: str | None = None
+    stock_code: str | None = None
+    stock_name: str | None = None
+    action: Literal["buy", "sell", "add", "reduce"] | None = None
+    decision_price: float | None = None
+    review_price: float | None = None
+    pnl_pct: float | None = None
+    holding_days: int | None = None
+    status: Literal["win", "loss", "holding"] | None = None
+    review_date: str | None = None
+    review_type: Literal["daily", "weekly"] | None = None
+    created_at: str
+
+
+class WeeklySummary(BaseModel):
+    id: str
+    week_start: str
+    week_end: str
+    total_trades: int = 0
+    win_count: int = 0
+    loss_count: int = 0
+    win_rate: float = 0.0
+    total_pnl_pct: float = 0.0
+    best_trade_id: str | None = None
+    worst_trade_id: str | None = None
+    insights: str | None = None
+    created_at: str
+
+
+class AgentMemory(BaseModel):
+    id: str
+    rule_text: str
+    category: str
+    source_run_id: str | None = None
+    status: Literal["active", "retired"] = "active"
+    confidence: float = 0.5
+    verify_count: int = 0
+    verify_win: int = 0
+    created_at: str
+    retired_at: str | None = None
+
+
 # ── Agent Brain ───────────────────────────────────────
 
 class BrainRun(BaseModel):
