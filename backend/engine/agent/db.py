@@ -244,6 +244,56 @@ class AgentDB:
             ADD COLUMN IF NOT EXISTS source_strategy_version INTEGER
         """)
         self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.review_records (
+                id VARCHAR PRIMARY KEY,
+                brain_run_id VARCHAR,
+                trade_id VARCHAR,
+                stock_code VARCHAR,
+                stock_name VARCHAR,
+                action VARCHAR,
+                decision_price DOUBLE,
+                review_price DOUBLE,
+                pnl_pct DOUBLE,
+                holding_days INTEGER,
+                status VARCHAR,
+                review_date DATE,
+                review_type VARCHAR,
+                created_at TIMESTAMP DEFAULT now(),
+                UNIQUE (trade_id, review_date)
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.weekly_summaries (
+                id VARCHAR PRIMARY KEY,
+                week_start DATE,
+                week_end DATE,
+                total_trades INTEGER,
+                win_count INTEGER,
+                loss_count INTEGER,
+                win_rate DOUBLE,
+                total_pnl_pct DOUBLE,
+                best_trade_id VARCHAR,
+                worst_trade_id VARCHAR,
+                insights TEXT,
+                created_at TIMESTAMP DEFAULT now(),
+                UNIQUE (week_start)
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.agent_memories (
+                id VARCHAR PRIMARY KEY,
+                rule_text VARCHAR NOT NULL,
+                category VARCHAR NOT NULL,
+                source_run_id VARCHAR,
+                status VARCHAR DEFAULT 'active',
+                confidence DOUBLE DEFAULT 0.5,
+                verify_count INTEGER DEFAULT 0,
+                verify_win INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT now(),
+                retired_at TIMESTAMP
+            )
+        """)
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS agent.brain_config (
                 id VARCHAR PRIMARY KEY DEFAULT 'default',
                 enable_debate BOOLEAN DEFAULT false,
