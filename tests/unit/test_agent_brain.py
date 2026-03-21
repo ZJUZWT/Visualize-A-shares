@@ -7,9 +7,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "backend"
 import asyncio
 from datetime import datetime
 import tempfile
+import types
 import duckdb
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 def run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
@@ -579,3 +580,108 @@ class TestBrainDecisionRuns:
         assert final_update["execution_summary"]["decision_count"] == 0
         assert final_update["execution_summary"]["plan_count"] == 0
         assert final_update["execution_summary"]["trade_count"] == 0
+
+    def test_make_decisions_injects_active_rules_into_prompt(self):
+        from engine.agent.brain import AgentBrain
+
+        class FakeService:
+            def __init__(self):
+                self.updates = []
+
+            async def update_brain_run(self, run_id, updates):
+                self.updates.append((run_id, updates))
+
+        class FakeMemoryManager:
+            async def get_active_rules(self, limit=20):
+                assert limit == 20
+                return [
+                    {"rule_text": "盈利单不要轻易补仓", "confidence": 0.8},
+                    {"rule_text": "先减仓再验证破位", "confidence": 0.65},
+                ]
+
+        class FakeLLM:
+            def __init__(self):
+                self.messages = None
+
+            async def chat_stream(self, messages):
+                self.messages = messages
+                yield '[{"stock_code":"600519","stock_name":"贵州茅台","action":"buy","price":1750.0,"quantity":100}]'
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain.portfolio_id = "p1"
+        brain.service = FakeService()
+        brain.memory = FakeMemoryManager()
+        fake_llm = FakeLLM()
+
+        with patch("llm.LLMProviderFactory.create", return_value=fake_llm):
+            decisions = run(brain._make_decisions(
+                [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}],
+                {
+                    "cash_balance": 1000000.0,
+                    "total_asset": 1000000.0,
+                    "positions": [],
+                },
+                {"single_position_pct": 0.15, "max_position_count": 10},
+                run_id="run-rules",
+            ))
+
+        assert len(decisions) == 1
+        prompt = fake_llm.messages[0].content
+        assert "历史经验" in prompt
+        assert "盈利单不要轻易补仓" in prompt
+        assert "先减仓再验证破位" in prompt
+        assert "80%" in prompt
+        assert "65%" in prompt
+
+
+class TestAgentScheduler:
+    def test_scheduler_start_creates_review_components_and_jobs(self):
+        from engine.agent.scheduler import AgentScheduler
+
+        scheduler = AgentScheduler()
+        fake_db = object()
+        fake_memory_manager = object()
+        fake_review_engine = MagicMock()
+        fake_review_engine.daily_review = MagicMock()
+        fake_review_engine.weekly_review = MagicMock()
+
+        created_jobs = []
+
+        class FakeScheduler:
+            def add_job(self, func, trigger, id, args=None, replace_existing=False):
+                created_jobs.append({
+                    "func": func,
+                    "trigger": trigger,
+                    "id": id,
+                    "args": args,
+                    "replace_existing": replace_existing,
+                })
+
+            def start(self):
+                created_jobs.append({"id": "scheduler_started"})
+
+        def fake_cron_trigger(**kwargs):
+            return kwargs
+
+        fake_asyncio_module = types.SimpleNamespace(AsyncIOScheduler=lambda: FakeScheduler())
+        fake_cron_module = types.SimpleNamespace(CronTrigger=fake_cron_trigger)
+
+        with patch("engine.agent.scheduler.AgentDB.get_instance", return_value=fake_db), \
+             patch("engine.agent.scheduler.MemoryManager", return_value=fake_memory_manager) as memory_cls, \
+             patch("engine.agent.scheduler.ReviewEngine", return_value=fake_review_engine) as review_cls, \
+             patch.dict(sys.modules, {
+                 "apscheduler.schedulers.asyncio": fake_asyncio_module,
+                 "apscheduler.triggers.cron": fake_cron_module,
+             }):
+            scheduler.start("p1")
+
+        memory_cls.assert_called_once_with(fake_db)
+        review_cls.assert_called_once_with(fake_db, fake_memory_manager)
+        assert scheduler._memory_manager is fake_memory_manager
+        assert scheduler._review_engine is fake_review_engine
+
+        job_ids = [job["id"] for job in created_jobs]
+        assert "agent_brain_daily" in job_ids
+        assert "agent_review_daily" in job_ids
+        assert "agent_review_weekly" in job_ids
+        assert "scheduler_started" in job_ids

@@ -17,6 +17,7 @@ from loguru import logger
 
 from engine.agent.db import AgentDB
 from engine.agent.execution import ExecutionCoordinator
+from engine.agent.memory import MemoryManager
 from engine.agent.service import AgentService
 from engine.agent.validator import TradeValidator
 
@@ -29,6 +30,7 @@ class AgentBrain:
         self.db = AgentDB.get_instance()
         self.service = AgentService(db=self.db, validator=TradeValidator())
         self.execution = ExecutionCoordinator(portfolio_id, self.service)
+        self.memory = MemoryManager(self.db)
 
     async def execute(self, run_id: str):
         """执行一次完整的分析→决策→执行流程"""
@@ -258,6 +260,7 @@ class AgentBrain:
         from llm.providers import ChatMessage
 
         llm = LLMProviderFactory.create(llm_settings)
+        memory_rules = await self._get_active_rules()
 
         positions_desc = ""
         for p in portfolio.get("positions", []):
@@ -283,6 +286,7 @@ class AgentBrain:
 
         single_pct = config.get("single_position_pct", 0.15)
         max_pos = config.get("max_position_count", 10)
+        memory_rules_section = self._format_memory_rules(memory_rules)
 
         prompt = f"""你是一个专业的 A 股投资 Agent，基于以下分析数据做出交易决策。
 
@@ -302,6 +306,7 @@ class AgentBrain:
 4. 必须设置止盈和止损价格
 5. 对已有持仓：检查是否需要止盈/止损/加仓/减仓
 6. 今天日期: {date.today().isoformat()}
+{memory_rules_section}
 
 请输出 JSON 数组，只包含需要操作的标的（不要输出 hold/ignore）：
 ```json
@@ -357,6 +362,26 @@ class AgentBrain:
         })
 
         return decisions
+
+    async def _get_active_rules(self) -> list[dict]:
+        memory_manager = getattr(self, "memory", None)
+        if memory_manager is None:
+            return []
+        return await memory_manager.get_active_rules(limit=20)
+
+    def _format_memory_rules(self, rules: list[dict]) -> str:
+        if not rules:
+            return ""
+
+        lines = [
+            "",
+            "## 历史经验",
+            "以下是你从过去交易中积累的经验规则，请在决策时参考：",
+        ]
+        for idx, rule in enumerate(rules, start=1):
+            confidence = float(rule.get("confidence", 0))
+            lines.append(f"{idx}. {rule['rule_text']} (置信度: {confidence:.0%})")
+        return "\n".join(lines)
 
     # ── Step 4: 自动执行 ──────────────────────────────
 
