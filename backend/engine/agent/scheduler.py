@@ -49,13 +49,13 @@ class AgentScheduler:
             )
             self._scheduler.add_job(
                 self._daily_review,
-                CronTrigger(hour=16, minute=0, day_of_week="mon-fri"),
+                CronTrigger(hour=15, minute=45, day_of_week="mon-fri"),
                 id="agent_review_daily",
                 replace_existing=True,
             )
             self._scheduler.add_job(
                 self._weekly_review,
-                CronTrigger(hour=16, minute=30, day_of_week="fri"),
+                CronTrigger(hour=16, minute=0, day_of_week="fri"),
                 id="agent_review_weekly",
                 replace_existing=True,
             )
