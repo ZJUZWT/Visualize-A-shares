@@ -39,6 +39,14 @@ function toNumber(value: unknown): number | null {
   return null;
 }
 
+function normalizePercent(value: unknown): number | null {
+  const numeric = toNumber(value);
+  if (numeric === null) {
+    return null;
+  }
+  return Math.abs(numeric) <= 1 ? numeric * 100 : numeric;
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const resp = await fetch(url);
   if (!resp.ok) {
@@ -175,7 +183,7 @@ function normalizeReviewRecords(raw: unknown): ReviewRecord[] {
       action: typeof data.action === "string" ? data.action : null,
       decision_price: toNumber(data.decision_price),
       review_price: toNumber(data.review_price),
-      pnl_pct: toNumber(data.pnl_pct),
+      pnl_pct: normalizePercent(data.pnl_pct),
       holding_days: toNumber(data.holding_days),
       status: typeof data.status === "string" ? data.status : null,
       review_date: typeof data.review_date === "string" ? data.review_date : null,
@@ -196,17 +204,17 @@ function normalizeReviewStats(raw: unknown, records: ReviewRecord[]): ReviewStat
 
   return {
     total_win_rate:
-      toNumber(data.total_win_rate)
-      ?? toNumber(data.win_rate)
+      normalizePercent(data.total_win_rate)
+      ?? normalizePercent(data.win_rate)
       ?? (totalReviews > 0 ? (winCount / totalReviews) * 100 : null),
     total_pnl_pct:
-      toNumber(data.total_pnl_pct)
+      normalizePercent(data.total_pnl_pct)
       ?? average(records.map((record) => record.pnl_pct).filter((value): value is number => value !== null && value !== undefined)),
     weekly_win_rate:
-      toNumber(data.weekly_win_rate)
+      normalizePercent(data.weekly_win_rate)
       ?? (weeklyRecords.length > 0 ? (weeklyWinCount / weeklyRecords.length) * 100 : null),
     weekly_pnl_pct:
-      toNumber(data.weekly_pnl_pct)
+      normalizePercent(data.weekly_pnl_pct)
       ?? average(weeklyRecords.map((record) => record.pnl_pct).filter((value): value is number => value !== null && value !== undefined)),
     total_reviews: toNumber(data.total_reviews) ?? totalReviews,
   };
@@ -232,8 +240,8 @@ function normalizeWeeklySummaries(raw: unknown): WeeklySummary[] {
       total_trades: toNumber(data.total_trades),
       win_count: toNumber(data.win_count),
       loss_count: toNumber(data.loss_count),
-      win_rate: toNumber(data.win_rate),
-      total_pnl_pct: toNumber(data.total_pnl_pct),
+      win_rate: normalizePercent(data.win_rate),
+      total_pnl_pct: normalizePercent(data.total_pnl_pct),
       insights: typeof data.insights === "string" ? data.insights : null,
       created_at: typeof data.created_at === "string" ? data.created_at : null,
     };
@@ -395,15 +403,12 @@ export default function AgentPage() {
     try {
       const [recordsRaw, statsRaw, weeklyRaw] = await Promise.all([
         fetchFirstAvailable<unknown>([
-          `${API_BASE}/api/v1/agent/review/records?portfolio_id=${portfolioId}`,
-          `${API_BASE}/api/v1/agent/reviews?days=30`,
+          `${API_BASE}/api/v1/agent/reviews?portfolio_id=${portfolioId}&days=30`,
         ]),
         fetchFirstAvailable<unknown>([
-          `${API_BASE}/api/v1/agent/review/stats?portfolio_id=${portfolioId}`,
-          `${API_BASE}/api/v1/agent/reviews/stats?days=30`,
+          `${API_BASE}/api/v1/agent/reviews/stats?portfolio_id=${portfolioId}&days=30`,
         ]),
         fetchFirstAvailable<unknown>([
-          `${API_BASE}/api/v1/agent/review/weekly?portfolio_id=${portfolioId}&limit=10`,
           `${API_BASE}/api/v1/agent/reviews/weekly?limit=10`,
         ]),
       ]);
@@ -427,7 +432,6 @@ export default function AgentPage() {
     setMemoryLoading(true);
     try {
       const raw = await fetchFirstAvailable<unknown>([
-        `${API_BASE}/api/v1/agent/review/memories`,
         `${API_BASE}/api/v1/agent/memories?status=${memoryStatus}`,
       ]);
       setMemoryRules(normalizeMemoryRules(raw));
