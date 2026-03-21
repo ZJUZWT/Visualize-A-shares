@@ -39,7 +39,7 @@ class TestAgentDB:
         conn.close()
         db.close()
 
-        expected = {"portfolio_config", "positions", "trades", "position_strategies", "trade_groups", "llm_calls", "trade_plans", "watchlist", "brain_runs", "brain_config"}
+        expected = {"portfolio_config", "positions", "trades", "position_strategies", "trade_groups", "llm_calls", "trade_plans", "watchlist", "agent_state", "brain_runs", "brain_config"}
         assert table_names == expected
 
     def test_get_instance_before_init_raises(self):
@@ -176,6 +176,10 @@ class TestModels:
         )
         assert t.review_result is None
         assert t.triggered_by == "agent"
+        assert t.source_run_id is None
+        assert t.source_plan_id is None
+        assert t.source_strategy_id is None
+        assert t.source_strategy_version is None
 
 
 # ═══════════════════════════════════════════════════════

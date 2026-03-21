@@ -3,7 +3,7 @@ Main Agent 数据模型
 """
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel
 
 
@@ -36,6 +36,7 @@ class PositionStrategy(BaseModel):
     reasoning: str
     details: dict = {}
     version: int = 1
+    source_run_id: str | None = None
     created_at: str
     updated_at: str
 
@@ -59,6 +60,10 @@ class Trade(BaseModel):
     invalidation: str
     triggered_by: Literal["manual", "agent"] = "agent"
     created_at: str
+    source_run_id: str | None = None
+    source_plan_id: str | None = None
+    source_strategy_id: str | None = None
+    source_strategy_version: int | None = None
     review_result: str | None = None
     review_note: str | None = None
     review_date: str | None = None
@@ -148,6 +153,7 @@ class TradePlan(BaseModel):
     status: Literal["pending", "executing", "completed", "expired", "ignored"] = "pending"
     source_type: Literal["expert", "agent", "manual"] = "expert"
     source_conversation_id: str | None = None
+    source_run_id: str | None = None
     created_at: str
     updated_at: str
 
@@ -193,6 +199,19 @@ class WatchlistInput(BaseModel):
     reason: str | None = None
 
 
+# ── Agent State ───────────────────────────────────────
+
+class AgentState(BaseModel):
+    portfolio_id: str
+    market_view: dict[str, Any] | None = None
+    position_level: str | None = None
+    sector_preferences: list[Any] | None = None
+    risk_alerts: list[Any] | None = None
+    source_run_id: str | None = None
+    created_at: str
+    updated_at: str
+
+
 # ── Agent Brain ───────────────────────────────────────
 
 class BrainRun(BaseModel):
@@ -205,6 +224,7 @@ class BrainRun(BaseModel):
     decisions: list[dict] | None = None
     plan_ids: list[str] | None = None
     trade_ids: list[str] | None = None
+    thinking_process: dict[str, Any] | list[Any] | str | None = None
     error_message: str | None = None
     llm_tokens_used: int = 0
     started_at: str

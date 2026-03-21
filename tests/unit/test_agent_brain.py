@@ -35,8 +35,41 @@ class TestBrainTables:
         db.close()
 
         assert "watchlist" in table_names
+        assert "agent_state" in table_names
         assert "brain_runs" in table_names
         assert "brain_config" in table_names
+
+    def test_schema_columns_exist(self, tmp_path):
+        db_path = tmp_path / "test_agent.duckdb"
+        with patch("engine.agent.db.AGENT_DB_PATH", db_path):
+            from engine.agent.db import AgentDB
+            AgentDB._instance = None
+            db = AgentDB.init_instance()
+
+        conn = duckdb.connect(str(db_path))
+
+        def columns_for(table_name: str) -> set[str]:
+            rows = conn.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'agent' AND table_name = ?
+                """,
+                [table_name],
+            ).fetchall()
+            return {row[0] for row in rows}
+
+        assert "thinking_process" in columns_for("brain_runs")
+        assert "source_run_id" in columns_for("trade_plans")
+        assert "source_run_id" in columns_for("position_strategies")
+        trade_columns = columns_for("trades")
+        assert "source_run_id" in trade_columns
+        assert "source_plan_id" in trade_columns
+        assert "source_strategy_id" in trade_columns
+        assert "source_strategy_version" in trade_columns
+
+        conn.close()
+        db.close()
 
 
 class TestBrainModels:
@@ -63,6 +96,43 @@ class TestBrainModels:
         )
         assert r.status == "running"
         assert r.candidates is None
+        assert r.thinking_process is None
+
+    def test_agent_state_model(self):
+        from engine.agent.models import AgentState
+        state = AgentState(
+            portfolio_id="p1",
+            created_at="2026-03-22T10:00:00",
+            updated_at="2026-03-22T10:00:00",
+        )
+        assert state.market_view is None
+        assert state.position_level is None
+        assert state.source_run_id is None
+
+    def test_trade_plan_model_has_source_run_id(self):
+        from engine.agent.models import TradePlan
+        plan = TradePlan(
+            id="plan-1",
+            stock_code="600519",
+            stock_name="贵州茅台",
+            direction="buy",
+            reasoning="test",
+            created_at="2026-03-22T10:00:00",
+            updated_at="2026-03-22T10:00:00",
+        )
+        assert plan.source_run_id is None
+
+    def test_position_strategy_model_has_source_run_id(self):
+        from engine.agent.models import PositionStrategy
+        strategy = PositionStrategy(
+            id="strategy-1",
+            position_id="pos-1",
+            holding_type="long_term",
+            reasoning="长期持有",
+            created_at="2026-03-22T10:00:00",
+            updated_at="2026-03-22T10:00:00",
+        )
+        assert strategy.source_run_id is None
 
 
 # ═══════════════════════════════════════════════════════
