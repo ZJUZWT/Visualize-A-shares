@@ -161,6 +161,26 @@ export interface MemoryRule {
   retired_at?: string | null;
 }
 
+export interface ReflectionFeedItem {
+  id: string;
+  kind: string | null;
+  date: string | null;
+  summary: string | null;
+  metrics: Record<string, number | string | null>;
+  details: Record<string, unknown> | null;
+}
+
+export interface StrategyHistoryEntry {
+  id: string;
+  run_id: string | null;
+  occurred_at: string | null;
+  market_view: Record<string, unknown> | null;
+  position_level: string | null;
+  sector_preferences: unknown[] | null;
+  risk_alerts: unknown[] | null;
+  execution_counters: Record<string, number | string | null>;
+}
+
 export interface WatchlistItem {
   id: string;
   stock_code: string;
@@ -170,4 +190,4 @@ export interface WatchlistItem {
   created_at: string;
 }
 
-export type AgentConsoleTab = "runs" | "reviews" | "memory";
+export type AgentConsoleTab = "runs" | "reviews" | "memory" | "reflection";

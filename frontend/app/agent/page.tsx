@@ -8,14 +8,18 @@ import DecisionRunPanel from "./components/DecisionRunPanel";
 import ExecutionLedgerPanel from "./components/ExecutionLedgerPanel";
 import ReviewRecordsPanel from "./components/ReviewRecordsPanel";
 import MemoryRulesPanel from "./components/MemoryRulesPanel";
+import ReflectionFeedPanel from "./components/ReflectionFeedPanel";
+import StrategyHistoryPanel from "./components/StrategyHistoryPanel";
 import {
   AgentConsoleTab,
   AgentState,
   BrainRun,
   LedgerOverview,
+  ReflectionFeedItem,
   MemoryRule,
   ReviewRecord,
   ReviewStats,
+  StrategyHistoryEntry,
   WeeklySummary,
   WatchlistItem,
 } from "./types";
@@ -276,6 +280,83 @@ function normalizeMemoryRules(raw: unknown): MemoryRule[] {
   });
 }
 
+function normalizeReflectionFeed(raw: unknown): ReflectionFeedItem[] {
+  const items = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.items)
+      ? raw.items
+      : isRecord(raw) && Array.isArray(raw.results)
+        ? raw.results
+        : isRecord(raw) && Array.isArray(raw.reflections)
+          ? raw.reflections
+          : [];
+
+  return items.map((item, index) => {
+    const data = isRecord(item) ? item : {};
+    const rawMetrics = isRecord(data.metrics) ? data.metrics : {};
+    const metrics = Object.fromEntries(
+      Object.entries(rawMetrics).map(([key, value]) => [key, typeof value === "number" ? value : toNumber(value) ?? (typeof value === "string" ? value : null)])
+    );
+
+    return {
+      id: typeof data.id === "string" ? data.id : `reflection-${index}`,
+      kind: typeof data.kind === "string" ? data.kind : null,
+      date:
+        typeof data.date === "string"
+          ? data.date
+          : typeof data.created_at === "string"
+            ? data.created_at
+            : null,
+      summary: typeof data.summary === "string" ? data.summary : null,
+      metrics,
+      details: isRecord(data.details) ? data.details : null,
+    };
+  });
+}
+
+function normalizeStrategyHistory(raw: unknown): StrategyHistoryEntry[] {
+  const items = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.items)
+      ? raw.items
+      : isRecord(raw) && Array.isArray(raw.results)
+        ? raw.results
+        : isRecord(raw) && Array.isArray(raw.history)
+          ? raw.history
+          : [];
+
+  return items.map((item, index) => {
+    const data = isRecord(item) ? item : {};
+    const executionSource = isRecord(data.execution_counters)
+      ? data.execution_counters
+      : isRecord(data.execution_summary)
+        ? data.execution_summary
+        : {};
+    const executionCounters = Object.fromEntries(
+      Object.entries(executionSource).map(([key, value]) => [
+        key,
+        typeof value === "number" ? value : toNumber(value) ?? (typeof value === "string" ? value : null),
+      ])
+    );
+
+    return {
+      id: typeof data.id === "string" ? data.id : typeof data.run_id === "string" ? data.run_id : `history-${index}`,
+      run_id: typeof data.run_id === "string" ? data.run_id : null,
+      occurred_at:
+        typeof data.occurred_at === "string"
+          ? data.occurred_at
+          : typeof data.started_at === "string"
+            ? data.started_at
+            : null,
+      market_view: isRecord(data.market_view) ? data.market_view : null,
+      position_level: typeof data.position_level === "string" ? data.position_level : null,
+      sector_preferences: Array.isArray(data.sector_preferences) ? data.sector_preferences : null,
+      risk_alerts: Array.isArray(data.risk_alerts) ? data.risk_alerts : null,
+      execution_counters: executionCounters,
+    };
+  });
+}
+
 export default function AgentPage() {
   const [runs, setRuns] = useState<BrainRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<BrainRun | null>(null);
@@ -285,16 +366,21 @@ export default function AgentPage() {
   const [reviewStats, setReviewStats] = useState<ReviewStats | null>(null);
   const [weeklySummaries, setWeeklySummaries] = useState<WeeklySummary[]>([]);
   const [memoryRules, setMemoryRules] = useState<MemoryRule[]>([]);
+  const [reflectionFeed, setReflectionFeed] = useState<ReflectionFeedItem[]>([]);
+  const [strategyHistory, setStrategyHistory] = useState<StrategyHistoryEntry[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
+  const [reflectionLoading, setReflectionLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [portfolioId, setPortfolioId] = useState<string | null>(null);
   const [stateError, setStateError] = useState<string | null>(null);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [reflectionError, setReflectionError] = useState<string | null>(null);
+  const [strategyHistoryError, setStrategyHistoryError] = useState<string | null>(null);
   const [ledgerSource, setLedgerSource] = useState<"overview" | "fallback" | "unavailable" | null>(null);
   const [activeTab, setActiveTab] = useState<AgentConsoleTab>("runs");
   const [reviewType, setReviewType] = useState<"all" | "daily" | "weekly">("all");
@@ -444,6 +530,35 @@ export default function AgentPage() {
     }
   }, [memoryStatus]);
 
+  const fetchReflectionData = useCallback(async () => {
+    if (!portfolioId) {
+      return;
+    }
+    setReflectionLoading(true);
+    const [feedResult, historyResult] = await Promise.allSettled([
+      fetchJson<unknown>(`${API_BASE}/api/v1/agent/reflections`),
+      fetchJson<unknown>(`${API_BASE}/api/v1/agent/strategy/history?portfolio_id=${portfolioId}`),
+    ]);
+
+    if (feedResult.status === "fulfilled") {
+      setReflectionFeed(normalizeReflectionFeed(feedResult.value));
+      setReflectionError(null);
+    } else {
+      setReflectionFeed([]);
+      setReflectionError("反思 feed 接口暂不可用，`/api/v1/agent/reflections` 尚未就绪。");
+    }
+
+    if (historyResult.status === "fulfilled") {
+      setStrategyHistory(normalizeStrategyHistory(historyResult.value));
+      setStrategyHistoryError(null);
+    } else {
+      setStrategyHistory([]);
+      setStrategyHistoryError("策略历史接口暂不可用，`/api/v1/agent/strategy/history` 尚未就绪。");
+    }
+
+    setReflectionLoading(false);
+  }, [portfolioId]);
+
   useEffect(() => {
     refreshConsole();
   }, [refreshConsole]);
@@ -459,6 +574,12 @@ export default function AgentPage() {
       fetchMemoryData();
     }
   }, [activeTab, fetchMemoryData]);
+
+  useEffect(() => {
+    if (activeTab === "reflection" && portfolioId) {
+      fetchReflectionData();
+    }
+  }, [activeTab, fetchReflectionData, portfolioId]);
 
   const fetchWatchlist = useCallback(async () => {
     const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist`);
@@ -625,6 +746,7 @@ export default function AgentPage() {
                         { key: "runs", label: "运行记录" },
                         { key: "reviews", label: "复盘记录" },
                         { key: "memory", label: "经验规则" },
+                        { key: "reflection", label: "反思演进" },
                       ] as const).map((tab) => (
                         <button
                           key={tab.key}
@@ -665,13 +787,19 @@ export default function AgentPage() {
                         reviewType={reviewType}
                         onReviewTypeChange={setReviewType}
                       />
-                    ) : (
+                    ) : activeTab === "memory" ? (
                       <MemoryRulesPanel
                         loading={memoryLoading}
                         error={memoryError}
                         rules={filteredMemoryRules}
                         statusFilter={memoryStatus}
                         onStatusFilterChange={setMemoryStatus}
+                      />
+                    ) : (
+                      <ReflectionFeedPanel
+                        loading={reflectionLoading}
+                        error={reflectionError}
+                        items={reflectionFeed}
                       />
                     )}
                   </div>
@@ -688,10 +816,16 @@ export default function AgentPage() {
                     <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
                       右栏保留给执行台账。当前 tab 聚焦复盘摘要、记录列表和 weekly summaries。
                     </div>
-                  ) : (
+                  ) : activeTab === "memory" ? (
                     <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
                       经验规则 tab 为只读规则库视图，不展示执行台账。
                     </div>
+                  ) : (
+                    <StrategyHistoryPanel
+                      loading={reflectionLoading}
+                      error={strategyHistoryError}
+                      items={strategyHistory}
+                    />
                   )}
                 </div>
               </div>
