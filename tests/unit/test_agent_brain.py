@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "backend"))
 
 import asyncio
+from datetime import datetime
 import tempfile
 import duckdb
 import pytest
@@ -244,6 +245,18 @@ class TestServiceBrainRuns:
         assert result["state_after"] == {"position_level": "medium"}
         assert result["execution_summary"] == {"plan_count": 1, "trade_count": 1}
 
+    def test_update_brain_run_normalizes_nested_timestamps(self):
+        created = run(self.svc.create_brain_run("portfolio_1"))
+        run(self.svc.update_brain_run(created["id"], {
+            "state_before": {
+                "snapshot_at": datetime(2026, 3, 22, 10, 0, 0),
+                "nested": {"reviewed_at": datetime(2026, 3, 22, 10, 5, 0)},
+            },
+        }))
+        result = run(self.svc.get_brain_run(created["id"]))
+        assert result["state_before"]["snapshot_at"] == "2026-03-22T10:00:00"
+        assert result["state_before"]["nested"]["reviewed_at"] == "2026-03-22T10:05:00"
+
 
 class TestServiceAgentState:
     def setup_method(self):
@@ -279,6 +292,13 @@ class TestServiceAgentState:
         assert result["sector_preferences"] == ["白酒", "银行"]
         assert result["risk_alerts"] == ["估值偏高"]
         assert result["source_run_id"] == "run-1"
+
+    def test_get_agent_state_normalizes_timestamps_to_iso_strings(self):
+        result = run(self.svc.get_agent_state("portfolio_1"))
+        assert isinstance(result["created_at"], str)
+        assert isinstance(result["updated_at"], str)
+        assert "T" in result["created_at"]
+        assert "T" in result["updated_at"]
 
 
 # ═══════════════════════════════════════════════════════
@@ -518,3 +538,44 @@ class TestBrainDecisionRuns:
         assert final_update["execution_summary"]["decision_count"] == 1
         assert final_update["execution_summary"]["plan_count"] == 1
         assert final_update["execution_summary"]["trade_count"] == 1
+
+    def test_execute_without_candidates_still_persists_complete_structure(self):
+        from engine.agent.brain import AgentBrain
+
+        class FakeService:
+            def __init__(self):
+                self.updates = []
+                self.state_reads = 0
+
+            async def get_brain_config(self):
+                return {"single_position_pct": 0.15, "max_position_count": 10}
+
+            async def update_brain_run(self, run_id, updates):
+                self.updates.append((run_id, updates))
+
+            async def get_agent_state(self, portfolio_id):
+                self.state_reads += 1
+                return {"portfolio_id": portfolio_id, "position_level": "low"}
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain.portfolio_id = "p1"
+        brain.service = FakeService()
+
+        async def fake_select_candidates(config):
+            return []
+
+        brain._select_candidates = fake_select_candidates
+
+        run(brain.execute("run-empty"))
+
+        final_update = brain.service.updates[-1][1]
+        assert final_update["status"] == "completed"
+        assert final_update["decisions"] == []
+        assert final_update["state_after"] == {
+            "portfolio_id": "p1", "position_level": "low"
+        }
+        assert final_update["execution_summary"]["candidate_count"] == 0
+        assert final_update["execution_summary"]["analysis_count"] == 0
+        assert final_update["execution_summary"]["decision_count"] == 0
+        assert final_update["execution_summary"]["plan_count"] == 0
+        assert final_update["execution_summary"]["trade_count"] == 0

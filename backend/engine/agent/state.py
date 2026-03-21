@@ -4,13 +4,14 @@ AgentState 读写边界
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from engine.agent.db import AgentDB
 
 
 JSON_STATE_FIELDS = ("market_view", "sector_preferences", "risk_alerts")
+STATE_TIME_FIELDS = ("created_at", "updated_at")
 STATE_UPDATE_FIELDS = (
     "market_view",
     "position_level",
@@ -19,10 +20,25 @@ STATE_UPDATE_FIELDS = (
 )
 
 
+def _normalize_json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _normalize_json_safe(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_normalize_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_normalize_json_safe(item) for item in value]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return isoformat()
+    return value
+
+
 def _encode_json(value: Any) -> str | None:
     if value is None:
         return None
-    return json.dumps(value, ensure_ascii=False)
+    return json.dumps(_normalize_json_safe(value), ensure_ascii=False)
 
 
 def _decode_json(value: Any) -> Any:
@@ -35,9 +51,12 @@ def _decode_json(value: Any) -> Any:
 
 
 def _normalize_state_row(row: dict) -> dict:
-    normalized = dict(row)
+    normalized = _normalize_json_safe(dict(row))
     for field in JSON_STATE_FIELDS:
         normalized[field] = _decode_json(normalized.get(field))
+        normalized[field] = _normalize_json_safe(normalized[field])
+    for field in STATE_TIME_FIELDS:
+        normalized[field] = _normalize_json_safe(normalized.get(field))
     return normalized
 
 
