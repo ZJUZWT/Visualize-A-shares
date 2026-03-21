@@ -8,6 +8,10 @@ from datetime import date
 
 from loguru import logger
 
+from engine.agent.db import AgentDB
+from engine.agent.memory import MemoryManager
+from engine.agent.review import ReviewEngine
+
 
 class AgentScheduler:
     """Agent Brain 定时调度器"""
@@ -23,6 +27,8 @@ class AgentScheduler:
 
     def __init__(self):
         self._scheduler = None
+        self._memory_manager = None
+        self._review_engine = None
 
     def start(self, portfolio_id: str | None = None):
         """启动定时调度"""
@@ -30,12 +36,27 @@ class AgentScheduler:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
             from apscheduler.triggers.cron import CronTrigger
 
+            db = AgentDB.get_instance()
+            self._memory_manager = MemoryManager(db)
+            self._review_engine = ReviewEngine(db, self._memory_manager)
             self._scheduler = AsyncIOScheduler()
             self._scheduler.add_job(
                 self._daily_run,
                 CronTrigger(hour=15, minute=30, day_of_week="mon-fri"),
                 id="agent_brain_daily",
                 args=[portfolio_id],
+                replace_existing=True,
+            )
+            self._scheduler.add_job(
+                self._daily_review,
+                CronTrigger(hour=16, minute=0, day_of_week="mon-fri"),
+                id="agent_review_daily",
+                replace_existing=True,
+            )
+            self._scheduler.add_job(
+                self._weekly_review,
+                CronTrigger(hour=16, minute=30, day_of_week="fri"),
+                id="agent_review_weekly",
                 replace_existing=True,
             )
             self._scheduler.start()
@@ -78,6 +99,18 @@ class AgentScheduler:
 
         brain = AgentBrain(portfolio_id)
         await brain.execute(run_record["id"])
+
+    async def _daily_review(self):
+        """每日复盘任务"""
+        if self._review_engine is None:
+            return
+        await self._review_engine.daily_review()
+
+    async def _weekly_review(self):
+        """每周复盘任务"""
+        if self._review_engine is None:
+            return
+        await self._review_engine.weekly_review()
 
     def shutdown(self):
         """关闭调度器"""
