@@ -37,6 +37,10 @@ class AgentBrain:
         logger.info(f"🧠 AgentBrain 运行开始: run_id={run_id}")
 
         try:
+            state_before = await self.service.get_agent_state(self.portfolio_id)
+            await self.service.update_brain_run(run_id, {
+                "state_before": state_before,
+            })
             config = await self.service.get_brain_config()
 
             # Step 1: 标的筛选
@@ -62,7 +66,7 @@ class AgentBrain:
 
             # Step 3: LLM 综合决策
             portfolio = await self.service.get_portfolio(self.portfolio_id)
-            decisions = await self._make_decisions(analysis_results, portfolio, config)
+            decisions = await self._make_decisions(analysis_results, portfolio, config, run_id)
             await self.service.update_brain_run(run_id, {
                 "decisions": decisions,
             })
@@ -71,10 +75,20 @@ class AgentBrain:
             # Step 4: 自动执行
             plan_ids, trade_ids = await self._execute_decisions(decisions)
             elapsed = time.monotonic() - start
+            state_after = await self.service.get_agent_state(self.portfolio_id)
             await self.service.update_brain_run(run_id, {
                 "status": "completed",
                 "plan_ids": plan_ids,
                 "trade_ids": trade_ids,
+                "state_after": state_after,
+                "execution_summary": {
+                    "candidate_count": len(candidates),
+                    "analysis_count": len(analysis_results),
+                    "decision_count": len(decisions),
+                    "plan_count": len(plan_ids),
+                    "trade_count": len(trade_ids),
+                    "elapsed_seconds": round(elapsed, 4),
+                },
             })
             logger.info(f"🧠 AgentBrain 运行完成: {elapsed:.1f}s, {len(plan_ids)} plans, {len(trade_ids)} trades")
 
@@ -226,7 +240,7 @@ class AgentBrain:
     # ── Step 3: LLM 综合决策 ──────────────────────────
 
     async def _make_decisions(
-        self, analysis_results: list[dict], portfolio: dict, config: dict
+        self, analysis_results: list[dict], portfolio: dict, config: dict, run_id: str
     ) -> list[dict]:
         """LLM 综合决策"""
         from llm import LLMProviderFactory, llm_settings
@@ -322,6 +336,14 @@ class AgentBrain:
         except (json.JSONDecodeError, IndexError):
             logger.warning(f"🧠 LLM 决策解析失败: {raw[:200]}")
             decisions = []
+
+        await self.service.update_brain_run(run_id, {
+            "thinking_process": {
+                "prompt": prompt,
+                "raw_output": raw,
+                "parsed_decisions": decisions,
+            },
+        })
 
         return decisions
 

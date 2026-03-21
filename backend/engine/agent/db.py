@@ -208,6 +208,18 @@ class AgentDB:
             ADD COLUMN IF NOT EXISTS thinking_process JSON
         """)
         self._conn.execute("""
+            ALTER TABLE agent.brain_runs
+            ADD COLUMN IF NOT EXISTS state_before JSON
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.brain_runs
+            ADD COLUMN IF NOT EXISTS state_after JSON
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.brain_runs
+            ADD COLUMN IF NOT EXISTS execution_summary JSON
+        """)
+        self._conn.execute("""
             ALTER TABLE agent.trade_plans
             ADD COLUMN IF NOT EXISTS source_run_id VARCHAR
         """)
