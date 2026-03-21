@@ -12,13 +12,11 @@ from __future__ import annotations
 import json
 import time
 import traceback
-import uuid
-from datetime import date, datetime
-
+from datetime import date
 from loguru import logger
 
 from engine.agent.db import AgentDB
-from engine.agent.models import TradePlanInput, TradeInput
+from engine.agent.execution import ExecutionCoordinator
 from engine.agent.service import AgentService
 from engine.agent.validator import TradeValidator
 
@@ -30,6 +28,7 @@ class AgentBrain:
         self.portfolio_id = portfolio_id
         self.db = AgentDB.get_instance()
         self.service = AgentService(db=self.db, validator=TradeValidator())
+        self.execution = ExecutionCoordinator(portfolio_id, self.service)
 
     async def execute(self, run_id: str):
         """执行一次完整的分析→决策→执行流程"""
@@ -84,6 +83,7 @@ class AgentBrain:
             logger.info(f"🧠 决策完成: {len(decisions)} 个操作")
 
             # Step 4: 自动执行
+            self._active_run_id = run_id
             plan_ids, trade_ids = await self._execute_decisions(decisions)
             elapsed = time.monotonic() - start
             state_after = await self.service.get_agent_state(self.portfolio_id)
@@ -360,83 +360,34 @@ class AgentBrain:
 
     # ── Step 4: 自动执行 ──────────────────────────────
 
-    async def _execute_decisions(self, decisions: list[dict]) -> tuple[list[str], list[str]]:
-        """执行决策：生成 trade_plan → execute_trade"""
+    async def _execute_decisions(
+        self,
+        decisions: list[dict] | str,
+        run_id: str | list[dict] | None = None,
+    ) -> tuple[list[str], list[str]]:
+        """执行决策：brain 只调 execution 协调器"""
         plan_ids: list[str] = []
         trade_ids: list[str] = []
-        trade_date = date.today().isoformat()
+        execution = getattr(self, "execution", ExecutionCoordinator(self.portfolio_id, self.service))
+        if isinstance(decisions, str):
+            effective_run_id = decisions
+            actual_decisions = run_id if isinstance(run_id, list) else []
+        else:
+            actual_decisions = decisions
+            effective_run_id = run_id if isinstance(run_id, str) else getattr(self, "_active_run_id", "manual")
 
-        for d in decisions:
+        for d in actual_decisions:
             action = d.get("action", "")
             if action in ("hold", "ignore", ""):
                 continue
 
             try:
-                # 1. 生成 trade_plan
-                direction = "buy" if action in ("buy", "add") else "sell"
-                plan = await self.service.create_plan(TradePlanInput(
-                    stock_code=d["stock_code"],
-                    stock_name=d.get("stock_name", d["stock_code"]),
-                    direction=direction,
-                    entry_price=d.get("price"),
-                    position_pct=d.get("position_pct"),
-                    take_profit=d.get("take_profit"),
-                    stop_loss=d.get("stop_loss"),
-                    stop_loss_method=d.get("stop_loss_method"),
-                    take_profit_method=d.get("take_profit_method"),
-                    reasoning=d.get("reasoning", "Agent 自动决策"),
-                    risk_note=d.get("risk_note"),
-                    invalidation=d.get("invalidation"),
-                    source_type="agent",
-                ))
+                plan = await execution.create_plan_from_decision(effective_run_id, d)
                 plan_ids.append(plan["id"])
 
-                # 2. 执行交易
-                position_id = None
-                holding_type = d.get("holding_type", "mid_term")
-
-                if action in ("sell", "reduce"):
-                    positions = await self.service.get_positions(self.portfolio_id, "open")
-                    for p in positions:
-                        if p["stock_code"] == d["stock_code"]:
-                            position_id = p["id"]
-                            holding_type = p.get("holding_type", holding_type)
-                            break
-                    if not position_id:
-                        logger.warning(f"🧠 卖出 {d['stock_code']} 但未找到持仓，跳过")
-                        continue
-
-                if action == "add":
-                    positions = await self.service.get_positions(self.portfolio_id, "open")
-                    for p in positions:
-                        if p["stock_code"] == d["stock_code"]:
-                            position_id = p["id"]
-                            break
-
-                trade_input = TradeInput(
-                    action=action,
-                    stock_code=d["stock_code"],
-                    price=d.get("price", 0),
-                    quantity=d.get("quantity", 100),
-                    holding_type=holding_type if action == "buy" else None,
-                    reason=d.get("reasoning", "Agent 自动决策"),
-                    thesis=d.get("reasoning", ""),
-                    data_basis=["agent_brain_analysis"],
-                    risk_note=d.get("risk_note", ""),
-                    invalidation=d.get("invalidation", ""),
-                    triggered_by="agent",
-                )
-
-                result = await self.service.execute_trade(
-                    self.portfolio_id, trade_input, trade_date,
-                    position_id=position_id,
-                    stock_name=d.get("stock_name"),
-                )
-                if result.get("trade"):
-                    trade_ids.append(result["trade"]["id"])
-
-                # 3. 更新 plan 状态
-                await self.service.update_plan(plan["id"], {"status": "executing"})
+                result = await execution.execute_plan(effective_run_id, plan["id"], d)
+                if result.get("trade_id"):
+                    trade_ids.append(result["trade_id"])
 
                 logger.info(f"🧠 执行: {action} {d['stock_code']} x{d.get('quantity', 100)}")
 
