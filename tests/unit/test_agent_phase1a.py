@@ -53,6 +53,8 @@ class TestAgentDB:
             "brain_config",
             "review_records",
             "weekly_summaries",
+            "daily_reviews",
+            "weekly_reflections",
             "agent_memories",
         }
         assert table_names == expected

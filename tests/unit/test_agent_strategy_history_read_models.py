@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 
 def run(coro):
@@ -51,17 +52,13 @@ def _create_reflection_tables(db):
             """
             CREATE TABLE IF NOT EXISTS agent.daily_reviews (
                 id VARCHAR PRIMARY KEY,
-                portfolio_id VARCHAR NOT NULL,
                 review_date DATE NOT NULL,
-                total_trades INTEGER DEFAULT 0,
+                total_reviews INTEGER DEFAULT 0,
                 win_count INTEGER DEFAULT 0,
                 loss_count INTEGER DEFAULT 0,
                 holding_count INTEGER DEFAULT 0,
-                win_rate DOUBLE DEFAULT 0.0,
-                avg_pnl_pct DOUBLE DEFAULT 0.0,
                 total_pnl_pct DOUBLE DEFAULT 0.0,
                 summary TEXT,
-                notes TEXT,
                 created_at TIMESTAMP DEFAULT now()
             )
             """
@@ -74,9 +71,10 @@ def _create_reflection_tables(db):
                 id VARCHAR PRIMARY KEY,
                 week_start DATE NOT NULL,
                 week_end DATE NOT NULL,
-                total_trades INTEGER DEFAULT 0,
+                total_reviews INTEGER DEFAULT 0,
                 win_count INTEGER DEFAULT 0,
                 loss_count INTEGER DEFAULT 0,
+                holding_count INTEGER DEFAULT 0,
                 win_rate DOUBLE DEFAULT 0.0,
                 total_pnl_pct DOUBLE DEFAULT 0.0,
                 summary TEXT,
@@ -181,13 +179,13 @@ class TestStrategyHistoryReadModels:
             self.db.execute_write(
                 """
                 INSERT INTO agent.daily_reviews
-                    (id, portfolio_id, review_date, total_trades, win_count, loss_count,
-                     holding_count, win_rate, avg_pnl_pct, total_pnl_pct, summary, notes, created_at)
+                    (id, review_date, total_reviews, win_count, loss_count,
+                     holding_count, total_pnl_pct, summary, created_at)
                 VALUES
-                    ('daily-1', 'live', '2026-03-21', 3, 2, 1, 0, 0.6667, 0.0125, 0.0375,
-                     '日复盘：执行较稳', '减仓纪律改善', '2026-03-21T16:10:00'),
-                    ('daily-2', 'live', '2026-03-19', 2, 1, 1, 0, 0.5, 0.0020, 0.0040,
-                     '日复盘：震荡等待', '仓位偏轻', '2026-03-19T16:10:00')
+                    ('daily-1', '2026-03-21', 3, 2, 1, 0, 0.0375,
+                     '日复盘：执行较稳', '2026-03-21T16:10:00'),
+                    ('daily-2', '2026-03-19', 2, 1, 1, 0, 0.0040,
+                     '日复盘：震荡等待', '2026-03-19T16:10:00')
                 """
             )
         )
@@ -195,7 +193,7 @@ class TestStrategyHistoryReadModels:
             self.db.execute_write(
                 """
                 INSERT INTO agent.weekly_reflections
-                    (id, week_start, week_end, total_trades, win_count, loss_count,
+                    (id, week_start, week_end, total_reviews, win_count, loss_count,
                      win_rate, total_pnl_pct, summary, created_at)
                 VALUES
                     ('weekly-1', '2026-03-16', '2026-03-20', 8, 5, 3, 0.625, 0.052,
@@ -211,7 +209,9 @@ class TestStrategyHistoryReadModels:
         assert reflections[0]["date"] == "2026-03-21"
         assert reflections[0]["summary"] == "日复盘：执行较稳"
         assert reflections[0]["metrics"]["total_trades"] == 3
-        assert reflections[0]["details"]["notes"] == "减仓纪律改善"
+        assert reflections[0]["metrics"]["win_rate"] == pytest.approx(2 / 3)
+        assert reflections[0]["metrics"]["avg_pnl_pct"] == pytest.approx(0.0125)
+        assert reflections[0]["details"]["notes"] is None
         assert reflections[1]["kind"] == "weekly"
         assert reflections[1]["date"] == "2026-03-20"
         assert reflections[1]["details"]["week_start"] == "2026-03-16"
@@ -266,11 +266,11 @@ class TestStrategyHistoryRoutes:
             self.db.execute_write(
                 """
                 INSERT INTO agent.daily_reviews
-                    (id, portfolio_id, review_date, total_trades, win_count, loss_count,
-                     holding_count, win_rate, avg_pnl_pct, total_pnl_pct, summary, notes, created_at)
+                    (id, review_date, total_reviews, win_count, loss_count,
+                     holding_count, total_pnl_pct, summary, created_at)
                 VALUES
-                    ('daily-1', 'live', '2026-03-21', 3, 2, 1, 0, 0.6667, 0.0125, 0.0375,
-                     '日复盘：执行较稳', '减仓纪律改善', '2026-03-21T16:10:00')
+                    ('daily-1', '2026-03-21', 3, 2, 1, 0, 0.0375,
+                     '日复盘：执行较稳', '2026-03-21T16:10:00')
                 """
             )
         )

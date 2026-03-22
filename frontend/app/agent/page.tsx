@@ -331,7 +331,13 @@ function normalizeStrategyHistory(raw: unknown): StrategyHistoryEntry[] {
       ? data.execution_counters
       : isRecord(data.execution_summary)
         ? data.execution_summary
-        : {};
+        : {
+            candidate_count: data.candidate_count,
+            analysis_count: data.analysis_count,
+            decision_count: data.decision_count,
+            plan_count: data.plan_count,
+            trade_count: data.trade_count,
+          };
     const executionCounters = Object.fromEntries(
       Object.entries(executionSource).map(([key, value]) => [
         key,

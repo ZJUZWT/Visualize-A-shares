@@ -6,11 +6,19 @@ interface ReflectionFeedPanelProps {
   items: ReflectionFeedItem[];
 }
 
-function renderMetricValue(value: number | string | null) {
+function isPercentMetric(key: string) {
+  return key.includes("rate") || key.endsWith("_pct");
+}
+
+function renderMetricValue(key: string, value: number | string | null) {
   if (value === null || value === "") {
     return "--";
   }
   if (typeof value === "number") {
+    if (isPercentMetric(key)) {
+      const normalized = Math.abs(value) <= 1 ? value * 100 : value;
+      return `${normalized.toFixed(2)}%`;
+    }
     return Number.isInteger(value) ? String(value) : value.toFixed(2);
   }
   return value;
@@ -62,7 +70,7 @@ export default function ReflectionFeedPanel({
                 <div className="mt-3 flex flex-wrap gap-2">
                   {Object.entries(item.metrics).map(([key, value]) => (
                     <span key={key} className="rounded border border-white/10 px-2 py-1 text-xs text-gray-300">
-                      {key}: <span className="text-white">{renderMetricValue(value)}</span>
+                      {key}: <span className="text-white">{renderMetricValue(key, value)}</span>
                     </span>
                   ))}
                 </div>

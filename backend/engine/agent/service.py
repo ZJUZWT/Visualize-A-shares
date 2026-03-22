@@ -148,6 +148,19 @@ def _build_strategy_history_item(run: dict) -> dict:
 
 
 def _build_daily_reflection_item(row: dict) -> dict:
+    total_trades = row.get("total_trades")
+    if total_trades is None:
+        total_trades = row.get("total_reviews", 0)
+    win_count = row.get("win_count", 0)
+    loss_count = row.get("loss_count", 0)
+    holding_count = row.get("holding_count", 0)
+    win_rate = row.get("win_rate")
+    if win_rate is None:
+        decided_count = (win_count or 0) + (loss_count or 0)
+        win_rate = ((win_count or 0) / decided_count) if decided_count else 0.0
+    avg_pnl_pct = row.get("avg_pnl_pct")
+    if avg_pnl_pct is None:
+        avg_pnl_pct = ((row.get("total_pnl_pct") or 0.0) / total_trades) if total_trades else 0.0
     return {
         "id": row["id"],
         "kind": "daily",
@@ -155,12 +168,12 @@ def _build_daily_reflection_item(row: dict) -> dict:
         "summary": row.get("summary") or "",
         "created_at": row.get("created_at"),
         "metrics": {
-            "total_trades": row.get("total_trades", 0),
-            "win_count": row.get("win_count", 0),
-            "loss_count": row.get("loss_count", 0),
-            "holding_count": row.get("holding_count", 0),
-            "win_rate": row.get("win_rate", 0.0),
-            "avg_pnl_pct": row.get("avg_pnl_pct", 0.0),
+            "total_trades": total_trades,
+            "win_count": win_count,
+            "loss_count": loss_count,
+            "holding_count": holding_count,
+            "win_rate": win_rate,
+            "avg_pnl_pct": avg_pnl_pct,
             "total_pnl_pct": row.get("total_pnl_pct", 0.0),
         },
         "details": {
@@ -171,6 +184,9 @@ def _build_daily_reflection_item(row: dict) -> dict:
 
 
 def _build_weekly_reflection_item(row: dict) -> dict:
+    total_trades = row.get("total_trades")
+    if total_trades is None:
+        total_trades = row.get("total_reviews", 0)
     return {
         "id": row["id"],
         "kind": "weekly",
@@ -178,7 +194,7 @@ def _build_weekly_reflection_item(row: dict) -> dict:
         "summary": row.get("summary") or "",
         "created_at": row.get("created_at"),
         "metrics": {
-            "total_trades": row.get("total_trades", 0),
+            "total_trades": total_trades,
             "win_count": row.get("win_count", 0),
             "loss_count": row.get("loss_count", 0),
             "win_rate": row.get("win_rate", 0.0),
