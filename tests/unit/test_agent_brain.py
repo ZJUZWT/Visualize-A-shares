@@ -460,7 +460,23 @@ class TestBrainDecisionRuns:
 
             async def chat_stream(self, messages):
                 self.messages = messages
-                yield '[{"stock_code":"600519","stock_name":"贵州茅台","action":"buy","price":1750.0,"quantity":100}]'
+                yield """{
+                  "assessment": {"market_posture": "neutral", "evidence_quality": "mixed"},
+                  "self_critique": [],
+                  "follow_up_questions": [],
+                  "decisions": [
+                    {
+                      "stock_code": "600519",
+                      "stock_name": "贵州茅台",
+                      "action": "buy",
+                      "price": 1750.0,
+                      "quantity": 100,
+                      "take_profit": 1820.0,
+                      "stop_loss": 1690.0,
+                      "confidence": 0.82
+                    }
+                  ]
+                }"""
 
         class FakeMemoryManager:
             async def get_active_rules(self, limit=20):
@@ -501,11 +517,14 @@ class TestBrainDecisionRuns:
             ))
 
         assert len(decisions) == 1
-        prompt = fake_llm.messages[0].content
+        assert fake_llm.messages[0].role == "system"
+        assert "默认态度是怀疑" in fake_llm.messages[0].content
+        prompt = fake_llm.messages[1].content
         assert "信息消化摘要" in prompt
         assert "白酒需求回暖，资金关注度提升" in prompt
         assert "minor_adjust" in prompt
         assert "白酒" in prompt
+        assert '"self_critique"' in prompt
 
     def test_make_decisions_persists_thinking_process(self):
         from engine.agent.brain import AgentBrain
@@ -519,7 +538,23 @@ class TestBrainDecisionRuns:
 
         class FakeLLM:
             async def chat_stream(self, messages):
-                yield '[{"stock_code":"600519","stock_name":"贵州茅台","action":"buy","price":1750.0,"quantity":100}]'
+                yield """{
+                  "assessment": {"market_posture": "neutral", "evidence_quality": "mixed"},
+                  "self_critique": ["公告不是 Tier 1 证据"],
+                  "follow_up_questions": ["是否已经看到量价确认？"],
+                  "decisions": [
+                    {
+                      "stock_code": "600519",
+                      "stock_name": "贵州茅台",
+                      "action": "buy",
+                      "price": 1750.0,
+                      "quantity": 100,
+                      "take_profit": 1820.0,
+                      "stop_loss": 1690.0,
+                      "confidence": 0.82
+                    }
+                  ]
+                }"""
 
         brain = AgentBrain.__new__(AgentBrain)
         brain.portfolio_id = "p1"
@@ -539,7 +574,66 @@ class TestBrainDecisionRuns:
 
         assert len(decisions) == 1
         assert brain.service.updates[0][0] == "run-1"
-        assert brain.service.updates[0][1]["thinking_process"]["raw_output"].startswith("[")
+        thinking = brain.service.updates[0][1]["thinking_process"]
+        assert thinking["raw_output"].startswith("{")
+        assert "system_prompt" in thinking
+        assert "decision_context" in thinking
+        assert thinking["self_critique"] == ["公告不是 Tier 1 证据"]
+        assert thinking["follow_up_questions"] == ["是否已经看到量价确认？"]
+        assert thinking["gate_result"]["accepted_count"] == 1
+        assert thinking["gate_result"]["rejected_count"] == 0
+
+    def test_make_decisions_rejects_actions_when_self_critique_requires_wait(self):
+        from engine.agent.brain import AgentBrain
+
+        class FakeService:
+            def __init__(self):
+                self.updates = []
+
+            async def update_brain_run(self, run_id, updates):
+                self.updates.append((run_id, updates))
+
+        class FakeLLM:
+            async def chat_stream(self, messages):
+                yield """{
+                  "assessment": {"market_posture": "neutral", "evidence_quality": "weak"},
+                  "self_critique": ["证据不足，等待确认，不要现在下单"],
+                  "follow_up_questions": ["是否已经放量突破？"],
+                  "decisions": [
+                    {
+                      "stock_code": "600519",
+                      "stock_name": "贵州茅台",
+                      "action": "buy",
+                      "price": 1750.0,
+                      "quantity": 100,
+                      "take_profit": 1820.0,
+                      "stop_loss": 1690.0,
+                      "confidence": 0.92
+                    }
+                  ]
+                }"""
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain.portfolio_id = "p1"
+        brain.service = FakeService()
+
+        with patch("llm.LLMProviderFactory.create", return_value=FakeLLM()):
+            decisions = run(brain._make_decisions(
+                [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}],
+                {
+                    "cash_balance": 1000000.0,
+                    "total_asset": 1000000.0,
+                    "positions": [],
+                },
+                {"single_position_pct": 0.15, "max_position_count": 10},
+                run_id="run-wait",
+            ))
+
+        assert decisions == []
+        thinking = brain.service.updates[0][1]["thinking_process"]
+        assert thinking["gate_result"]["requires_wait"] is True
+        assert thinking["gate_result"]["accepted_count"] == 0
+        assert thinking["gate_result"]["rejections"][0]["reason"] == "self_critique_requires_wait"
 
     def test_execute_updates_state_before_and_after(self):
         from engine.agent.brain import AgentBrain
@@ -701,7 +795,23 @@ class TestBrainDecisionRuns:
 
             async def chat_stream(self, messages):
                 self.messages = messages
-                yield '[{"stock_code":"600519","stock_name":"贵州茅台","action":"buy","price":1750.0,"quantity":100}]'
+                yield """{
+                  "assessment": {"market_posture": "neutral", "evidence_quality": "mixed"},
+                  "self_critique": [],
+                  "follow_up_questions": [],
+                  "decisions": [
+                    {
+                      "stock_code": "600519",
+                      "stock_name": "贵州茅台",
+                      "action": "buy",
+                      "price": 1750.0,
+                      "quantity": 100,
+                      "take_profit": 1820.0,
+                      "stop_loss": 1690.0,
+                      "confidence": 0.82
+                    }
+                  ]
+                }"""
 
         brain = AgentBrain.__new__(AgentBrain)
         brain.portfolio_id = "p1"
@@ -722,7 +832,7 @@ class TestBrainDecisionRuns:
             ))
 
         assert len(decisions) == 1
-        prompt = fake_llm.messages[0].content
+        prompt = fake_llm.messages[1].content
         assert "历史经验" in prompt
         assert "盈利单不要轻易补仓" in prompt
         assert "先减仓再验证破位" in prompt

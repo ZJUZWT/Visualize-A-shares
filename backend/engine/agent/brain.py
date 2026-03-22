@@ -17,6 +17,13 @@ from loguru import logger
 
 from engine.agent.db import AgentDB
 from engine.agent.data_hunger import DataHungerService
+from engine.agent.decision_quality import (
+    build_decision_context,
+    build_output_contract,
+    build_system_prompt,
+    gate_decisions,
+    parse_decision_payload,
+)
 from engine.agent.execution import ExecutionCoordinator
 from engine.agent.memory import MemoryManager
 from engine.agent.service import AgentService
@@ -350,82 +357,25 @@ class AgentBrain:
 
         llm = LLMProviderFactory.create(llm_settings)
         memory_rules = await self._get_active_rules()
+        current_digests = getattr(self, "_current_digests", [])
+        current_triggered_signals = getattr(self, "_current_triggered_signals", [])
 
-        positions_desc = ""
-        for p in portfolio.get("positions", []):
-            positions_desc += (
-                f"  - {p['stock_code']} {p['stock_name']}: "
-                f"{p['current_qty']}股, 成本{p['entry_price']}, 类型{p['holding_type']}\n"
-            )
-        if not positions_desc:
-            positions_desc = "  （空仓）\n"
-
-        analysis_desc = ""
-        for a in analysis_results:
-            analysis_desc += f"\n### {a['stock_code']} {a.get('stock_name', '')}\n"
-            analysis_desc += f"来源: {a.get('source', 'unknown')}\n"
-            if "daily" in a:
-                daily_str = a["daily"] if isinstance(a["daily"], str) else str(a["daily"])
-                analysis_desc += f"行情: {daily_str}\n"
-            if "indicators" in a:
-                ind_str = a["indicators"] if isinstance(a["indicators"], str) else str(a["indicators"])
-                analysis_desc += f"技术指标: {ind_str}\n"
-            if "error" in a:
-                analysis_desc += f"分析失败: {a['error']}\n"
-
-        single_pct = config.get("single_position_pct", 0.15)
-        max_pos = config.get("max_position_count", 10)
-        memory_rules_section = self._format_memory_rules(memory_rules)
-        digest_section = self._format_digest_context(
-            getattr(self, "_current_digests", []),
-            getattr(self, "_current_triggered_signals", []),
+        system_prompt = build_system_prompt()
+        decision_context = build_decision_context(
+            analysis_results=analysis_results,
+            portfolio=portfolio,
+            config=config,
+            memory_rules=memory_rules,
+            digests=current_digests,
+            signal_hits=current_triggered_signals,
         )
+        output_contract = build_output_contract()
+        user_prompt = f"{decision_context}\n\n## 输出要求\n{output_contract}"
 
-        prompt = f"""你是一个专业的 A 股投资 Agent，基于以下分析数据做出交易决策。
-
-## 当前账户状态
-- 现金余额：{portfolio['cash_balance']:.2f}
-- 总资产：{portfolio['total_asset']:.2f}
-- 当前持仓：
-{positions_desc}
-
-## 候选标的分析
-{analysis_desc}
-{digest_section}
-
-## 决策规则
-1. 单只股票仓位不超过总资产的 {single_pct * 100:.0f}%
-2. 同时持仓不超过 {max_pos} 只
-3. quantity 必须是 100 的整数倍
-4. 必须设置止盈和止损价格
-5. 对已有持仓：检查是否需要止盈/止损/加仓/减仓
-6. 今天日期: {date.today().isoformat()}
-{memory_rules_section}
-
-请输出 JSON 数组，只包含需要操作的标的（不要输出 hold/ignore）：
-```json
-[
-  {{
-    "stock_code": "600519",
-    "stock_name": "贵州茅台",
-    "action": "buy",
-    "price": 1750.0,
-    "quantity": 100,
-    "holding_type": "mid_term",
-    "reasoning": "...",
-    "take_profit": 2100.0,
-    "stop_loss": 1650.0,
-    "risk_note": "...",
-    "invalidation": "...",
-    "confidence": 0.8
-  }}
-]
-```
-
-如果没有值得操作的标的，输出空数组 `[]`。
-只输出 JSON，不要其他文字。"""
-
-        messages = [ChatMessage(role="user", content=prompt)]
+        messages = [
+            ChatMessage(role="system", content=system_prompt),
+            ChatMessage(role="user", content=user_prompt),
+        ]
 
         # 流式收集
         chunks: list[str] = []
@@ -433,27 +383,42 @@ class AgentBrain:
             chunks.append(token)
         raw = "".join(chunks)
 
-        # 解析 JSON
-        try:
-            json_str = raw
-            if "```json" in raw:
-                json_str = raw.split("```json")[1].split("```")[0]
-            elif "```" in raw:
-                json_str = raw.split("```")[1].split("```")[0]
-            decisions = json.loads(json_str.strip())
-            if not isinstance(decisions, list):
-                decisions = []
-        except (json.JSONDecodeError, IndexError):
-            logger.warning(f"🧠 LLM 决策解析失败: {raw[:200]}")
-            decisions = []
+        parsed_payload = parse_decision_payload(raw)
+        gate_result = gate_decisions(
+            parsed_payload,
+            min_confidence=float(config.get("min_decision_confidence", 0.65)),
+        )
+        decisions = gate_result.accepted
 
         await self.service.update_brain_run(run_id, {
             "thinking_process": {
-                "prompt": prompt,
+                "system_prompt": system_prompt,
+                "decision_context": decision_context,
+                "output_contract": output_contract,
                 "raw_output": raw,
-                "parsed_decisions": decisions,
-                "digests": getattr(self, "_current_digests", []),
-                "triggered_signals": getattr(self, "_current_triggered_signals", []),
+                "parsed_payload": parsed_payload,
+                "assessment": gate_result.assessment,
+                "self_critique": gate_result.self_critique,
+                "follow_up_questions": gate_result.follow_up_questions,
+                "gate_result": {
+                    "requires_wait": gate_result.requires_wait,
+                    "accepted_count": len(gate_result.accepted),
+                    "rejected_count": len(gate_result.rejected),
+                    "rejections": [
+                        {
+                            "reason": item["reason"],
+                            "stock_code": (
+                                item.get("decision", {}).get("stock_code")
+                                if isinstance(item.get("decision"), dict)
+                                else None
+                            ),
+                        }
+                        for item in gate_result.rejected
+                    ],
+                },
+                "parsed_decisions": gate_result.accepted,
+                "digests": current_digests,
+                "triggered_signals": current_triggered_signals,
             },
         })
 
