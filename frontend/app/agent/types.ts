@@ -169,7 +169,12 @@ export interface ReflectionFeedItem {
   date: string | null;
   summary: string | null;
   metrics: Record<string, number | string | null>;
-  details: Record<string, unknown> | null;
+  details: (Record<string, unknown> & {
+    info_review?: {
+      summary: string | null;
+      details: Record<string, unknown> | null;
+    } | null;
+  }) | null;
 }
 
 export interface StrategyHistoryEntry {
