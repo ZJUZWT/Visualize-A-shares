@@ -50,6 +50,7 @@ Coordinator:
 
 Worker:
 
+- Must read `.coord/README.md` before starting work.
 - Reads only its own assigned runtime directory.
 - Updates only its own `status.json`, `result.md`, and `commit.txt`.
 - Must not write into another worker's runtime directory.
@@ -67,7 +68,7 @@ Reviewer:
 2. Coordinator fills in `task.md`.
 3. Worker sets `status.json` to `running`.
 4. Worker completes work in its git worktree.
-5. Worker writes summary to `result.md`.
+5. Worker writes a human-readable completion or blocker summary to `result.md`.
 6. Worker writes final commit hash to `commit.txt`.
 7. Worker sets `status.json` to `done` or `blocked`.
 8. Reviewer reads outputs and performs review/integration.
@@ -77,3 +78,4 @@ Reviewer:
 - `.coord/runtime/` is intentionally ignored by git.
 - `.coord/templates/` is committed so future sessions can reuse the same protocol.
 - If a worker is restarted, rewrite `task.md` rather than appending chat-style history.
+- `result.md` is the canonical completion summary file. Chat replies can stay short.

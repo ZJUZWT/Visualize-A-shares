@@ -12,6 +12,7 @@ This repository uses a fixed parallel-work convention.
 - Tracked plans live in `docs/superpowers/plans/`
 - Runtime handoff lives in `.coord/runtime/<batch-id>/`
 - Current batch pointer lives in `.coord/active-batch.json`
+- Worker ownership includes branch/worktree hygiene: each new worker task should start from a fresh branch cut from the current local `main`, not by stacking work on an old worker branch.
 
 When an agent is told to use this skill, it should resolve the project-local skill path convention first:
 
@@ -41,17 +42,21 @@ Required outcomes:
 4. Write one worker brief per worker
 5. Define output files under `outputs/`
 6. Update `.coord/active-batch.json`
+7. Declare one fresh branch name and one worktree path per worker
 
 Rules:
 
 - Prefer disjoint write sets over thematic splitting
 - Default to `parallelism=auto`; choose 2-4 workers unless the user specifies a number
 - Every worker brief must include:
+  - branch name
+  - worktree path
   - owned files
   - forbidden files
   - tests
   - done condition
   - required summary output path
+- Worker branch/worktree names should be batch-specific so a new batch never silently reuses stale worker state.
 - The tracked plan must include:
   - mainline
   - worker plans
@@ -66,15 +71,22 @@ Execution order:
 1. Read `.coord/active-batch.json`
 2. Read the pointed `manifest.json`
 3. Read only the assigned worker brief
-4. Stay inside the owned write set
-5. Run the required focused verification
-6. Write completion summary to the assigned `outputs/*.md`
+4. If this session still owns an older worker branch/worktree for this repo and that work has already been merged or explicitly accepted, clean it up before starting the new slice
+5. Create or switch into the declared fresh worktree/branch from the current local `main`
+6. Stay inside the owned write set
+7. Run the required focused verification
+8. Write completion summary to the assigned `outputs/*.md`
 
 Worker rules:
 
 - Do not broaden scope silently
 - Do not edit another worker's owned files
 - If blocked by an architecture mismatch, record it in the summary instead of freelancing
+- Do not stack a new batch on top of an old worker branch
+- Treat branch/worktree setup as part of the task, not optional prework
+- Leave the assigned worktree clean at handoff
+- After merge or explicit acceptance, the worker should remove its finished branch/worktree before taking the next worker task
+- If cleanup is unsafe because the branch is unmerged, dirty, or still checked out elsewhere, record the exact blocker instead of forcing deletion
 
 ### Review Mode
 
@@ -94,6 +106,7 @@ Review rules:
 - Never trust worker "done" claims without diff + verification
 - Fix small integration mismatches locally when cheaper than redispatch
 - Do not merge forbidden-file drift without explicit approval
+- Batch closeout should verify worker branches/worktrees were cleaned or explicitly note which ones remain and why
 
 ## Batch Layout
 
@@ -125,6 +138,8 @@ Recommended `manifest.json` fields:
 Each worker entry should include:
 
 - `id`
+- `branch`
+- `worktree_path`
 - `brief_path`
 - `output_path`
 - `scope`
@@ -159,10 +174,13 @@ For this repository specifically:
 - specs stay in `docs/superpowers/specs/`
 - runtime coordination stays out of git under `.coord/runtime/`
 - `.coord/active-batch.json` is a local pointer, not a tracked artifact
+- Worker branches should be cut from the current local `main`
+- Worker worktrees should live under `.worktrees/`
 
 ## Common Mistakes
 
 - Writing plans into `docs/plans/` instead of `docs/superpowers/plans/`
 - Letting two workers edit the same file family
+- Reusing an old worker branch/worktree for a new batch
 - Having workers report back only in chat instead of writing `outputs/*.md`
 - Reviewing worker claims without rerunning verification
