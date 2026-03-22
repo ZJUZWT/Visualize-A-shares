@@ -771,6 +771,90 @@ class TestBrainDecisionRuns:
         assert final_update["execution_summary"]["plan_count"] == 0
         assert final_update["execution_summary"]["trade_count"] == 0
 
+    def test_execute_does_not_forward_wait_gated_decisions_to_execution(self):
+        from engine.agent.brain import AgentBrain
+
+        class FakeService:
+            def __init__(self):
+                self.updates = []
+                self.state_reads = 0
+
+            async def get_brain_config(self):
+                return {"single_position_pct": 0.15, "max_position_count": 10}
+
+            async def update_brain_run(self, run_id, updates):
+                self.updates.append((run_id, updates))
+
+            async def get_agent_state(self, portfolio_id):
+                self.state_reads += 1
+                if self.state_reads == 1:
+                    return {"portfolio_id": portfolio_id, "position_level": "low"}
+                return {"portfolio_id": portfolio_id, "position_level": "low"}
+
+            async def get_portfolio(self, portfolio_id):
+                return {
+                    "cash_balance": 1000000.0,
+                    "total_asset": 1000000.0,
+                    "positions": [],
+                }
+
+        class FakeLLM:
+            async def chat_stream(self, messages):
+                yield """{
+                  "assessment": {"market_posture": "neutral", "evidence_quality": "weak"},
+                  "self_critique": ["证据不足，等待确认，不要现在下单"],
+                  "follow_up_questions": ["是否已经放量突破？"],
+                  "decisions": [
+                    {
+                      "stock_code": "600519",
+                      "stock_name": "贵州茅台",
+                      "action": "buy",
+                      "price": 1750.0,
+                      "quantity": 100,
+                      "take_profit": 1820.0,
+                      "stop_loss": 1690.0,
+                      "confidence": 0.92
+                    }
+                  ]
+                }"""
+
+        class FakeDataHunger:
+            async def scan_watch_signals(self, portfolio_id):
+                return []
+
+        forwarded = []
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain.portfolio_id = "p1"
+        brain.service = FakeService()
+        brain.data_hunger = FakeDataHunger()
+
+        async def fake_select_candidates(config):
+            return [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}]
+
+        async def fake_analyze_candidates(candidates, config):
+            return [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}]
+
+        async def fake_execute_decisions(decisions):
+            forwarded.extend(decisions)
+            return [], []
+
+        brain._select_candidates = fake_select_candidates
+        brain._analyze_candidates = fake_analyze_candidates
+        brain._execute_decisions = fake_execute_decisions
+
+        with patch("llm.LLMProviderFactory.create", return_value=FakeLLM()):
+            run(brain.execute("run-gated"))
+
+        assert forwarded == []
+        final_update = brain.service.updates[-1][1]
+        assert final_update["status"] == "completed"
+        assert final_update["plan_ids"] == []
+        assert final_update["trade_ids"] == []
+        assert final_update["execution_summary"]["decision_count"] == 0
+        assert final_update["execution_summary"]["plan_count"] == 0
+        assert final_update["execution_summary"]["trade_count"] == 0
+
     def test_make_decisions_injects_active_rules_into_prompt(self):
         from engine.agent.brain import AgentBrain
 
