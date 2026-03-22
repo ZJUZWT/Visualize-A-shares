@@ -56,6 +56,33 @@ class TestReviewMemoryTables:
         assert "weekly_summaries" in table_names
         assert "agent_memories" in table_names
 
+    def test_reflection_journals_have_info_review_columns(self, tmp_path):
+        db, db_path = _make_db(tmp_path)
+
+        conn = duckdb.connect(str(db_path))
+
+        def columns_for(table_name: str) -> set[str]:
+            rows = conn.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema='agent' AND table_name=?
+                """,
+                [table_name],
+            ).fetchall()
+            return {row[0] for row in rows}
+
+        daily_columns = columns_for("daily_reviews")
+        weekly_columns = columns_for("weekly_reflections")
+
+        conn.close()
+        db.close()
+
+        assert "info_review_summary" in daily_columns
+        assert "info_review_details" in daily_columns
+        assert "info_review_summary" in weekly_columns
+        assert "info_review_details" in weekly_columns
+
 
 class TestReviewMemoryModels:
     def test_agent_memory_defaults(self):
@@ -74,6 +101,30 @@ class TestReviewMemoryModels:
         assert record.verify_count == 0
         assert record.verify_win == 0
         assert record.retired_at is None
+
+    def test_reflection_models_allow_info_review_fields(self):
+        from engine.agent.models import DailyReview, WeeklyReflection
+
+        daily = DailyReview(
+            id="daily-1",
+            review_date="2026-03-22",
+            info_review_summary="当日共审计 2 条 digest，其中 1 条有效。",
+            info_review_details={"digest_count": 2, "useful_count": 1},
+            created_at="2026-03-22T15:45:00",
+        )
+        weekly = WeeklyReflection(
+            id="weekly-1",
+            week_start="2026-03-16",
+            week_end="2026-03-20",
+            info_review_summary="本周 digest 总体偏噪音。",
+            info_review_details={"digest_count": 8, "misleading_count": 2},
+            created_at="2026-03-20T16:00:00",
+        )
+
+        assert daily.info_review_summary is not None
+        assert daily.info_review_details == {"digest_count": 2, "useful_count": 1}
+        assert weekly.info_review_summary is not None
+        assert weekly.info_review_details == {"digest_count": 8, "misleading_count": 2}
 
 
 class TestMemoryManager:
@@ -245,6 +296,87 @@ class TestReviewEngine:
         assert updated_rule["verify_count"] == 1
         assert updated_rule["verify_win"] == 1
 
+    def test_daily_review_persists_info_review_summary_and_details(self):
+        from engine.agent.memory import MemoryManager
+        from engine.agent.review import ReviewEngine
+
+        memory_mgr = MemoryManager(self.db)
+        trade = run(
+            self.svc.execute_trade(
+                "live",
+                self._make_trade_input(),
+                "2026-03-20",
+                source_run_id="run-info-1",
+            )
+        )["trade"]
+        run_record = run(self.svc.create_brain_run("live", "manual"))
+        run(
+            self.svc.update_brain_run(
+                run_record["id"],
+                {
+                    "status": "completed",
+                    "trade_ids": [trade["id"]],
+                    "thinking_process": {
+                        "gate_result": {
+                            "requires_wait": False,
+                            "accepted_count": 1,
+                            "rejected_count": 0,
+                            "rejections": [],
+                        }
+                    },
+                    "execution_summary": {"trade_count": 1},
+                },
+            )
+        )
+        run(
+            self.db.execute_write(
+                "UPDATE agent.brain_runs SET started_at = ? WHERE id = ?",
+                ["2026-03-22T10:00:00", run_record["id"]],
+            )
+        )
+        run(
+            self.db.execute_write(
+                """
+                INSERT INTO agent.info_digests (
+                    id, portfolio_id, run_id, stock_code, digest_type,
+                    raw_summary, structured_summary, strategy_relevance,
+                    impact_assessment, missing_sources, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    "digest-1",
+                    "live",
+                    run_record["id"],
+                    "600519",
+                    "wake",
+                    json.dumps({"news": []}, ensure_ascii=False),
+                    json.dumps({"summary": "白酒需求回暖"}, ensure_ascii=False),
+                    "watch signal triggered",
+                    "minor_adjust",
+                    json.dumps([], ensure_ascii=False),
+                    "2026-03-22T10:01:00",
+                ],
+            )
+        )
+
+        engine = ReviewEngine(db=self.db, memory_mgr=memory_mgr)
+        run(engine.daily_review(as_of_date="2026-03-22"))
+
+        journal = run(
+            self.db.execute_read(
+                "SELECT info_review_summary, info_review_details FROM agent.daily_reviews WHERE review_date = ?",
+                ["2026-03-22"],
+            )
+        )[0]
+
+        assert journal["info_review_summary"] is not None
+        assert "digest" in journal["info_review_summary"]
+        assert journal["info_review_details"]["digest_count"] == 1
+        assert journal["info_review_details"]["useful_count"] == 1
+        assert journal["info_review_details"]["misleading_count"] == 0
+        assert journal["info_review_details"]["items"][0]["review_label"] == "useful"
+
     def test_weekly_review_writes_summary_and_updates_memories(self):
         from engine.agent.memory import MemoryManager
         from engine.agent.review import ReviewEngine
@@ -299,6 +431,108 @@ class TestReviewEngine:
         assert summary_rows[0]["worst_trade_id"] == "trade-1"
         assert any(rule["source_run_id"] == "weekly:2026-03-16" for rule in active_rules)
         assert retired_rules[0]["id"] == retiring_rule_id
+
+    def test_weekly_review_aggregates_info_review_from_daily_journals(self):
+        from engine.agent.memory import MemoryManager
+        from engine.agent.review import ReviewEngine
+
+        run(
+            self.db.execute_write(
+                """
+                INSERT INTO agent.daily_reviews (
+                    id, review_date, total_reviews, win_count, loss_count,
+                    holding_count, total_pnl_pct, summary,
+                    info_review_summary, info_review_details
+                )
+                VALUES
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    "daily-info-1",
+                    "2026-03-16",
+                    1,
+                    1,
+                    0,
+                    0,
+                    0.01,
+                    "首日复盘",
+                    "首日信息复盘",
+                    json.dumps(
+                        {
+                            "digest_count": 2,
+                            "useful_count": 1,
+                            "misleading_count": 0,
+                            "inconclusive_count": 1,
+                            "noted_count": 0,
+                            "top_missing_sources": ["filing", "macro"],
+                            "items": [],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    "daily-info-2",
+                    "2026-03-18",
+                    1,
+                    0,
+                    1,
+                    0,
+                    -0.02,
+                    "次日复盘",
+                    "次日信息复盘",
+                    json.dumps(
+                        {
+                            "digest_count": 3,
+                            "useful_count": 1,
+                            "misleading_count": 1,
+                            "inconclusive_count": 0,
+                            "noted_count": 1,
+                            "top_missing_sources": ["filing", "channel"],
+                            "items": [],
+                        },
+                        ensure_ascii=False,
+                    ),
+                ],
+            )
+        )
+        run(
+            self.db.execute_write(
+                """
+                INSERT INTO agent.review_records (
+                    id, brain_run_id, trade_id, stock_code, stock_name, action,
+                    decision_price, review_price, pnl_pct, holding_days,
+                    status, review_date, review_type
+                )
+                VALUES
+                    ('review-1', 'run-1', 'trade-1', '600519', '贵州茅台', 'buy',
+                     1800.0, 1818.0, 0.01, 2, 'win', '2026-03-16', 'daily'),
+                    ('review-2', 'run-2', 'trade-2', '601318', '中国平安', 'buy',
+                     50.0, 49.0, -0.02, 1, 'loss', '2026-03-18', 'daily')
+                """
+            )
+        )
+
+        engine = ReviewEngine(db=self.db, memory_mgr=MemoryManager(self.db))
+
+        result = run(engine.weekly_review(as_of_date="2026-03-20"))
+        reflection = run(
+            self.db.execute_read(
+                """
+                SELECT info_review_summary, info_review_details
+                FROM agent.weekly_reflections
+                WHERE week_start = ?
+                """,
+                ["2026-03-16"],
+            )
+        )[0]
+
+        assert result["review_type"] == "weekly"
+        assert reflection["info_review_summary"] is not None
+        assert reflection["info_review_details"]["digest_count"] == 5
+        assert reflection["info_review_details"]["useful_count"] == 2
+        assert reflection["info_review_details"]["misleading_count"] == 1
+        assert reflection["info_review_details"]["inconclusive_count"] == 1
+        assert reflection["info_review_details"]["noted_count"] == 1
+        assert reflection["info_review_details"]["top_missing_sources"] == ["filing", "channel", "macro"]
 
     @staticmethod
     def _make_trade_input():

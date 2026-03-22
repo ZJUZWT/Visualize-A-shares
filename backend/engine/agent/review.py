@@ -246,6 +246,15 @@ class ReviewEngine:
             return value
         return datetime.fromisoformat(value)
 
+    @staticmethod
+    def _decode_json_like(value):
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        return value
+
     async def _get_recent_completed_trade_ids(self, review_day: date) -> list[str]:
         recent_from = review_day - timedelta(days=5)
         runs = await self.db.execute_read(
@@ -314,8 +323,6 @@ class ReviewEngine:
             "SELECT id FROM agent.daily_reviews WHERE review_date = ?",
             [review_day.isoformat()],
         )
-        if existing:
-            return existing[0]["id"]
 
         records = await self.db.execute_read(
             """
@@ -335,15 +342,40 @@ class ReviewEngine:
             f"当日复盘 {total_reviews} 笔，胜 {win_count} 笔，负 {loss_count} 笔，"
             f"持有中 {holding_count} 笔，总收益率 {round(total_pnl_pct * 100, 2)}%。"
         )
+        info_review_details = await self._build_daily_info_review(review_day)
+        info_review_summary = self._format_info_review_summary(info_review_details)
+
+        if existing:
+            daily_review_id = existing[0]["id"]
+            await self.db.execute_write(
+                """
+                UPDATE agent.daily_reviews
+                SET total_reviews = ?, win_count = ?, loss_count = ?, holding_count = ?,
+                    total_pnl_pct = ?, summary = ?, info_review_summary = ?, info_review_details = ?
+                WHERE id = ?
+                """,
+                [
+                    total_reviews,
+                    win_count,
+                    loss_count,
+                    holding_count,
+                    total_pnl_pct,
+                    summary,
+                    info_review_summary,
+                    json.dumps(info_review_details, ensure_ascii=False),
+                    daily_review_id,
+                ],
+            )
+            return daily_review_id
 
         daily_review_id = str(uuid.uuid4())
         await self.db.execute_write(
             """
             INSERT INTO agent.daily_reviews (
                 id, review_date, total_reviews, win_count, loss_count,
-                holding_count, total_pnl_pct, summary
+                holding_count, total_pnl_pct, summary, info_review_summary, info_review_details
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 daily_review_id,
@@ -354,9 +386,184 @@ class ReviewEngine:
                 holding_count,
                 total_pnl_pct,
                 summary,
+                info_review_summary,
+                json.dumps(info_review_details, ensure_ascii=False),
             ],
         )
         return daily_review_id
+
+    async def _build_daily_info_review(self, review_day: date) -> dict:
+        digest_rows = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.info_digests
+            WHERE CAST(created_at AS DATE) = ?
+            ORDER BY created_at, id
+            """,
+            [review_day.isoformat()],
+        )
+
+        items: list[dict] = []
+        missing_counts: dict[str, int] = {}
+        useful_count = 0
+        misleading_count = 0
+        inconclusive_count = 0
+        noted_count = 0
+
+        for row in digest_rows:
+            missing_sources = self._decode_json_like(row.get("missing_sources")) or []
+            if not isinstance(missing_sources, list):
+                missing_sources = []
+            structured_summary = self._decode_json_like(row.get("structured_summary")) or {}
+            if not isinstance(structured_summary, dict):
+                structured_summary = {}
+
+            run_rows = await self.db.execute_read(
+                "SELECT thinking_process, execution_summary FROM agent.brain_runs WHERE id = ?",
+                [row["run_id"]],
+            )
+            thinking_process = {}
+            execution_summary = {}
+            if run_rows:
+                thinking_process = self._decode_json_like(run_rows[0].get("thinking_process")) or {}
+                execution_summary = self._decode_json_like(run_rows[0].get("execution_summary")) or {}
+                if not isinstance(thinking_process, dict):
+                    thinking_process = {}
+                if not isinstance(execution_summary, dict):
+                    execution_summary = {}
+
+            requires_wait = bool(
+                (thinking_process.get("gate_result") or {}).get("requires_wait", False)
+            )
+            impact_assessment = row.get("impact_assessment") or "none"
+            trade_count = int(execution_summary.get("trade_count") or 0)
+
+            if requires_wait and impact_assessment in {"minor_adjust", "reassess"}:
+                review_label = "misleading"
+                misleading_count += 1
+            elif trade_count > 0 and impact_assessment in {"minor_adjust", "reassess"} and not missing_sources:
+                review_label = "useful"
+                useful_count += 1
+            elif missing_sources:
+                review_label = "inconclusive"
+                inconclusive_count += 1
+            else:
+                review_label = "noted"
+                noted_count += 1
+
+            for source in missing_sources:
+                if isinstance(source, str) and source:
+                    missing_counts[source] = missing_counts.get(source, 0) + 1
+
+            items.append(
+                {
+                    "digest_id": row["id"],
+                    "run_id": row["run_id"],
+                    "stock_code": row.get("stock_code"),
+                    "impact_assessment": impact_assessment,
+                    "review_label": review_label,
+                    "summary": structured_summary.get("summary"),
+                    "missing_sources": missing_sources,
+                }
+            )
+
+        top_missing_sources = [
+            source
+            for source, _count in sorted(
+                missing_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:3]
+        ]
+        return {
+            "digest_count": len(digest_rows),
+            "useful_count": useful_count,
+            "misleading_count": misleading_count,
+            "inconclusive_count": inconclusive_count,
+            "noted_count": noted_count,
+            "top_missing_sources": top_missing_sources,
+            "items": items,
+        }
+
+    @staticmethod
+    def _format_info_review_summary(details: dict, period_label: str = "当日") -> str | None:
+        digest_count = int(details.get("digest_count") or 0)
+        if digest_count == 0:
+            return None
+        useful_count = int(details.get("useful_count") or 0)
+        misleading_count = int(details.get("misleading_count") or 0)
+        inconclusive_count = int(details.get("inconclusive_count") or 0)
+        missing_sources = details.get("top_missing_sources") or []
+        summary = (
+            f"信息复盘：{period_label}共审计 {digest_count} 条 digest，"
+            f"有效 {useful_count} 条，误导 {misleading_count} 条，"
+            f"待确认 {inconclusive_count} 条。"
+        )
+        if missing_sources:
+            summary += f" 最常缺失来源：{', '.join(str(item) for item in missing_sources)}。"
+        return summary
+
+    async def _build_weekly_info_review(self, week_start: date, week_end: date) -> dict:
+        rows = await self.db.execute_read(
+            """
+            SELECT review_date, info_review_summary, info_review_details
+            FROM agent.daily_reviews
+            WHERE review_date >= ? AND review_date <= ?
+            ORDER BY review_date
+            """,
+            [week_start.isoformat(), week_end.isoformat()],
+        )
+
+        missing_counts: dict[str, int] = {}
+        digest_count = 0
+        useful_count = 0
+        misleading_count = 0
+        inconclusive_count = 0
+        noted_count = 0
+        days: list[dict] = []
+
+        for row in rows:
+            details = self._decode_json_like(row.get("info_review_details")) or {}
+            if not isinstance(details, dict):
+                continue
+
+            digest_count += int(details.get("digest_count") or 0)
+            useful_count += int(details.get("useful_count") or 0)
+            misleading_count += int(details.get("misleading_count") or 0)
+            inconclusive_count += int(details.get("inconclusive_count") or 0)
+            noted_count += int(details.get("noted_count") or 0)
+
+            for source in details.get("top_missing_sources") or []:
+                if isinstance(source, str) and source:
+                    missing_counts[source] = missing_counts.get(source, 0) + 1
+
+            days.append(
+                {
+                    "review_date": row.get("review_date"),
+                    "summary": row.get("info_review_summary"),
+                    "digest_count": int(details.get("digest_count") or 0),
+                    "useful_count": int(details.get("useful_count") or 0),
+                    "misleading_count": int(details.get("misleading_count") or 0),
+                    "inconclusive_count": int(details.get("inconclusive_count") or 0),
+                    "noted_count": int(details.get("noted_count") or 0),
+                }
+            )
+
+        top_missing_sources = [
+            source
+            for source, _count in sorted(
+                missing_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:3]
+        ]
+        return {
+            "digest_count": digest_count,
+            "useful_count": useful_count,
+            "misleading_count": misleading_count,
+            "inconclusive_count": inconclusive_count,
+            "noted_count": noted_count,
+            "top_missing_sources": top_missing_sources,
+            "days": days,
+        }
 
     async def _ensure_weekly_reflection(
         self,
@@ -374,17 +581,46 @@ class ReviewEngine:
             "SELECT id FROM agent.weekly_reflections WHERE week_start = ?",
             [week_start.isoformat()],
         )
+        info_review_details = await self._build_weekly_info_review(week_start, week_end)
+        info_review_summary = self._format_info_review_summary(
+            info_review_details,
+            period_label="本周",
+        )
+
         if existing:
-            return existing[0]["id"]
+            reflection_id = existing[0]["id"]
+            await self.db.execute_write(
+                """
+                UPDATE agent.weekly_reflections
+                SET total_reviews = ?, win_count = ?, loss_count = ?,
+                    holding_count = ?, win_rate = ?, total_pnl_pct = ?,
+                    summary = ?, info_review_summary = ?, info_review_details = ?
+                WHERE id = ?
+                """,
+                [
+                    total_trades,
+                    win_count,
+                    loss_count,
+                    holding_count,
+                    win_rate,
+                    total_pnl_pct,
+                    summary,
+                    info_review_summary,
+                    json.dumps(info_review_details, ensure_ascii=False),
+                    reflection_id,
+                ],
+            )
+            return reflection_id
 
         reflection_id = str(uuid.uuid4())
         await self.db.execute_write(
             """
             INSERT INTO agent.weekly_reflections (
                 id, week_start, week_end, total_reviews, win_count, loss_count,
-                holding_count, win_rate, total_pnl_pct, summary
+                holding_count, win_rate, total_pnl_pct, summary,
+                info_review_summary, info_review_details
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 reflection_id,
@@ -397,6 +633,8 @@ class ReviewEngine:
                 win_rate,
                 total_pnl_pct,
                 summary,
+                info_review_summary,
+                json.dumps(info_review_details, ensure_ascii=False),
             ],
         )
         return reflection_id

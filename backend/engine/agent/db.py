@@ -5,6 +5,7 @@ AgentDB — Main Agent 数据库单例
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 
 import duckdb
@@ -34,6 +35,15 @@ def _normalize_read_value(value):
         except ValueError:
             return None
     return value
+
+
+def _decode_json_column_value(value):
+    if value is None or not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
 
 
 class AgentDB:
@@ -374,6 +384,14 @@ class AgentDB:
             )
         """)
         self._conn.execute("""
+            ALTER TABLE agent.daily_reviews
+            ADD COLUMN IF NOT EXISTS info_review_summary TEXT
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.daily_reviews
+            ADD COLUMN IF NOT EXISTS info_review_details JSON
+        """)
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS agent.weekly_reflections (
                 id VARCHAR PRIMARY KEY,
                 week_start DATE NOT NULL,
@@ -388,6 +406,14 @@ class AgentDB:
                 created_at TIMESTAMP DEFAULT now(),
                 UNIQUE (week_start)
             )
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.weekly_reflections
+            ADD COLUMN IF NOT EXISTS info_review_summary TEXT
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.weekly_reflections
+            ADD COLUMN IF NOT EXISTS info_review_details JSON
         """)
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS agent.brain_config (
@@ -411,11 +437,25 @@ class AgentDB:
 
     def _sync_read(self, sql: str, params=None) -> list[dict]:
         if params:
-            result = self._conn.execute(sql, params).fetchdf()
+            cursor = self._conn.execute(sql, params)
         else:
-            result = self._conn.execute(sql).fetchdf()
-        records = result.to_dict("records")
-        return [_normalize_read_value(row) for row in records]
+            cursor = self._conn.execute(sql)
+
+        columns = [column[0] for column in cursor.description]
+        json_columns = {
+            column[0]
+            for column in cursor.description
+            if str(column[1]) == "JSON"
+        }
+        rows = cursor.fetchall()
+
+        records: list[dict] = []
+        for row in rows:
+            record = dict(zip(columns, row))
+            for column in json_columns:
+                record[column] = _decode_json_column_value(record.get(column))
+            records.append(_normalize_read_value(record))
+        return records
 
     async def execute_write(self, sql: str, params=None):
         async with self._write_lock:

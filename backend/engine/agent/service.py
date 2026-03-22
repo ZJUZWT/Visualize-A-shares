@@ -30,6 +30,7 @@ BRAIN_RUN_JSON_FIELDS = (
 )
 WATCH_SIGNAL_JSON_FIELDS = ("keywords", "trigger_evidence")
 INFO_DIGEST_JSON_FIELDS = ("raw_summary", "structured_summary", "missing_sources")
+REFLECTION_JSON_FIELDS = ("info_review_details",)
 WATCH_SIGNAL_STATUSES = {
     "watching",
     "analyzing",
@@ -74,11 +75,25 @@ def _normalize_brain_run(row: dict) -> dict:
 
 def _normalize_record(row: dict) -> dict:
     normalized = _normalize_json_safe(dict(row))
+    for field in REFLECTION_JSON_FIELDS:
+        normalized[field] = _decode_json_value(normalized.get(field))
+        normalized[field] = _normalize_json_safe(normalized[field])
     for field in ("review_date", "week_start", "week_end"):
         value = normalized.get(field)
         if isinstance(value, str) and "T" in value:
             normalized[field] = value.split("T", 1)[0]
     return normalized
+
+
+def _build_info_review_payload(row: dict) -> dict | None:
+    summary = row.get("info_review_summary")
+    details = row.get("info_review_details")
+    if summary is None and details is None:
+        return None
+    return {
+        "summary": summary,
+        "details": details,
+    }
 
 
 def _normalize_watch_signal(row: dict) -> dict:
@@ -207,6 +222,7 @@ def _build_daily_reflection_item(row: dict) -> dict:
         "details": {
             "portfolio_id": row.get("portfolio_id"),
             "notes": row.get("notes"),
+            "info_review": _build_info_review_payload(row),
         },
     }
 
@@ -231,6 +247,7 @@ def _build_weekly_reflection_item(row: dict) -> dict:
         "details": {
             "week_start": row.get("week_start"),
             "week_end": row.get("week_end"),
+            "info_review": _build_info_review_payload(row),
         },
     }
 

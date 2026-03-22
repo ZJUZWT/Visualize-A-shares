@@ -180,12 +180,14 @@ class TestStrategyHistoryReadModels:
                 """
                 INSERT INTO agent.daily_reviews
                     (id, review_date, total_reviews, win_count, loss_count,
-                     holding_count, total_pnl_pct, summary, created_at)
+                     holding_count, total_pnl_pct, summary,
+                     info_review_summary, info_review_details, created_at)
                 VALUES
                     ('daily-1', '2026-03-21', 3, 2, 1, 0, 0.0375,
-                     '日复盘：执行较稳', '2026-03-21T16:10:00'),
+                     '日复盘：执行较稳', '信息复盘：有效信号占优',
+                     '{"digest_count":3,"useful_count":2}', '2026-03-21T16:10:00'),
                     ('daily-2', '2026-03-19', 2, 1, 1, 0, 0.0040,
-                     '日复盘：震荡等待', '2026-03-19T16:10:00')
+                     '日复盘：震荡等待', null, null, '2026-03-19T16:10:00')
                 """
             )
         )
@@ -194,10 +196,12 @@ class TestStrategyHistoryReadModels:
                 """
                 INSERT INTO agent.weekly_reflections
                     (id, week_start, week_end, total_reviews, win_count, loss_count,
-                     win_rate, total_pnl_pct, summary, created_at)
+                     win_rate, total_pnl_pct, summary,
+                     info_review_summary, info_review_details, created_at)
                 VALUES
                     ('weekly-1', '2026-03-16', '2026-03-20', 8, 5, 3, 0.625, 0.052,
-                     '周反思：仓位控制优于追涨', '2026-03-20T18:00:00')
+                     '周反思：仓位控制优于追涨', '周信息复盘：缺失来源集中在公告',
+                     '{"digest_count":8,"misleading_count":2}', '2026-03-20T18:00:00')
                 """
             )
         )
@@ -212,10 +216,14 @@ class TestStrategyHistoryReadModels:
         assert reflections[0]["metrics"]["win_rate"] == pytest.approx(2 / 3)
         assert reflections[0]["metrics"]["avg_pnl_pct"] == pytest.approx(0.0125)
         assert reflections[0]["details"]["notes"] is None
+        assert reflections[0]["details"]["info_review"]["summary"] == "信息复盘：有效信号占优"
+        assert reflections[0]["details"]["info_review"]["details"]["digest_count"] == 3
         assert reflections[1]["kind"] == "weekly"
         assert reflections[1]["date"] == "2026-03-20"
         assert reflections[1]["details"]["week_start"] == "2026-03-16"
         assert reflections[1]["details"]["week_end"] == "2026-03-20"
+        assert reflections[1]["details"]["info_review"]["summary"] == "周信息复盘：缺失来源集中在公告"
+        assert reflections[1]["details"]["info_review"]["details"]["misleading_count"] == 2
 
 
 class TestStrategyHistoryRoutes:
@@ -267,10 +275,12 @@ class TestStrategyHistoryRoutes:
                 """
                 INSERT INTO agent.daily_reviews
                     (id, review_date, total_reviews, win_count, loss_count,
-                     holding_count, total_pnl_pct, summary, created_at)
+                     holding_count, total_pnl_pct, summary,
+                     info_review_summary, info_review_details, created_at)
                 VALUES
                     ('daily-1', '2026-03-21', 3, 2, 1, 0, 0.0375,
-                     '日复盘：执行较稳', '2026-03-21T16:10:00')
+                     '日复盘：执行较稳', '信息复盘：有效信号占优',
+                     '{"digest_count":3,"useful_count":2}', '2026-03-21T16:10:00')
                 """
             )
         )
@@ -282,3 +292,4 @@ class TestStrategyHistoryRoutes:
         assert len(body) == 1
         assert body[0]["kind"] == "daily"
         assert body[0]["summary"] == "日复盘：执行较稳"
+        assert body[0]["details"]["info_review"]["summary"] == "信息复盘：有效信号占优"

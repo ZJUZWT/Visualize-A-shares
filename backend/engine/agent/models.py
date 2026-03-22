@@ -314,6 +314,8 @@ class DailyReview(BaseModel):
     holding_count: int = 0
     total_pnl_pct: float = 0.0
     summary: str | None = None
+    info_review_summary: str | None = None
+    info_review_details: dict[str, Any] | list[Any] | str | None = None
     created_at: str
 
 
@@ -328,6 +330,8 @@ class WeeklyReflection(BaseModel):
     win_rate: float = 0.0
     total_pnl_pct: float = 0.0
     summary: str | None = None
+    info_review_summary: str | None = None
+    info_review_details: dict[str, Any] | list[Any] | str | None = None
     created_at: str
 
 
