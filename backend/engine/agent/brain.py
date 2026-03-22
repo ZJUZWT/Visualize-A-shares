@@ -16,6 +16,7 @@ from datetime import date
 from loguru import logger
 
 from engine.agent.db import AgentDB
+from engine.agent.data_hunger import DataHungerService
 from engine.agent.execution import ExecutionCoordinator
 from engine.agent.memory import MemoryManager
 from engine.agent.service import AgentService
@@ -31,6 +32,7 @@ class AgentBrain:
         self.service = AgentService(db=self.db, validator=TradeValidator())
         self.execution = ExecutionCoordinator(portfolio_id, self.service)
         self.memory = MemoryManager(self.db)
+        self.data_hunger = DataHungerService(db=self.db, agent_service=self.service)
 
     async def execute(self, run_id: str):
         """执行一次完整的分析→决策→执行流程"""
@@ -43,11 +45,15 @@ class AgentBrain:
                 "state_before": state_before,
             })
             config = await self.service.get_brain_config()
+            signal_hits = await self._scan_watch_signals()
+            triggered_signal_ids = self._collect_triggered_signal_ids(signal_hits)
 
             # Step 1: 标的筛选
             candidates = await self._select_candidates(config)
+            candidates = self._merge_signal_candidates(candidates, signal_hits)
             await self.service.update_brain_run(run_id, {
                 "candidates": candidates,
+                "triggered_signal_ids": triggered_signal_ids,
             })
             logger.info(f"🧠 候选标的: {len(candidates)} 只")
 
@@ -58,6 +64,8 @@ class AgentBrain:
                     "status": "completed",
                     "decisions": [],
                     "state_after": state_after,
+                    "info_digest_ids": [],
+                    "triggered_signal_ids": triggered_signal_ids,
                     "execution_summary": {
                         "candidate_count": 0,
                         "analysis_count": 0,
@@ -76,6 +84,18 @@ class AgentBrain:
             })
             logger.info(f"🧠 分析完成: {len(analysis_results)} 只")
 
+            digest_results = await self._digest_candidates(run_id, candidates, signal_hits)
+            info_digest_ids = [
+                digest["id"] for digest in digest_results
+                if isinstance(digest, dict) and digest.get("id")
+            ]
+            self._current_digests = digest_results
+            self._current_triggered_signals = signal_hits
+            await self.service.update_brain_run(run_id, {
+                "info_digest_ids": info_digest_ids,
+                "triggered_signal_ids": triggered_signal_ids,
+            })
+
             # Step 3: LLM 综合决策
             portfolio = await self.service.get_portfolio(self.portfolio_id)
             decisions = await self._make_decisions(analysis_results, portfolio, config, run_id)
@@ -93,10 +113,14 @@ class AgentBrain:
                 "status": "completed",
                 "plan_ids": plan_ids,
                 "trade_ids": trade_ids,
+                "info_digest_ids": info_digest_ids,
+                "triggered_signal_ids": triggered_signal_ids,
                 "state_after": state_after,
                 "execution_summary": {
                     "candidate_count": len(candidates),
                     "analysis_count": len(analysis_results),
+                    "digest_count": len(digest_results),
+                    "triggered_signal_count": len(triggered_signal_ids),
                     "decision_count": len(decisions),
                     "plan_count": len(plan_ids),
                     "trade_count": len(trade_ids),
@@ -224,6 +248,71 @@ class AgentBrain:
                 })
         return results
 
+    async def _scan_watch_signals(self) -> list[dict]:
+        hunger = getattr(self, "data_hunger", None)
+        if hunger is None:
+            return []
+        return await hunger.scan_watch_signals(self.portfolio_id)
+
+    def _collect_triggered_signal_ids(self, signal_hits: list[dict]) -> list[str]:
+        signal_ids: list[str] = []
+        for hit in signal_hits:
+            signal_id = hit.get("signal_id")
+            if signal_id and signal_id not in signal_ids:
+                signal_ids.append(signal_id)
+        return signal_ids
+
+    def _merge_signal_candidates(self, candidates: list[dict], signal_hits: list[dict]) -> list[dict]:
+        merged = list(candidates)
+        seen = {candidate.get("stock_code") for candidate in candidates if candidate.get("stock_code")}
+        for hit in signal_hits:
+            stock_code = hit.get("stock_code")
+            if not stock_code or stock_code in seen:
+                continue
+            seen.add(stock_code)
+            merged.append({
+                "stock_code": stock_code,
+                "stock_name": hit.get("stock_name", stock_code),
+                "source": "watch_signal",
+            })
+        return merged
+
+    async def _digest_candidates(
+        self,
+        run_id: str,
+        candidates: list[dict],
+        signal_hits: list[dict],
+    ) -> list[dict]:
+        hunger = getattr(self, "data_hunger", None)
+        if hunger is None:
+            return []
+
+        hits_by_stock: dict[str, list[dict]] = {}
+        for hit in signal_hits:
+            stock_code = hit.get("stock_code")
+            if not stock_code:
+                continue
+            hits_by_stock.setdefault(stock_code, []).append(hit)
+
+        digests: list[dict] = []
+        for candidate in candidates:
+            stock_code = candidate.get("stock_code")
+            if not stock_code:
+                continue
+            try:
+                digest = await hunger.execute_and_digest(
+                    self.portfolio_id,
+                    run_id,
+                    stock_code,
+                    triggers=hits_by_stock.get(stock_code, []),
+                )
+            except Exception as e:
+                logger.warning(f"🧠 digest {stock_code} 失败: {e}")
+                continue
+            if isinstance(digest, dict):
+                digests.append(digest)
+        return digests
+
     async def _analyze_single(self, code: str) -> dict:
         """分析单个标的"""
         from engine.expert.tools import ExpertTools
@@ -287,6 +376,10 @@ class AgentBrain:
         single_pct = config.get("single_position_pct", 0.15)
         max_pos = config.get("max_position_count", 10)
         memory_rules_section = self._format_memory_rules(memory_rules)
+        digest_section = self._format_digest_context(
+            getattr(self, "_current_digests", []),
+            getattr(self, "_current_triggered_signals", []),
+        )
 
         prompt = f"""你是一个专业的 A 股投资 Agent，基于以下分析数据做出交易决策。
 
@@ -298,6 +391,7 @@ class AgentBrain:
 
 ## 候选标的分析
 {analysis_desc}
+{digest_section}
 
 ## 决策规则
 1. 单只股票仓位不超过总资产的 {single_pct * 100:.0f}%
@@ -358,6 +452,8 @@ class AgentBrain:
                 "prompt": prompt,
                 "raw_output": raw,
                 "parsed_decisions": decisions,
+                "digests": getattr(self, "_current_digests", []),
+                "triggered_signals": getattr(self, "_current_triggered_signals", []),
             },
         })
 
@@ -381,6 +477,31 @@ class AgentBrain:
         for idx, rule in enumerate(rules, start=1):
             confidence = float(rule.get("confidence", 0))
             lines.append(f"{idx}. {rule['rule_text']} (置信度: {confidence:.0%})")
+        return "\n".join(lines)
+
+    def _format_digest_context(self, digests: list[dict], signal_hits: list[dict]) -> str:
+        if not digests and not signal_hits:
+            return ""
+
+        lines = ["", "## 信息消化摘要"]
+        if signal_hits:
+            lines.append("观察信号命中：")
+            for hit in signal_hits:
+                stock_code = hit.get("stock_code", "unknown")
+                matched_keywords = ",".join(hit.get("matched_keywords") or [])
+                lines.append(f"- {stock_code}: 关键词 [{matched_keywords}]")
+        if digests:
+            lines.append("Digest：")
+            for digest in digests:
+                stock_code = digest.get("stock_code", "unknown")
+                impact = digest.get("impact_assessment", "none")
+                summary = digest.get("summary") or digest.get("strategy_relevance") or ""
+                evidence = digest.get("key_evidence") or []
+                evidence_text = ", ".join(str(item) for item in evidence)
+                lines.append(f"- {stock_code}: {summary}")
+                lines.append(f"  impact={impact}")
+                if evidence_text:
+                    lines.append(f"  evidence={evidence_text}")
         return "\n".join(lines)
 
     # ── Step 4: 自动执行 ──────────────────────────────

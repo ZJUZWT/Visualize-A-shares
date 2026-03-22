@@ -444,6 +444,69 @@ class TestBrainCandidates:
 
 
 class TestBrainDecisionRuns:
+    def test_make_decisions_injects_digest_summary_into_prompt(self):
+        from engine.agent.brain import AgentBrain
+
+        class FakeService:
+            def __init__(self):
+                self.updates = []
+
+            async def update_brain_run(self, run_id, updates):
+                self.updates.append((run_id, updates))
+
+        class FakeLLM:
+            def __init__(self):
+                self.messages = None
+
+            async def chat_stream(self, messages):
+                self.messages = messages
+                yield '[{"stock_code":"600519","stock_name":"贵州茅台","action":"buy","price":1750.0,"quantity":100}]'
+
+        class FakeMemoryManager:
+            async def get_active_rules(self, limit=20):
+                assert limit == 20
+                return []
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain.portfolio_id = "p1"
+        brain.service = FakeService()
+        brain.memory = FakeMemoryManager()
+        brain._current_digests = [
+            {
+                "stock_code": "600519",
+                "summary": "白酒需求回暖，资金关注度提升",
+                "impact_assessment": "minor_adjust",
+                "key_evidence": ["news_count=3", "industry_cycle=高位震荡"],
+            }
+        ]
+        brain._current_triggered_signals = [
+            {
+                "signal_id": "signal-1",
+                "stock_code": "600519",
+                "matched_keywords": ["白酒", "回暖"],
+            }
+        ]
+        fake_llm = FakeLLM()
+
+        with patch("llm.LLMProviderFactory.create", return_value=fake_llm):
+            decisions = run(brain._make_decisions(
+                [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}],
+                {
+                    "cash_balance": 1000000.0,
+                    "total_asset": 1000000.0,
+                    "positions": [],
+                },
+                {"single_position_pct": 0.15, "max_position_count": 10},
+                run_id="run-digest",
+            ))
+
+        assert len(decisions) == 1
+        prompt = fake_llm.messages[0].content
+        assert "信息消化摘要" in prompt
+        assert "白酒需求回暖，资金关注度提升" in prompt
+        assert "minor_adjust" in prompt
+        assert "白酒" in prompt
+
     def test_make_decisions_persists_thinking_process(self):
         from engine.agent.brain import AgentBrain
 
@@ -505,9 +568,40 @@ class TestBrainDecisionRuns:
                     "positions": [],
                 }
 
+        class FakeDataHunger:
+            async def scan_watch_signals(self, portfolio_id):
+                assert portfolio_id == "p1"
+                return [
+                    {
+                        "signal_id": "signal-1",
+                        "stock_code": "600519",
+                        "matched_keywords": ["白酒", "回暖"],
+                    }
+                ]
+
+            async def execute_and_digest(self, portfolio_id, run_id, stock_code, triggers=None):
+                assert portfolio_id == "p1"
+                assert run_id == "run-1"
+                assert stock_code == "600519"
+                assert triggers == [
+                    {
+                        "signal_id": "signal-1",
+                        "stock_code": "600519",
+                        "matched_keywords": ["白酒", "回暖"],
+                    }
+                ]
+                return {
+                    "id": "digest-1",
+                    "stock_code": stock_code,
+                    "summary": "白酒需求回暖，资金关注度提升",
+                    "impact_assessment": "minor_adjust",
+                    "key_evidence": ["news_count=3"],
+                }
+
         brain = AgentBrain.__new__(AgentBrain)
         brain.portfolio_id = "p1"
         brain.service = FakeService()
+        brain.data_hunger = FakeDataHunger()
 
         async def fake_select_candidates(config):
             return [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}]
@@ -536,6 +630,8 @@ class TestBrainDecisionRuns:
         assert final_update["state_after"] == {
             "portfolio_id": "p1", "position_level": "medium"
         }
+        assert final_update["info_digest_ids"] == ["digest-1"]
+        assert final_update["triggered_signal_ids"] == ["signal-1"]
         assert final_update["execution_summary"]["decision_count"] == 1
         assert final_update["execution_summary"]["plan_count"] == 1
         assert final_update["execution_summary"]["trade_count"] == 1
