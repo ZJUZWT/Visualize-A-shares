@@ -10,7 +10,13 @@ from pydantic import BaseModel
 
 from engine.agent.chat_routes import create_agent_chat_router
 from engine.agent.db import AgentDB
-from engine.agent.models import TradeInput, TradePlanInput, TradePlanUpdate, WatchlistInput
+from engine.agent.models import (
+    TradeInput,
+    TradePlanInput,
+    TradePlanUpdate,
+    WatchSignalInput,
+    WatchlistInput,
+)
 from engine.agent.service import AgentService
 from engine.agent.strategy_action_routes import create_strategy_action_router
 from engine.agent.validator import TradeValidator
@@ -30,6 +36,10 @@ class CreateStrategyRequest(BaseModel):
     stop_loss: float | None = None
     reasoning: str = ""
     details: dict = {}
+
+
+class CreateWatchSignalRequest(WatchSignalInput):
+    portfolio_id: str
 
 
 # ── 路由工厂 ──────────────────────────────────────────
@@ -195,6 +205,34 @@ def create_agent_router() -> APIRouter:
         try:
             await svc.remove_watchlist(item_id)
             return {"ok": True}
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.post("/watch-signals")
+    async def create_watch_signal(req: CreateWatchSignalRequest):
+        svc = _get_service()
+        try:
+            payload = WatchSignalInput(**req.model_dump(exclude={"portfolio_id"}))
+            return await svc.create_watch_signal(req.portfolio_id, payload)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.get("/watch-signals")
+    async def list_watch_signals(
+        portfolio_id: str,
+        status: str | None = Query(None),
+    ):
+        svc = _get_service()
+        try:
+            return await svc.list_watch_signals(portfolio_id, status=status)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.patch("/watch-signals/{signal_id}")
+    async def update_watch_signal(signal_id: str, req: dict):
+        svc = _get_service()
+        try:
+            return await svc.update_watch_signal(signal_id, req)
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 

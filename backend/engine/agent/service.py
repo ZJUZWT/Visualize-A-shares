@@ -28,6 +28,15 @@ BRAIN_RUN_JSON_FIELDS = (
     "info_digest_ids",
     "triggered_signal_ids",
 )
+WATCH_SIGNAL_JSON_FIELDS = ("keywords", "trigger_evidence")
+WATCH_SIGNAL_STATUSES = {
+    "watching",
+    "analyzing",
+    "triggered",
+    "failed",
+    "expired",
+    "cancelled",
+}
 
 
 def _decode_json_value(value):
@@ -68,6 +77,14 @@ def _normalize_record(row: dict) -> dict:
         value = normalized.get(field)
         if isinstance(value, str) and "T" in value:
             normalized[field] = value.split("T", 1)[0]
+    return normalized
+
+
+def _normalize_watch_signal(row: dict) -> dict:
+    normalized = _normalize_record(row)
+    for field in WATCH_SIGNAL_JSON_FIELDS:
+        normalized[field] = _decode_json_value(normalized.get(field))
+        normalized[field] = _normalize_json_safe(normalized[field])
     return normalized
 
 
@@ -757,6 +774,131 @@ class AgentService:
         await self.db.execute_write(
             "DELETE FROM agent.watchlist WHERE id = ?", [item_id]
         )
+
+    async def create_watch_signal(
+        self,
+        portfolio_id: str,
+        item_input,
+        source_run_id: str | None = None,
+    ) -> dict:
+        await self.get_portfolio(portfolio_id)
+        if item_input.status not in WATCH_SIGNAL_STATUSES:
+            raise ValueError(f"非法状态: {item_input.status}")
+
+        signal_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        keywords = _normalize_json_safe(item_input.keywords)
+        trigger_evidence = _normalize_json_safe(item_input.trigger_evidence)
+        await self.db.execute_write(
+            """
+            INSERT INTO agent.watch_signals (
+                id, portfolio_id, stock_code, sector, signal_description,
+                check_engine, keywords, if_triggered, cycle_context, status,
+                trigger_evidence, source_run_id, created_at, updated_at, triggered_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                signal_id,
+                portfolio_id,
+                item_input.stock_code,
+                item_input.sector,
+                item_input.signal_description,
+                item_input.check_engine,
+                json.dumps(keywords, ensure_ascii=False) if keywords is not None else None,
+                item_input.if_triggered,
+                item_input.cycle_context,
+                item_input.status,
+                (
+                    json.dumps(trigger_evidence, ensure_ascii=False)
+                    if trigger_evidence is not None else None
+                ),
+                source_run_id,
+                now,
+                now,
+                now if item_input.status == "triggered" else None,
+            ],
+        )
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.watch_signals WHERE id = ?",
+            [signal_id],
+        )
+        return _normalize_watch_signal(rows[0])
+
+    async def list_watch_signals(
+        self,
+        portfolio_id: str,
+        status: str | None = None,
+    ) -> list[dict]:
+        await self.get_portfolio(portfolio_id)
+        if status is not None and status not in WATCH_SIGNAL_STATUSES:
+            raise ValueError(f"非法状态: {status}")
+
+        sql = """
+            SELECT *
+            FROM agent.watch_signals
+            WHERE portfolio_id = ?
+        """
+        params: list = [portfolio_id]
+        if status is not None:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY updated_at DESC, created_at DESC"
+        rows = await self.db.execute_read(sql, params)
+        return [_normalize_watch_signal(row) for row in rows]
+
+    async def update_watch_signal(self, signal_id: str, updates: dict) -> dict:
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.watch_signals WHERE id = ?",
+            [signal_id],
+        )
+        if not rows:
+            raise ValueError(f"观察信号 {signal_id} 不存在")
+
+        sets = []
+        params = []
+        for key in (
+            "stock_code",
+            "sector",
+            "signal_description",
+            "check_engine",
+            "keywords",
+            "if_triggered",
+            "cycle_context",
+            "status",
+            "trigger_evidence",
+            "source_run_id",
+        ):
+            if key not in updates:
+                continue
+            value = _normalize_json_safe(updates[key])
+            if key == "status" and value not in WATCH_SIGNAL_STATUSES:
+                raise ValueError(f"非法状态: {value}")
+            if key in WATCH_SIGNAL_JSON_FIELDS and value is not None:
+                value = json.dumps(value, ensure_ascii=False)
+            sets.append(f"{key} = ?")
+            params.append(value)
+
+        if "status" in updates:
+            sets.append("triggered_at = ?")
+            params.append(
+                datetime.now().isoformat() if updates["status"] == "triggered" else None
+            )
+
+        if sets:
+            sets.append("updated_at = ?")
+            params.append(datetime.now().isoformat())
+            params.append(signal_id)
+            await self.db.execute_write(
+                f"UPDATE agent.watch_signals SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.watch_signals WHERE id = ?",
+            [signal_id],
+        )
+        return _normalize_watch_signal(rows[0])
 
     # ── Agent State ──────────────────────────────────
 
