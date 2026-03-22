@@ -29,6 +29,7 @@ BRAIN_RUN_JSON_FIELDS = (
     "triggered_signal_ids",
 )
 WATCH_SIGNAL_JSON_FIELDS = ("keywords", "trigger_evidence")
+INFO_DIGEST_JSON_FIELDS = ("raw_summary", "structured_summary", "missing_sources")
 WATCH_SIGNAL_STATUSES = {
     "watching",
     "analyzing",
@@ -83,6 +84,14 @@ def _normalize_record(row: dict) -> dict:
 def _normalize_watch_signal(row: dict) -> dict:
     normalized = _normalize_record(row)
     for field in WATCH_SIGNAL_JSON_FIELDS:
+        normalized[field] = _decode_json_value(normalized.get(field))
+        normalized[field] = _normalize_json_safe(normalized[field])
+    return normalized
+
+
+def _normalize_info_digest(row: dict) -> dict:
+    normalized = _normalize_record(row)
+    for field in INFO_DIGEST_JSON_FIELDS:
         normalized[field] = _decode_json_value(normalized.get(field))
         normalized[field] = _normalize_json_safe(normalized[field])
     return normalized
@@ -899,6 +908,78 @@ class AgentService:
             [signal_id],
         )
         return _normalize_watch_signal(rows[0])
+
+    async def create_info_digest(
+        self,
+        portfolio_id: str,
+        run_id: str,
+        stock_code: str,
+        digest_type: str,
+        raw_summary,
+        structured_summary,
+        strategy_relevance: str | None,
+        impact_assessment: str,
+        missing_sources: list[str] | None = None,
+    ) -> dict:
+        await self.get_portfolio(portfolio_id)
+        digest_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        await self.db.execute_write(
+            """
+            INSERT INTO agent.info_digests (
+                id, portfolio_id, run_id, stock_code, digest_type,
+                raw_summary, structured_summary, strategy_relevance,
+                impact_assessment, missing_sources, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                digest_id,
+                portfolio_id,
+                run_id,
+                stock_code,
+                digest_type,
+                json.dumps(_normalize_json_safe(raw_summary), ensure_ascii=False),
+                json.dumps(_normalize_json_safe(structured_summary), ensure_ascii=False),
+                strategy_relevance,
+                impact_assessment,
+                (
+                    json.dumps(_normalize_json_safe(missing_sources), ensure_ascii=False)
+                    if missing_sources is not None else None
+                ),
+                now,
+            ],
+        )
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.info_digests WHERE id = ?",
+            [digest_id],
+        )
+        return _normalize_info_digest(rows[0])
+
+    async def list_info_digests(
+        self,
+        portfolio_id: str,
+        run_id: str | None = None,
+        stock_code: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        await self.get_portfolio(portfolio_id)
+        sql = """
+            SELECT *
+            FROM agent.info_digests
+            WHERE portfolio_id = ?
+        """
+        params: list = [portfolio_id]
+        if run_id is not None:
+            sql += " AND run_id = ?"
+            params.append(run_id)
+        if stock_code is not None:
+            sql += " AND stock_code = ?"
+            params.append(stock_code)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = await self.db.execute_read(sql, params)
+        return [_normalize_info_digest(row) for row in rows]
 
     # ── Agent State ──────────────────────────────────
 

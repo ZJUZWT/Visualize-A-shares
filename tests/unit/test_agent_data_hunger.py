@@ -143,3 +143,142 @@ class TestWatchSignalRoutes:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "triggered"
+
+
+class _FakeInfoEngine:
+    def __init__(self, *, news=None, announcements=None, announcement_error: Exception | None = None):
+        self._news = news or []
+        self._announcements = announcements or []
+        self._announcement_error = announcement_error
+
+    async def get_news(self, code: str, limit: int = 20):
+        return self._news
+
+    async def get_announcements(self, code: str, limit: int = 10):
+        if self._announcement_error is not None:
+            raise self._announcement_error
+        return self._announcements
+
+
+class _FakeIndustryEngine:
+    def __init__(self, cognition, capital_structure):
+        self._cognition = cognition
+        self._capital_structure = capital_structure
+
+    async def analyze(self, target: str, as_of_date: str = "", force_refresh: bool = False):
+        return self._cognition
+
+    async def get_capital_structure(self, code: str, as_of_date: str = ""):
+        return self._capital_structure
+
+
+class TestDataHungerService:
+    def setup_method(self):
+        self._tmp = tempfile.mkdtemp()
+        self.db, self.svc = _make_service(self._tmp)
+        run(self.svc.create_portfolio("p1", "live", 1000000.0))
+
+    def teardown_method(self):
+        self.db.close()
+
+    def test_query_industry_context_returns_normalized_payload(self):
+        from engine.agent.data_hunger import DataHungerService
+        from engine.industry.schemas import CapitalStructure, IndustryCognition
+
+        hunger = DataHungerService(
+            db=self.db,
+            agent_service=self.svc,
+            info_engine=_FakeInfoEngine(),
+            industry_engine=_FakeIndustryEngine(
+                IndustryCognition(
+                    industry="饮料制造",
+                    target="600519",
+                    cycle_position="高位震荡",
+                    catalysts=["旺季提价"],
+                    risks=["需求放缓"],
+                    core_drivers=["消费复苏"],
+                    as_of_date="2026-03-22",
+                ),
+                CapitalStructure(
+                    code="600519",
+                    as_of_date="2026-03-22",
+                    structure_summary="北向增持，主力净流入",
+                ),
+            ),
+            daily_history_fetcher=lambda code: {"code": code, "history": []},
+            technical_indicator_fetcher=lambda code: {"macd": "golden_cross"},
+        )
+
+        result = run(hunger.query_industry_context("600519"))
+        assert result["industry"] == "饮料制造"
+        assert result["cycle_position"] == "高位震荡"
+        assert result["capital_summary"] == "北向增持，主力净流入"
+
+    def test_scan_watch_signals_matches_keywords(self):
+        from engine.agent.data_hunger import DataHungerService
+        from engine.agent.models import WatchSignalInput
+        from engine.industry.schemas import CapitalStructure, IndustryCognition
+
+        run(self.svc.create_watch_signal(
+            "p1",
+            WatchSignalInput(
+                stock_code="600519",
+                signal_description="白酒景气度回升",
+                check_engine="info",
+                keywords=["白酒", "回升"],
+            ),
+        ))
+
+        hunger = DataHungerService(
+            db=self.db,
+            agent_service=self.svc,
+            info_engine=_FakeInfoEngine(
+                news=[{"title": "白酒需求回升，龙头股走强", "content": "渠道反馈改善"}],
+            ),
+            industry_engine=_FakeIndustryEngine(
+                IndustryCognition(industry="饮料制造", target="600519"),
+                CapitalStructure(code="600519"),
+            ),
+            daily_history_fetcher=lambda code: {"code": code, "history": []},
+            technical_indicator_fetcher=lambda code: {"macd": "golden_cross"},
+        )
+
+        hits = run(hunger.scan_watch_signals("p1"))
+        assert hits[0]["signal_id"]
+        assert hits[0]["stock_code"] == "600519"
+        assert hits[0]["matched_keywords"] == ["白酒", "回升"]
+
+    def test_execute_and_digest_marks_missing_sources(self):
+        from engine.agent.data_hunger import DataHungerService
+        from engine.industry.schemas import CapitalStructure, IndustryCognition
+
+        hunger = DataHungerService(
+            db=self.db,
+            agent_service=self.svc,
+            info_engine=_FakeInfoEngine(
+                news=[{"title": "白酒龙头获资金关注", "content": "成交放大"}],
+                announcement_error=RuntimeError("announcements unavailable"),
+            ),
+            industry_engine=_FakeIndustryEngine(
+                IndustryCognition(
+                    industry="饮料制造",
+                    target="600519",
+                    cycle_position="高位震荡",
+                    catalysts=["旺季提价"],
+                    risks=["需求放缓"],
+                    core_drivers=["消费复苏"],
+                    as_of_date="2026-03-22",
+                ),
+                CapitalStructure(
+                    code="600519",
+                    as_of_date="2026-03-22",
+                    structure_summary="北向增持，主力净流入",
+                ),
+            ),
+            daily_history_fetcher=lambda code: {"code": code, "history": [{"close": 1800.0}]},
+            technical_indicator_fetcher=lambda code: {"macd": "golden_cross", "rsi": 61.5},
+        )
+
+        digest = run(hunger.execute_and_digest("p1", "run-1", "600519", triggers=[]))
+        assert digest["impact_assessment"] in {"none", "noted", "minor_adjust", "reassess"}
+        assert digest["missing_sources"] == ["announcements"]
