@@ -545,13 +545,15 @@ function normalizeStrategyActions(raw: unknown): AgentStrategyActionRecord[] {
   return items
     .map((item, index) => {
       const data = isRecord(item) ? item : {};
-      const planSource = isRecord(data.trade_plan)
-        ? data.trade_plan
+      const planSource = isRecord(data.plan_snapshot)
+        ? data.plan_snapshot
         : isRecord(data.plan)
           ? data.plan
-          : isRecord(data.strategy)
-            ? data.strategy
-            : data;
+          : isRecord(data.trade_plan)
+            ? data.trade_plan
+            : isRecord(data.strategy)
+              ? data.strategy
+              : data;
       const plan = buildStrategyPlanFromRaw(planSource);
       const strategyKey =
         typeof data.strategy_key === "string"
@@ -1241,9 +1243,9 @@ export default function AgentPage() {
             session_id: request.session_id,
             message_id: request.message_id,
             strategy_key: request.strategy_key,
-            stock_code: request.plan.stock_code,
-            trade_plan: request.plan,
+            plan: request.plan,
             reason: request.reason ?? null,
+            source_run_id: request.source_run_id ?? undefined,
           }),
         });
 

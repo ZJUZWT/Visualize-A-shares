@@ -245,6 +245,7 @@ export interface AgentStrategyActionRequest {
   strategy_key: string;
   plan: TradePlanData;
   reason?: string | null;
+  source_run_id?: string | null;
 }
 
 export type AgentConsoleTab = "runs" | "reviews" | "memory" | "reflection";
