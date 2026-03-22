@@ -145,6 +145,62 @@ class TestWatchSignalRoutes:
         assert resp.json()["status"] == "triggered"
 
 
+class TestInfoDigestRoutes:
+    def setup_method(self):
+        self._tmp = tempfile.mkdtemp()
+        self.app, self.db = _create_test_app(self._tmp)
+        self.client = TestClient(self.app)
+        self.client.post(
+            "/api/v1/agent/portfolio",
+            json={"id": "p1", "mode": "live", "initial_capital": 1000000.0},
+        )
+
+        from engine.agent.service import AgentService
+        from engine.agent.validator import TradeValidator
+
+        self.svc = AgentService(db=self.db, validator=TradeValidator())
+        run(self.svc.create_info_digest(
+            portfolio_id="p1",
+            run_id="run-1",
+            stock_code="600519",
+            digest_type="wake",
+            raw_summary={"news": [{"title": "白酒回暖"}]},
+            structured_summary={"summary": "白酒需求回暖"},
+            strategy_relevance="watch signal triggered",
+            impact_assessment="minor_adjust",
+            missing_sources=["announcements"],
+        ))
+        run(self.svc.create_info_digest(
+            portfolio_id="p1",
+            run_id="run-2",
+            stock_code="000858",
+            digest_type="wake",
+            raw_summary={"news": [{"title": "渠道改善"}]},
+            structured_summary={"summary": "渠道反馈改善"},
+            strategy_relevance="monitor only",
+            impact_assessment="noted",
+            missing_sources=[],
+        ))
+
+    def teardown_method(self):
+        self.db.close()
+
+    def test_get_info_digests_route_filters_by_run(self):
+        resp = self.client.get("/api/v1/agent/info-digests?portfolio_id=p1&run_id=run-1")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert len(payload) == 1
+        assert payload[0]["run_id"] == "run-1"
+        assert payload[0]["stock_code"] == "600519"
+
+    def test_get_info_digests_route_returns_json_safe_fields(self):
+        resp = self.client.get("/api/v1/agent/info-digests?portfolio_id=p1&limit=5")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload[0]["structured_summary"]["summary"]
+        assert isinstance(payload[0]["missing_sources"], list)
+
+
 class _FakeInfoEngine:
     def __init__(self, *, news=None, announcements=None, announcement_error: Exception | None = None):
         self._news = news or []

@@ -236,6 +236,24 @@ def create_agent_router() -> APIRouter:
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
+    @router.get("/info-digests")
+    async def list_info_digests(
+        portfolio_id: str,
+        run_id: str | None = None,
+        stock_code: str | None = None,
+        limit: int = Query(50, ge=1, le=200),
+    ):
+        svc = _get_service()
+        try:
+            return await svc.list_info_digests(
+                portfolio_id=portfolio_id,
+                run_id=run_id,
+                stock_code=stock_code,
+                limit=limit,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
     # ── Agent State ──
 
     @router.get("/state")
