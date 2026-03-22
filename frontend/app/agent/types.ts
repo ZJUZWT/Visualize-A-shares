@@ -1,3 +1,5 @@
+import type { TradePlanData } from "@/lib/parseTradePlan";
+
 export interface AgentState {
   portfolio_id: string;
   market_view: Record<string, unknown> | null;
@@ -190,4 +192,58 @@ export interface WatchlistItem {
   created_at: string;
 }
 
+export interface AgentChatEntry {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+  is_streaming?: boolean;
+}
+
+export type AgentStrategyDecision = "adopted" | "rejected";
+export type AgentStrategyActionIntent = "adopt" | "reject";
+
+export interface AgentStrategyActionRecord {
+  id: string;
+  strategy_key: string;
+  action: AgentStrategyDecision;
+  status: string | null;
+  reason: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AgentStrategyActionState {
+  id: string | null;
+  action: AgentStrategyDecision | null;
+  status: string | null;
+  reason: string | null;
+  updated_at: string | null;
+  is_submitting: boolean;
+  error: string | null;
+}
+
+export type AgentStrategyActionLookup = Record<string, AgentStrategyActionState>;
+
+export interface AgentStrategyActionRequest {
+  intent: AgentStrategyActionIntent;
+  message_id: string;
+  strategy_key: string;
+  plan: TradePlanData;
+  reason?: string | null;
+}
+
 export type AgentConsoleTab = "runs" | "reviews" | "memory" | "reflection";
+
+export function buildAgentStrategyKey(plan: TradePlanData): string {
+  const numericPart = (value: number | null) => (value === null ? "" : value.toFixed(4));
+
+  return [
+    plan.stock_code.trim().toUpperCase(),
+    plan.direction,
+    numericPart(plan.entry_price),
+    numericPart(plan.take_profit),
+    numericPart(plan.stop_loss),
+    (plan.valid_until || "").trim(),
+  ].join("|");
+}

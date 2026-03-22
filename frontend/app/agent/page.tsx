@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { TradePlanData } from "@/lib/parseTradePlan";
 import NavSidebar from "@/components/ui/NavSidebar";
-import AgentRunFeed from "./components/AgentRunFeed";
+import AgentChatPanel from "./components/AgentChatPanel";
 import AgentStatePanel from "./components/AgentStatePanel";
 import DecisionRunPanel from "./components/DecisionRunPanel";
 import ExecutionLedgerPanel from "./components/ExecutionLedgerPanel";
@@ -11,20 +12,32 @@ import MemoryRulesPanel from "./components/MemoryRulesPanel";
 import ReflectionFeedPanel from "./components/ReflectionFeedPanel";
 import StrategyHistoryPanel from "./components/StrategyHistoryPanel";
 import {
+  AgentChatEntry,
   AgentConsoleTab,
   AgentState,
+  AgentStrategyActionRecord,
+  AgentStrategyActionRequest,
+  AgentStrategyActionState,
   BrainRun,
   LedgerOverview,
-  ReflectionFeedItem,
   MemoryRule,
+  ReflectionFeedItem,
   ReviewRecord,
   ReviewStats,
   StrategyHistoryEntry,
-  WeeklySummary,
   WatchlistItem,
+  WeeklySummary,
+  buildAgentStrategyKey,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+let chatEntryCounter = 0;
+
+function nextChatEntryId() {
+  chatEntryCounter += 1;
+  return `agent-chat-${Date.now()}-${chatEntryCounter}`;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -69,6 +82,19 @@ async function fetchFirstAvailable<T>(urls: string[]): Promise<T> {
     }
   }
   throw lastError ?? new Error("No available endpoint");
+}
+
+async function readErrorMessage(resp: Response, fallback: string): Promise<string> {
+  const text = await resp.text().catch(() => "");
+  if (!text) {
+    return fallback;
+  }
+  try {
+    const parsed = JSON.parse(text) as { detail?: string; message?: string };
+    return parsed.detail || parsed.message || fallback;
+  } catch {
+    return text;
+  }
 }
 
 function normalizeAgentState(portfolioId: string, raw: unknown): AgentState {
@@ -140,13 +166,20 @@ function normalizeLedgerOverview(portfolioId: string, raw: unknown): LedgerOverv
   };
 }
 
-function buildLedgerFallback(portfolioId: string, portfolio: unknown, plans: unknown, trades: unknown): LedgerOverview {
+function buildLedgerFallback(
+  portfolioId: string,
+  portfolio: unknown,
+  plans: unknown,
+  trades: unknown
+): LedgerOverview {
   const portfolioData = isRecord(portfolio) ? portfolio : {};
   const config = isRecord(portfolioData.config) ? portfolioData.config : {};
   const positions = Array.isArray(portfolioData.positions) ? portfolioData.positions : [];
   const planList = Array.isArray(plans) ? plans : [];
   const tradeList = Array.isArray(trades) ? trades : [];
-  const pendingPlans = planList.filter((plan) => isRecord(plan) && plan.status !== "completed" && plan.status !== "expired");
+  const pendingPlans = planList.filter(
+    (plan) => isRecord(plan) && plan.status !== "completed" && plan.status !== "expired"
+  );
 
   return {
     portfolio_id: typeof config.id === "string" ? config.id : portfolioId,
@@ -199,12 +232,12 @@ function normalizeReviewRecords(raw: unknown): ReviewRecord[] {
 
 function normalizeReviewStats(raw: unknown, records: ReviewRecord[]): ReviewStats {
   const data = isRecord(raw) ? raw : {};
-
   const totalReviews = records.length;
   const winCount = records.filter((record) => record.status === "win").length;
   const weeklyRecords = records.filter((record) => record.review_type === "weekly");
   const weeklyWinCount = weeklyRecords.filter((record) => record.status === "win").length;
-  const average = (values: number[]) => (values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length);
+  const average = (values: number[]) =>
+    values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
 
   return {
     total_win_rate:
@@ -213,13 +246,21 @@ function normalizeReviewStats(raw: unknown, records: ReviewRecord[]): ReviewStat
       ?? (totalReviews > 0 ? (winCount / totalReviews) * 100 : null),
     total_pnl_pct:
       normalizePercent(data.total_pnl_pct)
-      ?? average(records.map((record) => record.pnl_pct).filter((value): value is number => value !== null && value !== undefined)),
+      ?? average(
+        records
+          .map((record) => record.pnl_pct)
+          .filter((value): value is number => value !== null && value !== undefined)
+      ),
     weekly_win_rate:
       normalizePercent(data.weekly_win_rate)
       ?? (weeklyRecords.length > 0 ? (weeklyWinCount / weeklyRecords.length) * 100 : null),
     weekly_pnl_pct:
       normalizePercent(data.weekly_pnl_pct)
-      ?? average(weeklyRecords.map((record) => record.pnl_pct).filter((value): value is number => value !== null && value !== undefined)),
+      ?? average(
+        weeklyRecords
+          .map((record) => record.pnl_pct)
+          .filter((value): value is number => value !== null && value !== undefined)
+      ),
     total_reviews: toNumber(data.total_reviews) ?? totalReviews,
   };
 }
@@ -295,7 +336,12 @@ function normalizeReflectionFeed(raw: unknown): ReflectionFeedItem[] {
     const data = isRecord(item) ? item : {};
     const rawMetrics = isRecord(data.metrics) ? data.metrics : {};
     const metrics = Object.fromEntries(
-      Object.entries(rawMetrics).map(([key, value]) => [key, typeof value === "number" ? value : toNumber(value) ?? (typeof value === "string" ? value : null)])
+      Object.entries(rawMetrics).map(([key, value]) => [
+        key,
+        typeof value === "number"
+          ? value
+          : toNumber(value) ?? (typeof value === "string" ? value : null),
+      ])
     );
 
     return {
@@ -341,12 +387,19 @@ function normalizeStrategyHistory(raw: unknown): StrategyHistoryEntry[] {
     const executionCounters = Object.fromEntries(
       Object.entries(executionSource).map(([key, value]) => [
         key,
-        typeof value === "number" ? value : toNumber(value) ?? (typeof value === "string" ? value : null),
+        typeof value === "number"
+          ? value
+          : toNumber(value) ?? (typeof value === "string" ? value : null),
       ])
     );
 
     return {
-      id: typeof data.id === "string" ? data.id : typeof data.run_id === "string" ? data.run_id : `history-${index}`,
+      id:
+        typeof data.id === "string"
+          ? data.id
+          : typeof data.run_id === "string"
+            ? data.run_id
+            : `history-${index}`,
       run_id: typeof data.run_id === "string" ? data.run_id : null,
       occurred_at:
         typeof data.occurred_at === "string"
@@ -363,6 +416,113 @@ function normalizeStrategyHistory(raw: unknown): StrategyHistoryEntry[] {
   });
 }
 
+function normalizeStrategyDecision(value: unknown): AgentStrategyActionRecord["action"] | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (["adopt", "adopted", "accept", "accepted"].includes(normalized)) {
+    return "adopted";
+  }
+  if (["reject", "rejected", "dismiss", "dismissed"].includes(normalized)) {
+    return "rejected";
+  }
+  return null;
+}
+
+function buildStrategyPlanFromRaw(raw: Record<string, unknown>): TradePlanData | null {
+  const stockCode = typeof raw.stock_code === "string" ? raw.stock_code : null;
+  if (!stockCode) {
+    return null;
+  }
+
+  return {
+    stock_code: stockCode,
+    stock_name: typeof raw.stock_name === "string" ? raw.stock_name : stockCode,
+    current_price: toNumber(raw.current_price),
+    direction: raw.direction === "sell" ? "sell" : "buy",
+    entry_price: toNumber(raw.entry_price),
+    entry_method: typeof raw.entry_method === "string" ? raw.entry_method : null,
+    position_pct: toNumber(raw.position_pct),
+    take_profit: toNumber(raw.take_profit),
+    take_profit_method:
+      typeof raw.take_profit_method === "string" ? raw.take_profit_method : null,
+    stop_loss: toNumber(raw.stop_loss),
+    stop_loss_method: typeof raw.stop_loss_method === "string" ? raw.stop_loss_method : null,
+    reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
+    risk_note: typeof raw.risk_note === "string" ? raw.risk_note : null,
+    invalidation: typeof raw.invalidation === "string" ? raw.invalidation : null,
+    valid_until: typeof raw.valid_until === "string" ? raw.valid_until : null,
+  };
+}
+
+function normalizeStrategyActions(raw: unknown): AgentStrategyActionRecord[] {
+  const items = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.items)
+      ? raw.items
+      : isRecord(raw) && Array.isArray(raw.actions)
+        ? raw.actions
+        : isRecord(raw) && Array.isArray(raw.results)
+          ? raw.results
+          : [];
+
+  return items
+    .map((item, index) => {
+      const data = isRecord(item) ? item : {};
+      const planSource = isRecord(data.trade_plan)
+        ? data.trade_plan
+        : isRecord(data.plan)
+          ? data.plan
+          : isRecord(data.strategy)
+            ? data.strategy
+            : data;
+      const plan = buildStrategyPlanFromRaw(planSource);
+      const strategyKey =
+        typeof data.strategy_key === "string"
+          ? data.strategy_key
+          : typeof data.plan_key === "string"
+            ? data.plan_key
+            : plan
+              ? buildAgentStrategyKey(plan)
+              : null;
+      const action =
+        normalizeStrategyDecision(data.action)
+        ?? normalizeStrategyDecision(data.decision)
+        ?? normalizeStrategyDecision(data.status);
+
+      if (!strategyKey || !action) {
+        return null;
+      }
+
+      return {
+        id: typeof data.id === "string" ? data.id : `strategy-action-${index}`,
+        strategy_key: strategyKey,
+        action,
+        status: typeof data.status === "string" ? data.status : null,
+        reason: typeof data.reason === "string" ? data.reason : null,
+        created_at: typeof data.created_at === "string" ? data.created_at : null,
+        updated_at: typeof data.updated_at === "string" ? data.updated_at : null,
+      };
+    })
+    .filter((value): value is AgentStrategyActionRecord => value !== null);
+}
+
+function applyStrategyRecord(
+  current: AgentStrategyActionState | undefined,
+  record: AgentStrategyActionRecord
+): AgentStrategyActionState {
+  return {
+    id: record.id,
+    action: record.action,
+    status: record.status,
+    reason: record.reason,
+    updated_at: record.updated_at ?? record.created_at,
+    is_submitting: current?.is_submitting ?? false,
+    error: null,
+  };
+}
+
 export default function AgentPage() {
   const [runs, setRuns] = useState<BrainRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<BrainRun | null>(null);
@@ -375,6 +535,14 @@ export default function AgentPage() {
   const [reflectionFeed, setReflectionFeed] = useState<ReflectionFeedItem[]>([]);
   const [strategyHistory, setStrategyHistory] = useState<StrategyHistoryEntry[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+  const [chatEntries, setChatEntries] = useState<AgentChatEntry[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatStreaming, setChatStreaming] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [strategyActions, setStrategyActions] = useState<
+    Record<string, AgentStrategyActionState>
+  >({});
+  const [strategyActionsError, setStrategyActionsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
@@ -387,7 +555,9 @@ export default function AgentPage() {
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [reflectionError, setReflectionError] = useState<string | null>(null);
   const [strategyHistoryError, setStrategyHistoryError] = useState<string | null>(null);
-  const [ledgerSource, setLedgerSource] = useState<"overview" | "fallback" | "unavailable" | null>(null);
+  const [ledgerSource, setLedgerSource] = useState<
+    "overview" | "fallback" | "unavailable" | null
+  >(null);
   const [activeTab, setActiveTab] = useState<AgentConsoleTab>("runs");
   const [reviewType, setReviewType] = useState<"all" | "daily" | "weekly">("all");
   const [memoryStatus, setMemoryStatus] = useState<"all" | "active" | "retired">("all");
@@ -396,9 +566,11 @@ export default function AgentPage() {
 
   useEffect(() => {
     fetch(`${API_BASE}/api/v1/agent/portfolio`)
-      .then((r) => r.json())
+      .then((resp) => resp.json())
       .then((data) => {
-        if (data.length > 0) setPortfolioId(data[0].id);
+        if (Array.isArray(data) && data.length > 0 && typeof data[0]?.id === "string") {
+          setPortfolioId(data[0].id);
+        }
       })
       .catch(() => {});
   }, []);
@@ -407,7 +579,9 @@ export default function AgentPage() {
     if (!portfolioId) {
       return [];
     }
-    const data = await fetchJson<BrainRun[]>(`${API_BASE}/api/v1/agent/brain/runs?portfolio_id=${portfolioId}`);
+    const data = await fetchJson<BrainRun[]>(
+      `${API_BASE}/api/v1/agent/brain/runs?portfolio_id=${portfolioId}`
+    );
     setRuns(data);
     setSelectedRun((current) => {
       if (data.length === 0) {
@@ -416,8 +590,7 @@ export default function AgentPage() {
       if (!current) {
         return data[0];
       }
-      const matched = data.find((run) => run.id === current.id);
-      return matched || data[0];
+      return data.find((run) => run.id === current.id) || data[0];
     });
     return data;
   }, [portfolioId]);
@@ -437,7 +610,9 @@ export default function AgentPage() {
       return null;
     }
     try {
-      const data = await fetchJson<unknown>(`${API_BASE}/api/v1/agent/ledger/overview?portfolio_id=${portfolioId}`);
+      const data = await fetchJson<unknown>(
+        `${API_BASE}/api/v1/agent/ledger/overview?portfolio_id=${portfolioId}`
+      );
       const normalized = normalizeLedgerOverview(portfolioId, data);
       setLedgerOverview(normalized);
       setLedgerSource("overview");
@@ -458,7 +633,9 @@ export default function AgentPage() {
       } catch {
         setLedgerOverview(null);
         setLedgerSource("unavailable");
-        setLedgerError("执行台账暂不可用，`ledger/overview` 尚未就绪且 fallback 读取失败。");
+        setLedgerError(
+          "执行台账暂不可用，`ledger/overview` 尚未就绪且 fallback 读取失败。"
+        );
         return null;
       }
     }
@@ -500,9 +677,7 @@ export default function AgentPage() {
         fetchFirstAvailable<unknown>([
           `${API_BASE}/api/v1/agent/reviews/stats?portfolio_id=${portfolioId}&days=30`,
         ]),
-        fetchFirstAvailable<unknown>([
-          `${API_BASE}/api/v1/agent/reviews/weekly?limit=10`,
-        ]),
+        fetchFirstAvailable<unknown>([`${API_BASE}/api/v1/agent/reviews/weekly?limit=10`]),
       ]);
 
       const normalizedRecords = normalizeReviewRecords(recordsRaw);
@@ -514,7 +689,9 @@ export default function AgentPage() {
       setReviewRecords([]);
       setReviewStats(null);
       setWeeklySummaries([]);
-      setReviewError("复盘读接口暂不可用，review records / stats / weekly summaries 尚未就绪。");
+      setReviewError(
+        "复盘读接口暂不可用，review records / stats / weekly summaries 尚未就绪。"
+      );
     } finally {
       setReviewLoading(false);
     }
@@ -559,11 +736,32 @@ export default function AgentPage() {
       setStrategyHistoryError(null);
     } else {
       setStrategyHistory([]);
-      setStrategyHistoryError("策略历史接口暂不可用，`/api/v1/agent/strategy/history` 尚未就绪。");
+      setStrategyHistoryError(
+        "策略历史接口暂不可用，`/api/v1/agent/strategy/history` 尚未就绪。"
+      );
     }
 
     setReflectionLoading(false);
   }, [portfolioId]);
+
+  const fetchStrategyActions = useCallback(async () => {
+    try {
+      const raw = await fetchJson<unknown>(`${API_BASE}/api/v1/agent/strategy-actions`);
+      const records = normalizeStrategyActions(raw);
+      setStrategyActions((current) => {
+        const next = { ...current };
+        for (const record of records) {
+          next[record.strategy_key] = applyStrategyRecord(current[record.strategy_key], record);
+        }
+        return next;
+      });
+      setStrategyActionsError(null);
+    } catch {
+      setStrategyActionsError(
+        "策略动作记录暂不可用，`/api/v1/agent/strategy-actions` 尚未就绪。"
+      );
+    }
+  }, []);
 
   useEffect(() => {
     refreshConsole();
@@ -587,9 +785,17 @@ export default function AgentPage() {
     }
   }, [activeTab, fetchReflectionData, portfolioId]);
 
+  useEffect(() => {
+    if (portfolioId) {
+      fetchStrategyActions();
+    }
+  }, [fetchStrategyActions, portfolioId]);
+
   const fetchWatchlist = useCallback(async () => {
     const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist`);
-    if (resp.ok) setWatchlist(await resp.json());
+    if (resp.ok) {
+      setWatchlist(await resp.json());
+    }
   }, []);
 
   useEffect(() => {
@@ -597,44 +803,276 @@ export default function AgentPage() {
   }, [fetchWatchlist]);
 
   const handleRun = async () => {
-    if (!portfolioId || running) return;
+    if (!portfolioId || running) {
+      return;
+    }
     setRunning(true);
     try {
       const resp = await fetch(`${API_BASE}/api/v1/agent/brain/run?portfolio_id=${portfolioId}`, {
         method: "POST",
       });
-      if (resp.ok) {
-        const run = await resp.json();
-        setSelectedRun(run);
-        setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
-        const poll = setInterval(async () => {
-          const r = await fetch(`${API_BASE}/api/v1/agent/brain/runs/${run.id}`);
-          if (r.ok) {
-            const updated = await r.json();
-            setSelectedRun(updated);
-            setRuns((current) => {
-              const next = current.filter((item) => item.id !== updated.id);
-              return [updated, ...next];
-            });
-            if (updated.status !== "running") {
-              clearInterval(poll);
-              setRunning(false);
-              refreshConsole();
-            }
-          }
-        }, 3000);
+      if (!resp.ok) {
+        setRunning(false);
+        return;
       }
+      const run = (await resp.json()) as BrainRun;
+      setSelectedRun(run);
+      setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+      const poll = setInterval(async () => {
+        const result = await fetch(`${API_BASE}/api/v1/agent/brain/runs/${run.id}`);
+        if (!result.ok) {
+          return;
+        }
+        const updated = (await result.json()) as BrainRun;
+        setSelectedRun(updated);
+        setRuns((current) => {
+          const next = current.filter((item) => item.id !== updated.id);
+          return [updated, ...next];
+        });
+        if (updated.status !== "running") {
+          clearInterval(poll);
+          setRunning(false);
+          refreshConsole();
+        }
+      }, 3000);
     } catch {
       setRunning(false);
     }
   };
 
+  const handleSendChat = useCallback(async () => {
+    const content = chatDraft.trim();
+    if (!content || chatStreaming || !portfolioId) {
+      return;
+    }
+
+    const createdAt = new Date().toISOString();
+    const userEntry: AgentChatEntry = {
+      id: nextChatEntryId(),
+      role: "user",
+      content,
+      created_at: createdAt,
+    };
+    const assistantEntry: AgentChatEntry = {
+      id: nextChatEntryId(),
+      role: "assistant",
+      content: "",
+      created_at: createdAt,
+      is_streaming: true,
+    };
+    const history = chatEntries.slice(-12).map((entry) => ({
+      role: entry.role,
+      content: entry.content,
+    }));
+
+    setChatEntries((current) => [...current, userEntry, assistantEntry]);
+    setChatDraft("");
+    setChatError(null);
+    setChatStreaming(true);
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/v1/agent/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          portfolio_id: portfolioId,
+          message: content,
+          history,
+        }),
+      });
+
+      if (!resp.ok) {
+        throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+      }
+
+      const reader = resp.body?.getReader();
+      if (!reader) {
+        throw new Error("浏览器不支持流式读取");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+
+        for (const eventBlock of events) {
+          if (!eventBlock.trim()) {
+            continue;
+          }
+          const lines = eventBlock.split("\n");
+          let eventType = "";
+          let eventData = "";
+
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              eventData = line.slice(6);
+            }
+          }
+
+          if (!eventType || !eventData) {
+            continue;
+          }
+
+          const parsed = JSON.parse(eventData) as {
+            content?: string;
+            full_content?: string;
+            message?: string;
+          };
+
+          if (eventType === "token") {
+            fullContent += parsed.content || "";
+            setChatEntries((current) =>
+              current.map((entry) =>
+                entry.id === assistantEntry.id
+                  ? { ...entry, content: fullContent }
+                  : entry
+              )
+            );
+          } else if (eventType === "done") {
+            const finalContent = parsed.full_content || fullContent;
+            setChatEntries((current) =>
+              current.map((entry) =>
+                entry.id === assistantEntry.id
+                  ? { ...entry, content: finalContent, is_streaming: false }
+                  : entry
+              )
+            );
+            setChatStreaming(false);
+            return;
+          } else if (eventType === "error") {
+            throw new Error(parsed.message || "Agent 回复失败");
+          }
+        }
+      }
+
+      setChatEntries((current) =>
+        current.map((entry) =>
+          entry.id === assistantEntry.id
+            ? {
+                ...entry,
+                content: fullContent || "（空回复）",
+                is_streaming: false,
+              }
+            : entry
+        )
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "发送消息失败";
+      setChatError(message);
+      setChatEntries((current) =>
+        current.map((entry) =>
+          entry.id === assistantEntry.id
+            ? { ...entry, content: `❌ ${message}`, is_streaming: false }
+            : entry
+        )
+      );
+    } finally {
+      setChatStreaming(false);
+    }
+  }, [chatDraft, chatEntries, chatStreaming, portfolioId]);
+
+  const handleStrategyAction = useCallback(
+    async (request: AgentStrategyActionRequest) => {
+      const pendingState = strategyActions[request.strategy_key];
+      setStrategyActions((current) => ({
+        ...current,
+        [request.strategy_key]: {
+          id: pendingState?.id ?? null,
+          action: pendingState?.action ?? null,
+          status: pendingState?.status ?? null,
+          reason: pendingState?.reason ?? null,
+          updated_at: pendingState?.updated_at ?? null,
+          is_submitting: true,
+          error: null,
+        },
+      }));
+
+      const endpoint =
+        request.intent === "adopt"
+          ? `${API_BASE}/api/v1/agent/adopt-strategy`
+          : `${API_BASE}/api/v1/agent/reject-strategy`;
+
+      try {
+        const resp = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            portfolio_id: portfolioId,
+            message_id: request.message_id,
+            strategy_key: request.strategy_key,
+            action: request.intent,
+            reason: request.reason ?? null,
+            trade_plan: request.plan,
+            plan: request.plan,
+          }),
+        });
+
+        if (!resp.ok) {
+          throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+        }
+
+        const raw = await resp.json().catch(() => null);
+        const records = normalizeStrategyActions(raw);
+        const matched = records.find((record) => record.strategy_key === request.strategy_key);
+
+        setStrategyActions((current) => ({
+          ...current,
+          [request.strategy_key]: matched
+            ? applyStrategyRecord(current[request.strategy_key], matched)
+            : {
+                id: current[request.strategy_key]?.id ?? null,
+                action: request.intent === "adopt" ? "adopted" : "rejected",
+                status: request.intent === "adopt" ? "adopted" : "rejected",
+                reason: request.reason ?? null,
+                updated_at: new Date().toISOString(),
+                is_submitting: false,
+                error: null,
+              },
+        }));
+        fetchStrategyActions().catch(() => {});
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "策略动作提交失败";
+        setStrategyActions((current) => ({
+          ...current,
+          [request.strategy_key]: {
+            ...(current[request.strategy_key] ?? {
+              id: null,
+              action: null,
+              status: null,
+              reason: null,
+              updated_at: null,
+            }),
+            is_submitting: false,
+            error: message,
+          },
+        }));
+      }
+    },
+    [fetchStrategyActions, portfolioId, strategyActions]
+  );
+
   const handleAddWatch = async () => {
-    if (!newCode.trim()) return;
+    if (!newCode.trim()) {
+      return;
+    }
     await fetch(`${API_BASE}/api/v1/agent/watchlist`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stock_code: newCode.trim(), stock_name: newName.trim() || newCode.trim() }),
+      body: JSON.stringify({
+        stock_code: newCode.trim(),
+        stock_name: newName.trim() || newCode.trim(),
+      }),
     });
     setNewCode("");
     setNewName("");
@@ -664,17 +1102,19 @@ export default function AgentPage() {
     }
     return rule.status === memoryStatus;
   });
+  const chatNotices = [chatError, strategyActionsError].filter(
+    (value): value is string => Boolean(value)
+  );
 
   return (
     <div className="flex h-screen bg-[#0a0a0f] text-white">
       <NavSidebar />
-      <div className="flex-1 flex flex-col ml-12">
-        {/* 顶部状态栏 */}
-        <div className="flex items-center justify-between p-4 border-b border-white/10">
+      <div className="ml-12 flex flex-1 flex-col">
+        <div className="flex items-center justify-between border-b border-white/10 p-4">
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-bold">🤖 Agent Brain</h1>
             {activeRun && (
-              <span className={`px-2 py-0.5 rounded text-xs ${statusColor[activeRun.status] || ""}`}>
+              <span className={`rounded px-2 py-0.5 text-xs ${statusColor[activeRun.status] || ""}`}>
                 {activeRun.status === "running" ? "运行中..." : activeRun.status}
               </span>
             )}
@@ -682,9 +1122,9 @@ export default function AgentPage() {
           <button
             onClick={handleRun}
             disabled={running || !portfolioId}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
               running
-                ? "bg-blue-500/20 text-blue-400 cursor-wait"
+                ? "cursor-wait bg-blue-500/20 text-blue-400"
                 : "bg-white/10 text-white hover:bg-white/20"
             }`}
           >
@@ -692,57 +1132,35 @@ export default function AgentPage() {
           </button>
         </div>
 
-        <div className="flex-1 flex overflow-hidden">
-          {/* 左侧：运行记录 + 关注列表 */}
-          <div className="w-72 border-r border-white/10 flex flex-col">
-            <AgentRunFeed
-              loading={loading}
+        <div className="flex flex-1 flex-col overflow-hidden xl:flex-row">
+          <div className="min-h-0 border-b border-white/10 xl:w-[430px] xl:min-w-[430px] xl:border-b-0 xl:border-r">
+            <AgentChatPanel
+              portfolioReady={Boolean(portfolioId)}
+              messages={chatEntries}
+              notices={chatNotices}
+              isStreaming={chatStreaming}
+              draft={chatDraft}
+              onDraftChange={setChatDraft}
+              onSend={handleSendChat}
               runs={runs}
               selectedRunId={activeRun?.id || null}
               onSelectRun={setSelectedRun}
               statusColor={statusColor}
+              watchlist={watchlist}
+              newCode={newCode}
+              newName={newName}
+              onNewCodeChange={setNewCode}
+              onNewNameChange={setNewName}
+              onAddWatch={handleAddWatch}
+              onRemoveWatch={handleRemoveWatch}
+              strategyActions={strategyActions}
+              onStrategyAction={handleStrategyAction}
             />
-
-            {/* 关注列表 */}
-            <div className="border-t border-white/10">
-              <div className="p-3 text-xs text-gray-400 font-medium">关注列表</div>
-              <div className="px-3 pb-2 flex gap-1">
-                <input
-                  type="text"
-                  placeholder="代码"
-                  value={newCode}
-                  onChange={(e) => setNewCode(e.target.value)}
-                  className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white w-20"
-                />
-                <input
-                  type="text"
-                  placeholder="名称"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-white w-20"
-                />
-                <button onClick={handleAddWatch} className="bg-white/10 rounded px-2 py-1 text-xs hover:bg-white/20">+</button>
-              </div>
-              <div className="max-h-40 overflow-y-auto">
-                {watchlist.map((w) => (
-                  <div key={w.id} className="flex items-center justify-between px-3 py-1 text-xs">
-                    <span>
-                      <span className="font-mono text-white">{w.stock_code}</span>
-                      <span className="text-gray-400 ml-1">{w.stock_name}</span>
-                    </span>
-                    <button onClick={() => handleRemoveWatch(w.id)} className="text-red-400 hover:text-red-300">×</button>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
 
-          {/* 右侧：运行详情 */}
           <div className="flex-1 overflow-hidden">
             {!portfolioId ? (
-              <div className="text-gray-500 text-center py-20 w-full">
-                请先创建虚拟账户
-              </div>
+              <div className="w-full py-20 text-center text-gray-500">请先创建虚拟账户</div>
             ) : (
               <div className="grid h-full grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
                 <div className="overflow-y-auto border-r border-white/10 p-6">
@@ -810,6 +1228,7 @@ export default function AgentPage() {
                     )}
                   </div>
                 </div>
+
                 <div className="overflow-y-auto p-6">
                   {activeTab === "runs" ? (
                     <ExecutionLedgerPanel
