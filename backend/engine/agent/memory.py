@@ -44,7 +44,7 @@ class MemoryManager:
             """
         )
 
-    async def add_rules(self, rules: list[dict], source_run_id: str) -> list[str]:
+    async def add_rules(self, rules: list[dict], source_run_id: str | None = None) -> list[str]:
         prepared_rules: list[tuple[str, str, str]] = []
         for rule in rules:
             rule_id = str(uuid.uuid4())

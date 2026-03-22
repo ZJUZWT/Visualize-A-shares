@@ -316,3 +316,65 @@ class BrainConfig(BaseModel):
     max_position_count: int = 10
     single_position_pct: float = 0.15
     schedule_time: str = "15:30"
+
+
+# ── Strategy Actions ─────────────────────────────────
+
+class StrategyActionPlanPayload(BaseModel):
+    stock_code: str
+    stock_name: str
+    direction: Literal["buy", "sell"]
+    current_price: float | None = None
+    entry_price: float | None = None
+    entry_method: str | None = None
+    position_pct: float | None = None
+    take_profit: float | None = None
+    take_profit_method: str | None = None
+    stop_loss: float | None = None
+    stop_loss_method: str | None = None
+    reasoning: str
+    risk_note: str | None = None
+    invalidation: str | None = None
+    valid_until: str | None = None
+    holding_type: Literal["long_term", "mid_term", "short_term"] = "mid_term"
+
+
+class AdoptStrategyRequest(BaseModel):
+    portfolio_id: str
+    session_id: str
+    message_id: str
+    strategy_key: str
+    plan: StrategyActionPlanPayload
+    source_run_id: str | None = None
+
+
+class RejectStrategyRequest(BaseModel):
+    portfolio_id: str
+    session_id: str
+    message_id: str
+    strategy_key: str
+    plan: StrategyActionPlanPayload
+    reason: str | None = None
+    source_run_id: str | None = None
+
+
+class StrategyActionRecord(BaseModel):
+    id: str
+    portfolio_id: str
+    session_id: str
+    message_id: str
+    strategy_key: str
+    stock_code: str
+    stock_name: str | None = None
+    decision: Literal["adopted", "rejected"]
+    status: Literal["adopted", "rejected"]
+    trade_action: Literal["buy", "sell", "add", "reduce"] | None = None
+    reason: str | None = None
+    source_run_id: str | None = None
+    plan_id: str | None = None
+    trade_id: str | None = None
+    position_id: str | None = None
+    strategy_id: str | None = None
+    strategy_version: int | None = None
+    created_at: str | None = None
+    updated_at: str | None = None

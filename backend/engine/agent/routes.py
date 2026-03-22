@@ -12,6 +12,7 @@ from engine.agent.chat_routes import create_agent_chat_router
 from engine.agent.db import AgentDB
 from engine.agent.models import TradeInput, TradePlanInput, TradePlanUpdate, WatchlistInput
 from engine.agent.service import AgentService
+from engine.agent.strategy_action_routes import create_strategy_action_router
 from engine.agent.validator import TradeValidator
 
 
@@ -36,6 +37,7 @@ class CreateStrategyRequest(BaseModel):
 def create_agent_router() -> APIRouter:
     router = APIRouter(tags=["agent"])
     router.include_router(create_agent_chat_router())
+    router.include_router(create_strategy_action_router())
 
     def _get_service() -> AgentService:
         db = AgentDB.get_instance()
