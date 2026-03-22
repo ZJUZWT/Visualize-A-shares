@@ -244,6 +244,14 @@ class AgentDB:
             ADD COLUMN IF NOT EXISTS execution_summary JSON
         """)
         self._conn.execute("""
+            ALTER TABLE agent.brain_runs
+            ADD COLUMN IF NOT EXISTS info_digest_ids JSON
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.brain_runs
+            ADD COLUMN IF NOT EXISTS triggered_signal_ids JSON
+        """)
+        self._conn.execute("""
             ALTER TABLE agent.trade_plans
             ADD COLUMN IF NOT EXISTS source_run_id VARCHAR
         """)
@@ -266,6 +274,40 @@ class AgentDB:
         self._conn.execute("""
             ALTER TABLE agent.trades
             ADD COLUMN IF NOT EXISTS source_strategy_version INTEGER
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.watch_signals (
+                id VARCHAR PRIMARY KEY,
+                portfolio_id VARCHAR NOT NULL,
+                stock_code VARCHAR,
+                sector VARCHAR,
+                signal_description TEXT NOT NULL,
+                check_engine VARCHAR NOT NULL,
+                keywords JSON,
+                if_triggered TEXT,
+                cycle_context TEXT,
+                status VARCHAR DEFAULT 'watching',
+                trigger_evidence JSON,
+                source_run_id VARCHAR,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now(),
+                triggered_at TIMESTAMP
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.info_digests (
+                id VARCHAR PRIMARY KEY,
+                portfolio_id VARCHAR NOT NULL,
+                run_id VARCHAR NOT NULL,
+                stock_code VARCHAR NOT NULL,
+                digest_type VARCHAR NOT NULL,
+                raw_summary JSON,
+                structured_summary JSON,
+                strategy_relevance TEXT,
+                impact_assessment VARCHAR NOT NULL,
+                missing_sources JSON,
+                created_at TIMESTAMP DEFAULT now()
+            )
         """)
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS agent.review_records (

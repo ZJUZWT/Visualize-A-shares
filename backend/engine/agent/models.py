@@ -199,6 +199,36 @@ class WatchlistInput(BaseModel):
     reason: str | None = None
 
 
+class WatchSignal(BaseModel):
+    id: str
+    portfolio_id: str
+    stock_code: str | None = None
+    sector: str | None = None
+    signal_description: str
+    check_engine: str
+    keywords: list[str] | None = None
+    if_triggered: str | None = None
+    cycle_context: str | None = None
+    status: Literal["watching", "analyzing", "triggered", "failed", "expired", "cancelled"] = "watching"
+    trigger_evidence: list[Any] | dict[str, Any] | None = None
+    source_run_id: str | None = None
+    created_at: str
+    updated_at: str
+    triggered_at: str | None = None
+
+
+class WatchSignalInput(BaseModel):
+    stock_code: str | None = None
+    sector: str | None = None
+    signal_description: str
+    check_engine: str
+    keywords: list[str] | None = None
+    if_triggered: str | None = None
+    cycle_context: str | None = None
+    status: Literal["watching", "analyzing", "triggered", "failed", "expired", "cancelled"] = "watching"
+    trigger_evidence: list[Any] | dict[str, Any] | None = None
+
+
 # ── Agent State ───────────────────────────────────────
 
 class AgentState(BaseModel):
@@ -259,6 +289,20 @@ class AgentMemory(BaseModel):
     retired_at: str | None = None
 
 
+class InfoDigest(BaseModel):
+    id: str
+    portfolio_id: str
+    run_id: str
+    stock_code: str
+    digest_type: str
+    raw_summary: dict[str, Any] | list[Any] | str | None = None
+    structured_summary: dict[str, Any] | list[Any] | str | None = None
+    strategy_relevance: str | None = None
+    impact_assessment: Literal["none", "noted", "minor_adjust", "reassess"]
+    missing_sources: list[str] | None = None
+    created_at: str
+
+
 # ── Reflection Journals ──────────────────────────────
 
 class DailyReview(BaseModel):
@@ -303,6 +347,8 @@ class BrainRun(BaseModel):
     state_before: dict[str, Any] | None = None
     state_after: dict[str, Any] | None = None
     execution_summary: dict[str, Any] | None = None
+    info_digest_ids: list[str] | None = None
+    triggered_signal_ids: list[str] | None = None
     error_message: str | None = None
     llm_tokens_used: int = 0
     started_at: str

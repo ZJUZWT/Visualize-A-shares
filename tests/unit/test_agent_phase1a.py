@@ -51,6 +51,8 @@ class TestAgentDB:
             "agent_state",
             "brain_runs",
             "brain_config",
+            "watch_signals",
+            "info_digests",
             "review_records",
             "weekly_summaries",
             "daily_reviews",
@@ -58,6 +60,28 @@ class TestAgentDB:
             "agent_memories",
         }
         assert table_names == expected
+
+    def test_brain_run_digest_columns_exist(self, tmp_path):
+        db_path = tmp_path / "test_agent.duckdb"
+        with patch("engine.agent.db.AGENT_DB_PATH", db_path):
+            from engine.agent.db import AgentDB
+            AgentDB._instance = None
+            db = AgentDB.init_instance()
+
+        conn = duckdb.connect(str(db_path))
+        columns = conn.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema='agent' AND table_name='brain_runs'
+            """
+        ).fetchall()
+        column_names = {row[0] for row in columns}
+        conn.close()
+        db.close()
+
+        assert "info_digest_ids" in column_names
+        assert "triggered_signal_ids" in column_names
 
     def test_get_instance_before_init_raises(self):
         from engine.agent.db import AgentDB

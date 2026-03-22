@@ -25,6 +25,8 @@ BRAIN_RUN_JSON_FIELDS = (
     "state_before",
     "state_after",
     "execution_summary",
+    "info_digest_ids",
+    "triggered_signal_ids",
 )
 
 
