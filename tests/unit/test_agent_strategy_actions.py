@@ -1,5 +1,5 @@
-"""Agent strategy action contract and rehydration tests"""
-import json
+"""Agent strategy action contract and idempotency tests."""
+import asyncio
 import sys
 import tempfile
 from pathlib import Path
@@ -7,8 +7,6 @@ from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-import asyncio
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "backend"))
 
@@ -49,12 +47,12 @@ def build_strategy_key(plan: dict) -> str:
 
     return "|".join(
         [
-            plan["stock_code"].strip().upper(),
-            plan["direction"],
+            str(plan["stock_code"]).strip().upper(),
+            str(plan["direction"]),
             numeric_part(plan.get("entry_price")),
             numeric_part(plan.get("take_profit")),
             numeric_part(plan.get("stop_loss")),
-            (plan.get("valid_until") or "").strip(),
+            str(plan.get("valid_until") or "").strip(),
         ]
     )
 
@@ -140,10 +138,10 @@ def _make_service(tmp_dir):
 
 def _make_test_app(tmp_dir):
     db = _make_db(tmp_dir)
-    from engine.agent.routes import create_agent_router
+    from engine.agent.strategy_action_routes import create_strategy_action_router
 
     app = FastAPI()
-    app.include_router(create_agent_router(), prefix="/api/v1/agent")
+    app.include_router(create_strategy_action_router(), prefix="/api/v1/agent")
     return app, db
 
 
@@ -210,6 +208,22 @@ class TestStrategyActionService:
         assert len(actions) == 1
         assert len(trades) == 1
 
+    def test_same_session_message_and_stock_but_different_strategy_key_creates_two_actions(self):
+        first_plan = _plan_payload(entry_price=100.0, take_profit=120.0, stop_loss=90.0)
+        second_plan = _plan_payload(entry_price=101.0, take_profit=125.0, stop_loss=92.0)
+
+        first = run(self.service.adopt_strategy(_adopt_request(plan=first_plan)))
+        second = run(self.service.adopt_strategy(_adopt_request(plan=second_plan)))
+
+        actions = run(self.service.list_actions("session-1"))
+
+        assert second["id"] != first["id"]
+        assert len(actions) == 2
+        assert {item["strategy_key"] for item in actions} == {
+            build_strategy_key(first_plan),
+            build_strategy_key(second_plan),
+        }
+
 
 class TestStrategyActionRoutes:
     def setup_method(self):
@@ -226,7 +240,7 @@ class TestStrategyActionRoutes:
     def teardown_method(self):
         self.db.close()
 
-    def test_create_agent_router_mounts_canonical_strategy_action_routes(self):
+    def test_strategy_action_routes_support_canonical_payloads(self):
         adopt_response = self.client.post("/api/v1/agent/adopt-strategy", json=_adopt_request())
         reject_response = self.client.post(
             "/api/v1/agent/reject-strategy",
@@ -287,11 +301,12 @@ class TestStrategyActionRoutes:
         assert memories == []
 
     def test_adopt_sell_without_position_returns_400(self):
+        sell_plan = _plan_payload(direction="sell", position_pct=1.0)
         response = self.client.post(
             "/api/v1/agent/adopt-strategy",
             json=_adopt_request(
-                plan=_plan_payload(direction="sell", position_pct=1.0),
-                strategy_key=build_strategy_key(_plan_payload(direction="sell", position_pct=1.0)),
+                plan=sell_plan,
+                strategy_key=build_strategy_key(sell_plan),
             ),
         )
 

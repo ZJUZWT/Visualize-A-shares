@@ -45,7 +45,6 @@ class StrategyActionService:
             request.session_id,
             request.message_id,
             request.strategy_key,
-            request.plan.stock_code,
         )
         if existing:
             return existing
@@ -155,7 +154,6 @@ class StrategyActionService:
             request.session_id,
             request.message_id,
             request.strategy_key,
-            request.plan.stock_code,
         )
         if existing:
             return existing
@@ -193,6 +191,35 @@ class StrategyActionService:
         return action
 
     async def _ensure_actions_table(self):
+        await self.db.execute_write("CREATE SCHEMA IF NOT EXISTS agent")
+        table_exists = await self.db.execute_read(
+            """
+            SELECT COUNT(*) AS count
+            FROM information_schema.tables
+            WHERE table_schema = 'agent' AND table_name = 'strategy_actions'
+            """
+        )
+        if not table_exists[0]["count"]:
+            await self._create_actions_table()
+            return
+
+        columns = {
+            row["column_name"]
+            for row in await self.db.execute_read(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'agent' AND table_name = 'strategy_actions'
+                """
+            )
+        }
+
+        if {"strategy_key", "status", "plan_snapshot"} <= columns:
+            return
+
+        await self._migrate_legacy_actions_table(columns)
+
+    async def _create_actions_table(self):
         await self.db.execute_write(
             """
             CREATE TABLE IF NOT EXISTS agent.strategy_actions (
@@ -200,9 +227,11 @@ class StrategyActionService:
                 portfolio_id VARCHAR NOT NULL,
                 session_id VARCHAR NOT NULL,
                 message_id VARCHAR NOT NULL,
+                strategy_key VARCHAR,
                 stock_code VARCHAR NOT NULL,
                 stock_name VARCHAR,
                 decision VARCHAR NOT NULL,
+                status VARCHAR,
                 trade_action VARCHAR,
                 reason TEXT,
                 source_run_id VARCHAR,
@@ -211,25 +240,94 @@ class StrategyActionService:
                 position_id VARCHAR,
                 strategy_id VARCHAR,
                 strategy_version INTEGER,
+                plan_snapshot JSON,
                 created_at TIMESTAMP DEFAULT now(),
                 updated_at TIMESTAMP DEFAULT now(),
-                UNIQUE (session_id, message_id, stock_code)
+                UNIQUE (session_id, message_id, strategy_key)
             )
             """
         )
-        for sql in (
-            "ALTER TABLE agent.strategy_actions ADD COLUMN IF NOT EXISTS strategy_key VARCHAR",
-            "ALTER TABLE agent.strategy_actions ADD COLUMN IF NOT EXISTS status VARCHAR",
-            "ALTER TABLE agent.strategy_actions ADD COLUMN IF NOT EXISTS plan_snapshot JSON",
-        ):
-            await self.db.execute_write(sql)
+
+    async def _migrate_legacy_actions_table(self, columns: set[str]):
+        await self.db.execute_write("DROP TABLE IF EXISTS agent.strategy_actions_v2")
+        await self.db.execute_write(
+            """
+            CREATE TABLE agent.strategy_actions_v2 (
+                id VARCHAR PRIMARY KEY,
+                portfolio_id VARCHAR NOT NULL,
+                session_id VARCHAR NOT NULL,
+                message_id VARCHAR NOT NULL,
+                strategy_key VARCHAR,
+                stock_code VARCHAR NOT NULL,
+                stock_name VARCHAR,
+                decision VARCHAR NOT NULL,
+                status VARCHAR,
+                trade_action VARCHAR,
+                reason TEXT,
+                source_run_id VARCHAR,
+                plan_id VARCHAR,
+                trade_id VARCHAR,
+                position_id VARCHAR,
+                strategy_id VARCHAR,
+                strategy_version INTEGER,
+                plan_snapshot JSON,
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now(),
+                UNIQUE (session_id, message_id, strategy_key)
+            )
+            """
+        )
+
+        existing_rows = await self.db.execute_read("SELECT * FROM agent.strategy_actions")
+        for row in existing_rows:
+            plan_snapshot = self._decode_plan_snapshot(row.get("plan_snapshot")) if "plan_snapshot" in columns else None
+            strategy_key = row.get("strategy_key") if "strategy_key" in columns else None
+            if not strategy_key and plan_snapshot:
+                strategy_key = build_strategy_key(plan_snapshot)
+            if not strategy_key:
+                strategy_key = f"legacy|{row['stock_code']}|{row['message_id']}|{row['id']}"
+
+            await self.db.execute_write(
+                """
+                INSERT INTO agent.strategy_actions_v2 (
+                    id, portfolio_id, session_id, message_id, strategy_key, stock_code, stock_name,
+                    decision, status, trade_action, reason, source_run_id, plan_id, trade_id,
+                    position_id, strategy_id, strategy_version, plan_snapshot, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    row["id"],
+                    row["portfolio_id"],
+                    row["session_id"],
+                    row["message_id"],
+                    strategy_key,
+                    row["stock_code"],
+                    row.get("stock_name"),
+                    row["decision"],
+                    row.get("status") if "status" in columns else row["decision"],
+                    row.get("trade_action"),
+                    row.get("reason"),
+                    row.get("source_run_id"),
+                    row.get("plan_id"),
+                    row.get("trade_id"),
+                    row.get("position_id"),
+                    row.get("strategy_id"),
+                    row.get("strategy_version"),
+                    json.dumps(plan_snapshot, ensure_ascii=False) if plan_snapshot is not None else None,
+                    row.get("created_at"),
+                    row.get("updated_at"),
+                ],
+            )
+
+        await self.db.execute_write("DROP TABLE agent.strategy_actions")
+        await self.db.execute_write("ALTER TABLE agent.strategy_actions_v2 RENAME TO strategy_actions")
 
     async def _get_existing_action(
         self,
         session_id: str,
         message_id: str,
         strategy_key: str,
-        stock_code: str,
     ) -> dict | None:
         rows = await self.db.execute_read(
             """
@@ -241,11 +339,9 @@ class StrategyActionService:
             [session_id, message_id],
         )
         for row in rows:
-            row_strategy_key = row.get("strategy_key")
-            if row_strategy_key and row_strategy_key == strategy_key:
-                return await self._normalize_action_row(row)
-            if row.get("stock_code") == stock_code:
-                return await self._normalize_action_row(row)
+            normalized = await self._normalize_action_row(row)
+            if normalized.get("strategy_key") == strategy_key:
+                return normalized
         return None
 
     async def _find_open_position(self, portfolio_id: str, stock_code: str) -> dict | None:
@@ -355,7 +451,7 @@ class StrategyActionService:
                 ],
             )
         except Exception:
-            existing = await self._get_existing_action(session_id, message_id, strategy_key, stock_code)
+            existing = await self._get_existing_action(session_id, message_id, strategy_key)
             if existing:
                 return existing
             raise

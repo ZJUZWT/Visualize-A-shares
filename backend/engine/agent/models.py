@@ -356,25 +356,3 @@ class RejectStrategyRequest(BaseModel):
     plan: StrategyActionPlanPayload
     reason: str | None = None
     source_run_id: str | None = None
-
-
-class StrategyActionRecord(BaseModel):
-    id: str
-    portfolio_id: str
-    session_id: str
-    message_id: str
-    strategy_key: str
-    stock_code: str
-    stock_name: str | None = None
-    decision: Literal["adopted", "rejected"]
-    status: Literal["adopted", "rejected"]
-    trade_action: Literal["buy", "sell", "add", "reduce"] | None = None
-    reason: str | None = None
-    source_run_id: str | None = None
-    plan_id: str | None = None
-    trade_id: str | None = None
-    position_id: str | None = None
-    strategy_id: str | None = None
-    strategy_version: int | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
