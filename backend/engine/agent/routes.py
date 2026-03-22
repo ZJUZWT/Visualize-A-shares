@@ -8,6 +8,7 @@ from datetime import date
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from engine.agent.chat_routes import create_agent_chat_router
 from engine.agent.db import AgentDB
 from engine.agent.models import TradeInput, TradePlanInput, TradePlanUpdate, WatchlistInput
 from engine.agent.service import AgentService
@@ -34,6 +35,7 @@ class CreateStrategyRequest(BaseModel):
 
 def create_agent_router() -> APIRouter:
     router = APIRouter(tags=["agent"])
+    router.include_router(create_agent_chat_router())
 
     def _get_service() -> AgentService:
         db = AgentDB.get_instance()
