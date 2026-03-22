@@ -3,6 +3,7 @@ import {
   AgentChatEntry,
   AgentStrategyActionLookup,
   AgentStrategyActionRequest,
+  buildAgentStrategyActionLookupKey,
   buildAgentStrategyKey,
 } from "../types";
 import AgentStrategyActionCard from "./AgentStrategyActionCard";
@@ -76,12 +77,15 @@ export default function AgentChatMessage({
                 }
 
                 const strategyKey = buildAgentStrategyKey(segment.plan);
+                const lookupKey = buildAgentStrategyActionLookupKey(message.id, strategyKey);
                 return (
                   <AgentStrategyActionCard
                     key={`${message.id}-plan-${index}`}
+                    sessionId={message.session_id ?? null}
                     messageId={message.id}
                     plan={segment.plan}
-                    actionState={strategyActions[strategyKey]}
+                    actionState={strategyActions[lookupKey]}
+                    interactive={Boolean(message.is_persisted) && !message.is_streaming}
                     onAction={onStrategyAction}
                   />
                 );

@@ -192,12 +192,23 @@ export interface WatchlistItem {
   created_at: string;
 }
 
+export interface AgentChatSession {
+  id: string;
+  portfolio_id: string | null;
+  title: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  message_count: number | null;
+}
+
 export interface AgentChatEntry {
   id: string;
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  session_id?: string | null;
   is_streaming?: boolean;
+  is_persisted?: boolean;
 }
 
 export type AgentStrategyDecision = "adopted" | "rejected";
@@ -205,6 +216,8 @@ export type AgentStrategyActionIntent = "adopt" | "reject";
 
 export interface AgentStrategyActionRecord {
   id: string;
+  session_id: string | null;
+  message_id: string | null;
   strategy_key: string;
   action: AgentStrategyDecision;
   status: string | null;
@@ -227,6 +240,7 @@ export type AgentStrategyActionLookup = Record<string, AgentStrategyActionState>
 
 export interface AgentStrategyActionRequest {
   intent: AgentStrategyActionIntent;
+  session_id: string;
   message_id: string;
   strategy_key: string;
   plan: TradePlanData;
@@ -246,4 +260,11 @@ export function buildAgentStrategyKey(plan: TradePlanData): string {
     numericPart(plan.stop_loss),
     (plan.valid_until || "").trim(),
   ].join("|");
+}
+
+export function buildAgentStrategyActionLookupKey(
+  messageId: string | null,
+  strategyKey: string
+): string {
+  return `${messageId || "__pending__"}::${strategyKey}`;
 }

@@ -6,30 +6,35 @@ import {
 } from "../types";
 
 interface AgentStrategyActionCardProps {
+  sessionId: string | null;
   messageId: string;
   plan: TradePlanData;
   actionState?: AgentStrategyActionState;
+  interactive: boolean;
   onAction: (request: AgentStrategyActionRequest) => Promise<void>;
 }
 
 const ACTION_BADGES: Record<string, string> = {
-  adopted: "bg-green-500/15 text-green-300 border-green-500/30",
-  rejected: "bg-red-500/15 text-red-300 border-red-500/30",
+  adopted: "border-green-500/30 bg-green-500/15 text-green-300",
+  rejected: "border-red-500/30 bg-red-500/15 text-red-300",
 };
 
 export default function AgentStrategyActionCard({
+  sessionId,
   messageId,
   plan,
   actionState,
+  interactive,
   onAction,
 }: AgentStrategyActionCardProps) {
   const strategyKey = buildAgentStrategyKey(plan);
   const directionLabel = plan.direction === "buy" ? "买入" : "卖出";
   const directionStyle =
     plan.direction === "buy"
-      ? "bg-green-500/15 text-green-300 border-green-500/30"
-      : "bg-red-500/15 text-red-300 border-red-500/30";
-  const isLocked = Boolean(actionState?.action) || Boolean(actionState?.is_submitting);
+      ? "border-green-500/30 bg-green-500/15 text-green-300"
+      : "border-red-500/30 bg-red-500/15 text-red-300";
+  const isLocked =
+    !interactive || Boolean(actionState?.action) || Boolean(actionState?.is_submitting);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-[#11121a] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.22)]">
@@ -66,7 +71,10 @@ export default function AgentStrategyActionCard({
               建议价 <span className="text-white">{plan.entry_price ?? "--"}</span>
             </div>
             <div>
-              仓位 <span className="text-white">{plan.position_pct === null ? "--" : `${(plan.position_pct * 100).toFixed(0)}%`}</span>
+              仓位{" "}
+              <span className="text-white">
+                {plan.position_pct === null ? "--" : `${(plan.position_pct * 100).toFixed(0)}%`}
+              </span>
             </div>
             {plan.entry_method && <div className="text-xs text-gray-400">{plan.entry_method}</div>}
           </div>
@@ -81,8 +89,12 @@ export default function AgentStrategyActionCard({
             <div>
               止损 <span className="text-red-300">{plan.stop_loss ?? "--"}</span>
             </div>
-            {plan.take_profit_method && <div className="text-xs text-gray-400">{plan.take_profit_method}</div>}
-            {plan.stop_loss_method && <div className="text-xs text-gray-400">{plan.stop_loss_method}</div>}
+            {plan.take_profit_method && (
+              <div className="text-xs text-gray-400">{plan.take_profit_method}</div>
+            )}
+            {plan.stop_loss_method && (
+              <div className="text-xs text-gray-400">{plan.stop_loss_method}</div>
+            )}
           </div>
         </div>
 
@@ -113,23 +125,29 @@ export default function AgentStrategyActionCard({
         <span className="text-[11px] text-gray-500">
           {actionState?.updated_at
             ? `最近更新 ${new Date(actionState.updated_at).toLocaleString()}`
-            : "可将策略写入后续执行流"}
+            : interactive
+              ? "可将策略写入后续执行流"
+              : "消息落库并绑定 session 后才能执行动作"}
         </span>
         <div className="flex items-center gap-2">
           <button
             type="button"
             disabled={isLocked}
-            onClick={() =>
+            onClick={() => {
+              if (!sessionId) {
+                return;
+              }
               void onAction({
                 intent: "adopt",
+                session_id: sessionId,
                 message_id: messageId,
                 strategy_key: strategyKey,
                 plan,
-              })
-            }
+              });
+            }}
             className={`rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
               isLocked
-                ? "bg-white/5 text-gray-500 cursor-not-allowed"
+                ? "cursor-not-allowed bg-white/5 text-gray-500"
                 : "bg-green-500/15 text-green-300 hover:bg-green-500/20"
             }`}
           >
@@ -139,12 +157,16 @@ export default function AgentStrategyActionCard({
             type="button"
             disabled={isLocked}
             onClick={() => {
+              if (!sessionId) {
+                return;
+              }
               const reason = window.prompt("记录否决原因（可选）", actionState?.reason || "");
               if (reason === null) {
                 return;
               }
               void onAction({
                 intent: "reject",
+                session_id: sessionId,
                 message_id: messageId,
                 strategy_key: strategyKey,
                 plan,
@@ -153,7 +175,7 @@ export default function AgentStrategyActionCard({
             }}
             className={`rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
               isLocked
-                ? "bg-white/5 text-gray-500 cursor-not-allowed"
+                ? "cursor-not-allowed bg-white/5 text-gray-500"
                 : "bg-red-500/15 text-red-300 hover:bg-red-500/20"
             }`}
           >

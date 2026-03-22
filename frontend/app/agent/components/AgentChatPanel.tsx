@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import {
   AgentChatEntry,
+  AgentChatSession,
   AgentStrategyActionLookup,
   AgentStrategyActionRequest,
   BrainRun,
@@ -13,12 +14,18 @@ import AgentChatMessage from "./AgentChatMessage";
 
 interface AgentChatPanelProps {
   portfolioReady: boolean;
+  sessions: AgentChatSession[];
+  activeSessionId: string | null;
+  sessionsLoading: boolean;
+  messagesLoading: boolean;
   messages: AgentChatEntry[];
   notices: string[];
   isStreaming: boolean;
   draft: string;
   onDraftChange: (value: string) => void;
   onSend: () => void;
+  onCreateSession: () => void;
+  onSelectSession: (sessionId: string) => void;
   runs: BrainRun[];
   selectedRunId: string | null;
   onSelectRun: (run: BrainRun) => void;
@@ -34,14 +41,30 @@ interface AgentChatPanelProps {
   onStrategyAction: (request: AgentStrategyActionRequest) => Promise<void>;
 }
 
+function formatSessionLabel(session: AgentChatSession) {
+  if (session.title && session.title.trim()) {
+    return session.title;
+  }
+  if (session.updated_at) {
+    return new Date(session.updated_at).toLocaleString();
+  }
+  return session.id;
+}
+
 export default function AgentChatPanel({
   portfolioReady,
+  sessions,
+  activeSessionId,
+  sessionsLoading,
+  messagesLoading,
   messages,
   notices,
   isStreaming,
   draft,
   onDraftChange,
   onSend,
+  onCreateSession,
+  onSelectSession,
   runs,
   selectedRunId,
   onSelectRun,
@@ -60,7 +83,7 @@ export default function AgentChatPanel({
 
   useEffect(() => {
     tailRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, isStreaming]);
+  }, [messages, isStreaming, activeSessionId]);
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-[#090a10]">
@@ -71,13 +94,61 @@ export default function AgentChatPanel({
               Agent Chat
             </h2>
             <p className="mt-1 text-xs leading-5 text-gray-500">
-              对话优先，结构化策略会在消息流里直接出现，可立即采纳或否决。
+              使用持久化 session 管理对话，刷新后仍可继续当前聊天与策略动作状态。
             </p>
           </div>
           <span className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-gray-400">
             {portfolioReady ? "Portfolio Ready" : "Portfolio Missing"}
           </span>
         </div>
+      </div>
+
+      <div className="border-b border-white/10 px-4 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[11px] uppercase tracking-[0.16em] text-gray-500">会话列表</div>
+          <button
+            type="button"
+            onClick={onCreateSession}
+            disabled={!portfolioReady || sessionsLoading || isStreaming}
+            className={`rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
+              portfolioReady && !sessionsLoading && !isStreaming
+                ? "bg-white/10 text-white hover:bg-white/20"
+                : "cursor-not-allowed bg-white/5 text-gray-500"
+            }`}
+          >
+            新会话
+          </button>
+        </div>
+        {sessionsLoading ? (
+          <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-gray-500">
+            加载会话中...
+          </div>
+        ) : sessions.length === 0 ? (
+          <div className="mt-3 rounded-xl border border-dashed border-white/10 bg-white/[0.03] px-3 py-3 text-sm text-gray-500">
+            还没有持久化会话。点击“新会话”或直接发送第一条消息。
+          </div>
+        ) : (
+          <div className="mt-3 max-h-44 space-y-2 overflow-y-auto pr-1">
+            {sessions.map((session) => (
+              <button
+                key={session.id}
+                type="button"
+                onClick={() => onSelectSession(session.id)}
+                className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${
+                  session.id === activeSessionId
+                    ? "border-white/20 bg-white/10"
+                    : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"
+                }`}
+              >
+                <div className="truncate text-sm text-white">{formatSessionLabel(session)}</div>
+                <div className="mt-1 flex items-center justify-between gap-3 text-xs text-gray-500">
+                  <span>{session.updated_at ? new Date(session.updated_at).toLocaleString() : "--"}</span>
+                  <span>{session.message_count ?? 0} 条消息</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="border-b border-white/10 px-4 py-4">
@@ -91,7 +162,7 @@ export default function AgentChatPanel({
                 暂无运行记录，手动运行后这里会同步最近的 brain run。
               </div>
             ) : (
-              <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+              <div className="max-h-40 space-y-2 overflow-y-auto pr-1">
                 {runs.map((run) => (
                   <button
                     key={run.id}
@@ -178,9 +249,17 @@ export default function AgentChatPanel({
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-4">
-          {messages.length === 0 ? (
+          {!activeSessionId && messages.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-5 text-sm leading-6 text-gray-500">
-              从这里直接跟 Agent 对话。它返回的 `【交易计划】...【/交易计划】` 会被拆成可操作的策略卡片。
+              选一个已有 session，或直接发送消息开始新的持久化对话。
+            </div>
+          ) : messagesLoading ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-5 text-sm leading-6 text-gray-500">
+              加载会话消息中...
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-5 text-sm leading-6 text-gray-500">
+              当前 session 还没有消息。直接发送问题，Agent 会把回复和策略卡持久化到这个会话里。
             </div>
           ) : (
             messages.map((message) => (

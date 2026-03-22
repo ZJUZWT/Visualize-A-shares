@@ -13,6 +13,7 @@ import ReflectionFeedPanel from "./components/ReflectionFeedPanel";
 import StrategyHistoryPanel from "./components/StrategyHistoryPanel";
 import {
   AgentChatEntry,
+  AgentChatSession,
   AgentConsoleTab,
   AgentState,
   AgentStrategyActionRecord,
@@ -27,6 +28,7 @@ import {
   StrategyHistoryEntry,
   WatchlistItem,
   WeeklySummary,
+  buildAgentStrategyActionLookupKey,
   buildAgentStrategyKey,
 } from "./types";
 
@@ -90,8 +92,8 @@ async function readErrorMessage(resp: Response, fallback: string): Promise<strin
     return fallback;
   }
   try {
-    const parsed = JSON.parse(text) as { detail?: string; message?: string };
-    return parsed.detail || parsed.message || fallback;
+    const parsed = JSON.parse(text) as { detail?: string; message?: string; error?: string };
+    return parsed.detail || parsed.message || parsed.error || fallback;
   } catch {
     return text;
   }
@@ -416,15 +418,86 @@ function normalizeStrategyHistory(raw: unknown): StrategyHistoryEntry[] {
   });
 }
 
+function normalizeAgentChatSessions(portfolioId: string, raw: unknown): AgentChatSession[] {
+  const items = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.items)
+      ? raw.items
+      : isRecord(raw) && Array.isArray(raw.sessions)
+        ? raw.sessions
+        : isRecord(raw) && Array.isArray(raw.results)
+          ? raw.results
+          : isRecord(raw)
+            ? [raw]
+            : [];
+
+  return items
+    .map((item, index): AgentChatSession | null => {
+      const data = isRecord(item) ? item : {};
+      if (typeof data.id !== "string") {
+        return null;
+      }
+      return {
+        id: data.id,
+        portfolio_id:
+          typeof data.portfolio_id === "string" ? data.portfolio_id : (portfolioId as string | null),
+        title: typeof data.title === "string" ? data.title : null,
+        created_at: typeof data.created_at === "string" ? data.created_at : null,
+        updated_at: typeof data.updated_at === "string" ? data.updated_at : null,
+        message_count: toNumber(data.message_count) ?? toNumber(data.msg_count) ?? index * 0,
+      };
+    })
+    .filter((value): value is AgentChatSession => value !== null);
+}
+
+function normalizeAgentChatMessages(sessionId: string, raw: unknown): AgentChatEntry[] {
+  const items = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.items)
+      ? raw.items
+      : isRecord(raw) && Array.isArray(raw.messages)
+        ? raw.messages
+        : isRecord(raw) && Array.isArray(raw.results)
+          ? raw.results
+          : [];
+
+  return items.map((item, index) => {
+    const data = isRecord(item) ? item : {};
+    const roleSource = typeof data.role === "string" ? data.role.toLowerCase() : "assistant";
+    const role = roleSource === "user" ? "user" : "assistant";
+    return {
+      id: typeof data.id === "string" ? data.id : `${sessionId}-message-${index}`,
+      role,
+      content: typeof data.content === "string" ? data.content : "",
+      created_at:
+        typeof data.created_at === "string" ? data.created_at : new Date().toISOString(),
+      session_id:
+        typeof data.session_id === "string" ? data.session_id : sessionId,
+      is_streaming: false,
+      is_persisted: true,
+    };
+  });
+}
+
 function normalizeStrategyDecision(value: unknown): AgentStrategyActionRecord["action"] | null {
   if (typeof value !== "string") {
     return null;
   }
   const normalized = value.trim().toLowerCase();
-  if (["adopt", "adopted", "accept", "accepted"].includes(normalized)) {
+  if (
+    [
+      "adopt",
+      "adopted",
+      "accept",
+      "accepted",
+      "active",
+      "executing",
+      "completed",
+    ].includes(normalized)
+  ) {
     return "adopted";
   }
-  if (["reject", "rejected", "dismiss", "dismissed"].includes(normalized)) {
+  if (["reject", "rejected", "dismiss", "dismissed", "ignored"].includes(normalized)) {
     return "rejected";
   }
   return null;
@@ -465,7 +538,9 @@ function normalizeStrategyActions(raw: unknown): AgentStrategyActionRecord[] {
         ? raw.actions
         : isRecord(raw) && Array.isArray(raw.results)
           ? raw.results
-          : [];
+          : isRecord(raw)
+            ? [raw]
+            : [];
 
   return items
     .map((item, index) => {
@@ -487,8 +562,8 @@ function normalizeStrategyActions(raw: unknown): AgentStrategyActionRecord[] {
               ? buildAgentStrategyKey(plan)
               : null;
       const action =
-        normalizeStrategyDecision(data.action)
-        ?? normalizeStrategyDecision(data.decision)
+        normalizeStrategyDecision(data.decision)
+        ?? normalizeStrategyDecision(data.action)
         ?? normalizeStrategyDecision(data.status);
 
       if (!strategyKey || !action) {
@@ -497,6 +572,8 @@ function normalizeStrategyActions(raw: unknown): AgentStrategyActionRecord[] {
 
       return {
         id: typeof data.id === "string" ? data.id : `strategy-action-${index}`,
+        session_id: typeof data.session_id === "string" ? data.session_id : null,
+        message_id: typeof data.message_id === "string" ? data.message_id : null,
         strategy_key: strategyKey,
         action,
         status: typeof data.status === "string" ? data.status : null,
@@ -535,10 +612,15 @@ export default function AgentPage() {
   const [reflectionFeed, setReflectionFeed] = useState<ReflectionFeedItem[]>([]);
   const [strategyHistory, setStrategyHistory] = useState<StrategyHistoryEntry[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+  const [chatSessions, setChatSessions] = useState<AgentChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [chatEntries, setChatEntries] = useState<AgentChatEntry[]>([]);
   const [chatDraft, setChatDraft] = useState("");
   const [chatStreaming, setChatStreaming] = useState(false);
+  const [chatSessionsLoading, setChatSessionsLoading] = useState(false);
+  const [chatMessagesLoading, setChatMessagesLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [strategyActions, setStrategyActions] = useState<
     Record<string, AgentStrategyActionState>
   >({});
@@ -744,24 +826,133 @@ export default function AgentPage() {
     setReflectionLoading(false);
   }, [portfolioId]);
 
-  const fetchStrategyActions = useCallback(async () => {
-    try {
-      const raw = await fetchJson<unknown>(`${API_BASE}/api/v1/agent/strategy-actions`);
-      const records = normalizeStrategyActions(raw);
-      setStrategyActions((current) => {
-        const next = { ...current };
-        for (const record of records) {
-          next[record.strategy_key] = applyStrategyRecord(current[record.strategy_key], record);
-        }
-        return next;
-      });
+  const fetchChatSessions = useCallback(
+    async (preferredSessionId?: string | null) => {
+      if (!portfolioId) {
+        setChatSessions([]);
+        return [];
+      }
+      setChatSessionsLoading(true);
+      try {
+        const raw = await fetchJson<unknown>(
+          `${API_BASE}/api/v1/agent/chat/sessions?portfolio_id=${portfolioId}`
+        );
+        const sessions = normalizeAgentChatSessions(portfolioId, raw);
+        setChatSessions(sessions);
+        setActiveSessionId((current) => {
+          const target = preferredSessionId ?? current;
+          if (target && sessions.some((session) => session.id === target)) {
+            return target;
+          }
+          return sessions[0]?.id ?? null;
+        });
+        setSessionError(null);
+        return sessions;
+      } catch {
+        setChatSessions([]);
+        setSessionError("Agent chat session 列表暂不可用，`/api/v1/agent/chat/sessions` 尚未就绪。");
+        return [];
+      } finally {
+        setChatSessionsLoading(false);
+      }
+    },
+    [portfolioId]
+  );
+
+  const fetchSessionMessages = useCallback(
+    async (sessionId: string) => {
+      if (!portfolioId) {
+        setChatEntries([]);
+        return [];
+      }
+      setChatMessagesLoading(true);
+      try {
+        const raw = await fetchJson<unknown>(
+          `${API_BASE}/api/v1/agent/chat/sessions/${sessionId}/messages?portfolio_id=${portfolioId}`
+        );
+        const messages = normalizeAgentChatMessages(sessionId, raw);
+        setChatEntries(messages);
+        setChatError(null);
+        return messages;
+      } catch {
+        setChatEntries([]);
+        setChatError(
+          "Agent chat 消息读取失败，`/api/v1/agent/chat/sessions/{session_id}/messages` 尚未就绪。"
+        );
+        return [];
+      } finally {
+        setChatMessagesLoading(false);
+      }
+    },
+    [portfolioId]
+  );
+
+  const fetchStrategyActions = useCallback(async (sessionId: string | null) => {
+    if (!sessionId) {
+      setStrategyActions({});
       setStrategyActionsError(null);
-    } catch {
-      setStrategyActionsError(
-        "策略动作记录暂不可用，`/api/v1/agent/strategy-actions` 尚未就绪。"
+      return {};
+    }
+    try {
+      const raw = await fetchJson<unknown>(
+        `${API_BASE}/api/v1/agent/strategy-actions?session_id=${sessionId}`
       );
+      const records = normalizeStrategyActions(raw);
+      const next: Record<string, AgentStrategyActionState> = {};
+      for (const record of records) {
+        const lookupKey = buildAgentStrategyActionLookupKey(
+          record.message_id,
+          record.strategy_key
+        );
+        next[lookupKey] = applyStrategyRecord(next[lookupKey], record);
+      }
+      setStrategyActions(next);
+      setStrategyActionsError(null);
+      return next;
+    } catch {
+      setStrategyActions({});
+      setStrategyActionsError(
+        "策略动作记录暂不可用，`/api/v1/agent/strategy-actions?session_id=...` 尚未就绪。"
+      );
+      return {};
     }
   }, []);
+
+  const createSession = useCallback(
+    async (seedTitle?: string) => {
+      if (!portfolioId) {
+        return null;
+      }
+      try {
+        const resp = await fetch(`${API_BASE}/api/v1/agent/chat/sessions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            portfolio_id: portfolioId,
+            title: seedTitle?.trim().slice(0, 32) || "新会话",
+          }),
+        });
+        if (!resp.ok) {
+          throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+        }
+        const raw = await resp.json();
+        const session = normalizeAgentChatSessions(portfolioId, raw)[0];
+        if (!session) {
+          throw new Error("会话创建响应缺少 session id");
+        }
+        setChatSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
+        setActiveSessionId(session.id);
+        setChatEntries([]);
+        setStrategyActions({});
+        setSessionError(null);
+        return session.id;
+      } catch (error) {
+        setSessionError(error instanceof Error ? error.message : "创建 chat session 失败");
+        return null;
+      }
+    },
+    [portfolioId]
+  );
 
   useEffect(() => {
     refreshConsole();
@@ -787,9 +978,19 @@ export default function AgentPage() {
 
   useEffect(() => {
     if (portfolioId) {
-      fetchStrategyActions();
+      fetchChatSessions();
     }
-  }, [fetchStrategyActions, portfolioId]);
+  }, [fetchChatSessions, portfolioId]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setChatEntries([]);
+      setStrategyActions({});
+      return;
+    }
+    fetchSessionMessages(activeSessionId);
+    fetchStrategyActions(activeSessionId);
+  }, [activeSessionId, fetchSessionMessages, fetchStrategyActions]);
 
   const fetchWatchlist = useCallback(async () => {
     const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist`);
@@ -840,9 +1041,18 @@ export default function AgentPage() {
     }
   };
 
+  const handleCreateSession = useCallback(async () => {
+    await createSession();
+  }, [createSession]);
+
   const handleSendChat = useCallback(async () => {
     const content = chatDraft.trim();
     if (!content || chatStreaming || !portfolioId) {
+      return;
+    }
+
+    const sessionId = activeSessionId ?? (await createSession(content));
+    if (!sessionId) {
       return;
     }
 
@@ -852,19 +1062,20 @@ export default function AgentPage() {
       role: "user",
       content,
       created_at: createdAt,
+      session_id: sessionId,
+      is_persisted: false,
     };
     const assistantEntry: AgentChatEntry = {
       id: nextChatEntryId(),
       role: "assistant",
       content: "",
       created_at: createdAt,
+      session_id: sessionId,
       is_streaming: true,
+      is_persisted: false,
     };
-    const history = chatEntries.slice(-12).map((entry) => ({
-      role: entry.role,
-      content: entry.content,
-    }));
 
+    setActiveSessionId(sessionId);
     setChatEntries((current) => [...current, userEntry, assistantEntry]);
     setChatDraft("");
     setChatError(null);
@@ -876,8 +1087,8 @@ export default function AgentPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           portfolio_id: portfolioId,
+          session_id: sessionId,
           message: content,
-          history,
         }),
       });
 
@@ -925,13 +1136,15 @@ export default function AgentPage() {
           }
 
           const parsed = JSON.parse(eventData) as {
+            token?: string;
             content?: string;
+            full_text?: string;
             full_content?: string;
             message?: string;
           };
 
-          if (eventType === "token") {
-            fullContent += parsed.content || "";
+          if (eventType === "reply_token") {
+            fullContent += parsed.token || parsed.content || "";
             setChatEntries((current) =>
               current.map((entry) =>
                 entry.id === assistantEntry.id
@@ -939,8 +1152,8 @@ export default function AgentPage() {
                   : entry
               )
             );
-          } else if (eventType === "done") {
-            const finalContent = parsed.full_content || fullContent;
+          } else if (eventType === "reply_complete") {
+            const finalContent = parsed.full_text || parsed.full_content || fullContent;
             setChatEntries((current) =>
               current.map((entry) =>
                 entry.id === assistantEntry.id
@@ -948,6 +1161,11 @@ export default function AgentPage() {
                   : entry
               )
             );
+            await Promise.all([
+              fetchChatSessions(sessionId),
+              fetchSessionMessages(sessionId),
+              fetchStrategyActions(sessionId),
+            ]);
             setChatStreaming(false);
             return;
           } else if (eventType === "error") {
@@ -956,17 +1174,11 @@ export default function AgentPage() {
         }
       }
 
-      setChatEntries((current) =>
-        current.map((entry) =>
-          entry.id === assistantEntry.id
-            ? {
-                ...entry,
-                content: fullContent || "（空回复）",
-                is_streaming: false,
-              }
-            : entry
-        )
-      );
+      await Promise.all([
+        fetchChatSessions(sessionId),
+        fetchSessionMessages(sessionId),
+        fetchStrategyActions(sessionId),
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "发送消息失败";
       setChatError(message);
@@ -980,14 +1192,31 @@ export default function AgentPage() {
     } finally {
       setChatStreaming(false);
     }
-  }, [chatDraft, chatEntries, chatStreaming, portfolioId]);
+  }, [
+    activeSessionId,
+    chatDraft,
+    chatStreaming,
+    createSession,
+    fetchChatSessions,
+    fetchSessionMessages,
+    fetchStrategyActions,
+    portfolioId,
+  ]);
 
   const handleStrategyAction = useCallback(
     async (request: AgentStrategyActionRequest) => {
-      const pendingState = strategyActions[request.strategy_key];
+      if (!portfolioId) {
+        return;
+      }
+
+      const lookupKey = buildAgentStrategyActionLookupKey(
+        request.message_id,
+        request.strategy_key
+      );
+      const pendingState = strategyActions[lookupKey];
       setStrategyActions((current) => ({
         ...current,
-        [request.strategy_key]: {
+        [lookupKey]: {
           id: pendingState?.id ?? null,
           action: pendingState?.action ?? null,
           status: pendingState?.status ?? null,
@@ -1009,12 +1238,12 @@ export default function AgentPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             portfolio_id: portfolioId,
+            session_id: request.session_id,
             message_id: request.message_id,
             strategy_key: request.strategy_key,
-            action: request.intent,
-            reason: request.reason ?? null,
+            stock_code: request.plan.stock_code,
             trade_plan: request.plan,
-            plan: request.plan,
+            reason: request.reason ?? null,
           }),
         });
 
@@ -1024,14 +1253,18 @@ export default function AgentPage() {
 
         const raw = await resp.json().catch(() => null);
         const records = normalizeStrategyActions(raw);
-        const matched = records.find((record) => record.strategy_key === request.strategy_key);
+        const matched = records.find(
+          (record) =>
+            record.message_id === request.message_id
+            && record.strategy_key === request.strategy_key
+        );
 
         setStrategyActions((current) => ({
           ...current,
-          [request.strategy_key]: matched
-            ? applyStrategyRecord(current[request.strategy_key], matched)
+          [lookupKey]: matched
+            ? applyStrategyRecord(current[lookupKey], matched)
             : {
-                id: current[request.strategy_key]?.id ?? null,
+                id: current[lookupKey]?.id ?? null,
                 action: request.intent === "adopt" ? "adopted" : "rejected",
                 status: request.intent === "adopt" ? "adopted" : "rejected",
                 reason: request.reason ?? null,
@@ -1040,13 +1273,13 @@ export default function AgentPage() {
                 error: null,
               },
         }));
-        fetchStrategyActions().catch(() => {});
+        fetchStrategyActions(request.session_id).catch(() => {});
       } catch (error) {
         const message = error instanceof Error ? error.message : "策略动作提交失败";
         setStrategyActions((current) => ({
           ...current,
-          [request.strategy_key]: {
-            ...(current[request.strategy_key] ?? {
+          [lookupKey]: {
+            ...(current[lookupKey] ?? {
               id: null,
               action: null,
               status: null,
@@ -1059,7 +1292,7 @@ export default function AgentPage() {
         }));
       }
     },
-    [fetchStrategyActions, portfolioId, strategyActions]
+    [portfolioId, strategyActions, fetchStrategyActions]
   );
 
   const handleAddWatch = async () => {
@@ -1102,7 +1335,7 @@ export default function AgentPage() {
     }
     return rule.status === memoryStatus;
   });
-  const chatNotices = [chatError, strategyActionsError].filter(
+  const chatNotices = [sessionError, chatError, strategyActionsError].filter(
     (value): value is string => Boolean(value)
   );
 
@@ -1136,12 +1369,18 @@ export default function AgentPage() {
           <div className="min-h-0 border-b border-white/10 xl:w-[430px] xl:min-w-[430px] xl:border-b-0 xl:border-r">
             <AgentChatPanel
               portfolioReady={Boolean(portfolioId)}
+              sessions={chatSessions}
+              activeSessionId={activeSessionId}
+              sessionsLoading={chatSessionsLoading}
+              messagesLoading={chatMessagesLoading}
               messages={chatEntries}
               notices={chatNotices}
               isStreaming={chatStreaming}
               draft={chatDraft}
               onDraftChange={setChatDraft}
               onSend={handleSendChat}
+              onCreateSession={handleCreateSession}
+              onSelectSession={setActiveSessionId}
               runs={runs}
               selectedRunId={activeRun?.id || null}
               onSelectRun={setSelectedRun}
