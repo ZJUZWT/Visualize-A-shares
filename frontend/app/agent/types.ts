@@ -183,6 +183,83 @@ export interface StrategyHistoryEntry {
   execution_counters: Record<string, number | string | null>;
 }
 
+export type WatchSignalStatus =
+  | "watching"
+  | "analyzing"
+  | "triggered"
+  | "failed"
+  | "expired"
+  | "cancelled";
+
+export interface WatchSignalEvidenceItem {
+  title: string | null;
+  type: string | null;
+  summary: string | null;
+}
+
+export interface WatchSignal {
+  id: string;
+  portfolio_id: string | null;
+  stock_code: string | null;
+  sector: string | null;
+  signal_description: string;
+  check_engine: string | null;
+  keywords: string[];
+  if_triggered: string | null;
+  cycle_context: string | null;
+  status: WatchSignalStatus | null;
+  trigger_evidence: WatchSignalEvidenceItem[];
+  source_run_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  triggered_at: string | null;
+}
+
+export interface InfoDigest {
+  id: string;
+  portfolio_id: string | null;
+  run_id: string | null;
+  stock_code: string | null;
+  digest_type: string | null;
+  summary: string | null;
+  key_evidence: string[];
+  risk_flags: string[];
+  strategy_relevance: string | null;
+  impact_assessment: string | null;
+  missing_sources: string[];
+  structured_summary: Record<string, unknown> | null;
+  raw_summary: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+export interface WakeSummary {
+  total: number;
+  watching: number;
+  triggered: number;
+  inactive: number;
+}
+
+export interface WatchSignalFormState {
+  stock_code: string;
+  sector: string;
+  signal_description: string;
+  keywords: string;
+  if_triggered: string;
+  cycle_context: string;
+}
+
+export interface CreateWatchSignalPayload {
+  portfolio_id: string;
+  stock_code: string;
+  sector?: string;
+  signal_description: string;
+  check_engine: "info";
+  keywords: string[];
+  if_triggered?: string;
+  cycle_context?: string;
+  status: "watching";
+}
+
 export interface WatchlistItem {
   id: string;
   stock_code: string;
@@ -248,7 +325,9 @@ export interface AgentStrategyActionRequest {
   source_run_id?: string | null;
 }
 
-export type AgentConsoleTab = "runs" | "reviews" | "memory" | "reflection";
+export type WakeDigestMode = "selected_run" | "recent";
+
+export type AgentConsoleTab = "runs" | "wake" | "reviews" | "memory" | "reflection";
 
 export function buildAgentStrategyKey(plan: TradePlanData): string {
   const numericPart = (value: number | null) => (value === null ? "" : value.toFixed(4));

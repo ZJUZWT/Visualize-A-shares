@@ -7,10 +7,19 @@ import AgentChatPanel from "./components/AgentChatPanel";
 import AgentStatePanel from "./components/AgentStatePanel";
 import DecisionRunPanel from "./components/DecisionRunPanel";
 import ExecutionLedgerPanel from "./components/ExecutionLedgerPanel";
+import WatchSignalsPanel from "./components/WatchSignalsPanel";
+import InfoDigestsPanel from "./components/InfoDigestsPanel";
 import ReviewRecordsPanel from "./components/ReviewRecordsPanel";
 import MemoryRulesPanel from "./components/MemoryRulesPanel";
 import ReflectionFeedPanel from "./components/ReflectionFeedPanel";
 import StrategyHistoryPanel from "./components/StrategyHistoryPanel";
+import {
+  buildWatchSignalPayload,
+  filterInfoDigestsForRun,
+  normalizeInfoDigests,
+  normalizeWatchSignals,
+  summarizeWatchSignals,
+} from "./lib/wakeViewModel";
 import {
   AgentChatEntry,
   AgentChatSession,
@@ -22,10 +31,14 @@ import {
   BrainRun,
   LedgerOverview,
   MemoryRule,
+  InfoDigest,
   ReflectionFeedItem,
   ReviewRecord,
   ReviewStats,
   StrategyHistoryEntry,
+  WakeDigestMode,
+  WatchSignal,
+  WatchSignalFormState,
   WatchlistItem,
   WeeklySummary,
   buildAgentStrategyActionLookupKey,
@@ -35,6 +48,15 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 let chatEntryCounter = 0;
+
+const EMPTY_WATCH_SIGNAL_FORM: WatchSignalFormState = {
+  stock_code: "",
+  sector: "",
+  signal_description: "",
+  keywords: "",
+  if_triggered: "",
+  cycle_context: "",
+};
 
 function nextChatEntryId() {
   chatEntryCounter += 1;
@@ -611,6 +633,8 @@ export default function AgentPage() {
   const [reviewStats, setReviewStats] = useState<ReviewStats | null>(null);
   const [weeklySummaries, setWeeklySummaries] = useState<WeeklySummary[]>([]);
   const [memoryRules, setMemoryRules] = useState<MemoryRule[]>([]);
+  const [watchSignals, setWatchSignals] = useState<WatchSignal[]>([]);
+  const [infoDigests, setInfoDigests] = useState<InfoDigest[]>([]);
   const [reflectionFeed, setReflectionFeed] = useState<ReflectionFeedItem[]>([]);
   const [strategyHistory, setStrategyHistory] = useState<StrategyHistoryEntry[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
@@ -628,6 +652,7 @@ export default function AgentPage() {
   >({});
   const [strategyActionsError, setStrategyActionsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [wakeLoading, setWakeLoading] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [reflectionLoading, setReflectionLoading] = useState(false);
@@ -635,6 +660,9 @@ export default function AgentPage() {
   const [portfolioId, setPortfolioId] = useState<string | null>(null);
   const [stateError, setStateError] = useState<string | null>(null);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
+  const [watchSignalsError, setWatchSignalsError] = useState<string | null>(null);
+  const [infoDigestsError, setInfoDigestsError] = useState<string | null>(null);
+  const [wakeMutationError, setWakeMutationError] = useState<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [reflectionError, setReflectionError] = useState<string | null>(null);
@@ -643,8 +671,14 @@ export default function AgentPage() {
     "overview" | "fallback" | "unavailable" | null
   >(null);
   const [activeTab, setActiveTab] = useState<AgentConsoleTab>("runs");
+  const [wakeDigestMode, setWakeDigestMode] = useState<WakeDigestMode>("selected_run");
   const [reviewType, setReviewType] = useState<"all" | "daily" | "weekly">("all");
   const [memoryStatus, setMemoryStatus] = useState<"all" | "active" | "retired">("all");
+  const [watchSignalForm, setWatchSignalForm] = useState<WatchSignalFormState>({
+    ...EMPTY_WATCH_SIGNAL_FORM,
+  });
+  const [watchSignalSubmitting, setWatchSignalSubmitting] = useState(false);
+  const [watchSignalUpdatingId, setWatchSignalUpdatingId] = useState<string | null>(null);
   const [newCode, setNewCode] = useState("");
   const [newName, setNewName] = useState("");
 
@@ -828,6 +862,40 @@ export default function AgentPage() {
     setReflectionLoading(false);
   }, [portfolioId]);
 
+  const fetchWakeData = useCallback(async () => {
+    if (!portfolioId) {
+      return;
+    }
+
+    setWakeLoading(true);
+    const [signalsResult, digestsResult] = await Promise.allSettled([
+      fetchJson<unknown>(`${API_BASE}/api/v1/agent/watch-signals?portfolio_id=${portfolioId}`),
+      fetchJson<unknown>(`${API_BASE}/api/v1/agent/info-digests?portfolio_id=${portfolioId}&limit=30`),
+    ]);
+
+    if (signalsResult.status === "fulfilled") {
+      setWatchSignals(normalizeWatchSignals(signalsResult.value));
+      setWatchSignalsError(null);
+    } else {
+      setWatchSignals([]);
+      setWatchSignalsError(
+        "观察信号接口暂不可用，`/api/v1/agent/watch-signals` 读取失败。"
+      );
+    }
+
+    if (digestsResult.status === "fulfilled") {
+      setInfoDigests(normalizeInfoDigests(digestsResult.value));
+      setInfoDigestsError(null);
+    } else {
+      setInfoDigests([]);
+      setInfoDigestsError(
+        "信息摘要接口暂不可用，`/api/v1/agent/info-digests` 读取失败。"
+      );
+    }
+
+    setWakeLoading(false);
+  }, [portfolioId]);
+
   const fetchChatSessions = useCallback(
     async (preferredSessionId?: string | null) => {
       if (!portfolioId) {
@@ -961,6 +1029,12 @@ export default function AgentPage() {
   }, [refreshConsole]);
 
   useEffect(() => {
+    if (activeTab === "wake" && portfolioId) {
+      fetchWakeData();
+    }
+  }, [activeTab, fetchWakeData, portfolioId]);
+
+  useEffect(() => {
     if (activeTab === "reviews" && portfolioId) {
       fetchReviewData();
     }
@@ -1005,6 +1079,70 @@ export default function AgentPage() {
     fetchWatchlist();
   }, [fetchWatchlist]);
 
+  const handleWatchSignalFormChange = useCallback(
+    (field: keyof WatchSignalFormState, value: string) => {
+      setWatchSignalForm((current) => ({
+        ...current,
+        [field]: value,
+      }));
+    },
+    []
+  );
+
+  const handleCreateWatchSignal = useCallback(async () => {
+    const payload = buildWatchSignalPayload(portfolioId, watchSignalForm);
+    if (!payload) {
+      setWakeMutationError("请至少填写股票代码和信号描述。");
+      return;
+    }
+
+    setWatchSignalSubmitting(true);
+    try {
+      const resp = await fetch(`${API_BASE}/api/v1/agent/watch-signals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) {
+        throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+      }
+      setWatchSignalForm({ ...EMPTY_WATCH_SIGNAL_FORM });
+      setWakeMutationError(null);
+      await fetchWakeData();
+    } catch (error) {
+      setWakeMutationError(
+        error instanceof Error ? error.message : "创建观察信号失败"
+      );
+    } finally {
+      setWatchSignalSubmitting(false);
+    }
+  }, [fetchWakeData, portfolioId, watchSignalForm]);
+
+  const handleWatchSignalStatusChange = useCallback(
+    async (signalId: string, status: "triggered" | "cancelled") => {
+      setWatchSignalUpdatingId(signalId);
+      try {
+        const resp = await fetch(`${API_BASE}/api/v1/agent/watch-signals/${signalId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        });
+        if (!resp.ok) {
+          throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+        }
+        setWakeMutationError(null);
+        await fetchWakeData();
+      } catch (error) {
+        setWakeMutationError(
+          error instanceof Error ? error.message : "更新观察信号失败"
+        );
+      } finally {
+        setWatchSignalUpdatingId(null);
+      }
+    },
+    [fetchWakeData]
+  );
+
   const handleRun = async () => {
     if (!portfolioId || running) {
       return;
@@ -1035,7 +1173,8 @@ export default function AgentPage() {
         if (updated.status !== "running") {
           clearInterval(poll);
           setRunning(false);
-          refreshConsole();
+          await refreshConsole();
+          await fetchWakeData();
         }
       }, 3000);
     } catch {
@@ -1325,6 +1464,12 @@ export default function AgentPage() {
     failed: "bg-red-500/20 text-red-400",
   };
   const activeRun = selectedRun || runs[0] || null;
+  const wakeSummary = summarizeWatchSignals(watchSignals);
+  const visibleInfoDigests = filterInfoDigestsForRun(
+    infoDigests,
+    activeRun?.id || null,
+    wakeDigestMode
+  );
   const filteredReviewRecords = reviewRecords.filter((record) => {
     if (reviewType === "all") {
       return true;
@@ -1409,6 +1554,7 @@ export default function AgentPage() {
                     <div className="inline-flex rounded-xl border border-white/10 bg-white/5 p-1 text-sm">
                       {([
                         { key: "runs", label: "运行记录" },
+                        { key: "wake", label: "Wake 观察" },
                         { key: "reviews", label: "复盘记录" },
                         { key: "memory", label: "经验规则" },
                         { key: "reflection", label: "反思演进" },
@@ -1442,6 +1588,20 @@ export default function AgentPage() {
                           statusColor={statusColor}
                         />
                       </>
+                    ) : activeTab === "wake" ? (
+                      <WatchSignalsPanel
+                        loading={wakeLoading}
+                        error={watchSignalsError}
+                        mutationError={wakeMutationError}
+                        signals={watchSignals}
+                        summary={wakeSummary}
+                        form={watchSignalForm}
+                        submitting={watchSignalSubmitting}
+                        updatingSignalId={watchSignalUpdatingId}
+                        onFormChange={handleWatchSignalFormChange}
+                        onSubmit={handleCreateWatchSignal}
+                        onStatusChange={handleWatchSignalStatusChange}
+                      />
                     ) : activeTab === "reviews" ? (
                       <ReviewRecordsPanel
                         loading={reviewLoading}
@@ -1477,6 +1637,15 @@ export default function AgentPage() {
                       loading={loading}
                       error={ledgerError}
                       source={ledgerSource}
+                    />
+                  ) : activeTab === "wake" ? (
+                    <InfoDigestsPanel
+                      loading={wakeLoading}
+                      error={infoDigestsError}
+                      items={visibleInfoDigests}
+                      mode={wakeDigestMode}
+                      selectedRunId={activeRun?.id || null}
+                      onModeChange={setWakeDigestMode}
                     />
                   ) : activeTab === "reviews" ? (
                     <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
