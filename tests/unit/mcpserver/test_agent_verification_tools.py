@@ -214,8 +214,13 @@ async def test_verify_demo_agent_cycle_formats_seed_and_verification(monkeypatch
 
     text = await agent_verification.verify_demo_agent_cycle("demo-evolution")
 
+    assert "Summary" in text
+    assert "Scenario: `demo-evolution`" in text
+    assert "Evolution Proof" in text
+    assert "Review Effect" in text
     assert "Demo Seed" in text
     assert "run-demo" in text
     assert "Evolution Diff" in text
     assert "daily_reviews_delta" in text
     assert "weekly_reflections_delta" in text
+    assert text.index("Summary") < text.index("Stages")

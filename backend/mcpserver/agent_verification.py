@@ -91,6 +91,48 @@ def _render_seed_summary(seed_summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _render_summary(result: dict[str, Any]) -> str:
+    seed_summary = result.get("seed_summary") or {}
+    evolution_diff = result.get("evolution_diff") or {}
+    review_result = result.get("review_result") or {}
+    lines = ["## Summary", ""]
+
+    scenario_id = seed_summary.get("scenario_id")
+    if scenario_id:
+        lines.append(f"- Scenario: `{scenario_id}`")
+    lines.append(f"- Outcome: `{result.get('verification_status', '-')}`")
+    lines.append(f"- Run: `{result.get('run_id', '-')}`")
+
+    proof_parts: list[str] = []
+    if evolution_diff.get("review_records_delta"):
+        proof_parts.append(f"review_records_delta={evolution_diff['review_records_delta']}")
+    if evolution_diff.get("daily_reviews_delta"):
+        proof_parts.append(f"daily_reviews_delta={evolution_diff['daily_reviews_delta']}")
+    if evolution_diff.get("weekly_reflections_delta"):
+        proof_parts.append(f"weekly_reflections_delta={evolution_diff['weekly_reflections_delta']}")
+    if evolution_diff.get("weekly_summaries_delta"):
+        proof_parts.append(f"weekly_summaries_delta={evolution_diff['weekly_summaries_delta']}")
+    if evolution_diff.get("memories_added"):
+        proof_parts.append(f"memories_added={evolution_diff['memories_added']}")
+    if evolution_diff.get("memories_updated"):
+        proof_parts.append(f"memories_updated={evolution_diff['memories_updated']}")
+    if evolution_diff.get("memories_retired"):
+        proof_parts.append(f"memories_retired={evolution_diff['memories_retired']}")
+    lines.append(f"- Evolution Proof: {', '.join(proof_parts) if proof_parts else 'none'}")
+
+    review_parts: list[str] = []
+    if review_result.get("review_type"):
+        review_parts.append(f"review_type={review_result['review_type']}")
+    if review_result.get("summary_id"):
+        review_parts.append("weekly_summary_written")
+    if review_result.get("reflection_id"):
+        review_parts.append("weekly_reflection_written")
+    if review_result.get("records_created") is not None:
+        review_parts.append(f"records_created={review_result['records_created']}")
+    lines.append(f"- Review Effect: {', '.join(review_parts) if review_parts else 'none'}")
+    return "\n".join(lines)
+
+
 def _render_verification_result(result: dict[str, Any]) -> str:
     lines = [
         "# Agent Cycle Verification",
@@ -101,6 +143,9 @@ def _render_verification_result(result: dict[str, Any]) -> str:
         f"- Brain Run Status: `{result.get('brain_run_status', '-')}`",
         f"- Failed Stage: `{result.get('failed_stage') or '-'}`",
     ]
+
+    if result.get("seed_summary"):
+        lines.extend(["", _render_summary(result)])
 
     seed_summary = result.get("seed_summary") or {}
     if seed_summary:
