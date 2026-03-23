@@ -128,9 +128,47 @@ class AgentBacktestEngine:
                     "open": row.get("open"),
                     "close": row.get("close"),
                 }
-            )
+        )
         rows.sort(key=lambda item: item["date"])
         return rows
+
+    async def _resolve_trading_days(
+        self,
+        portfolio_id: str,
+        start_day: date,
+        end_day: date,
+    ) -> list[date]:
+        code_rows = await self.db.execute_read(
+            """
+            SELECT DISTINCT stock_code
+            FROM agent.watchlist
+            WHERE stock_code IS NOT NULL
+            """,
+        )
+        position_rows = await self.db.execute_read(
+            """
+            SELECT DISTINCT stock_code
+            FROM agent.positions
+            WHERE portfolio_id = ?
+            """,
+            [portfolio_id],
+        )
+        codes = {
+            row["stock_code"]
+            for row in [*code_rows, *position_rows]
+            if row.get("stock_code")
+        }
+        if not codes:
+            return self._iter_days(start_day, end_day)
+
+        trading_days: set[str] = set()
+        for code in sorted(codes):
+            for row in await self._get_history_rows(code, start_day, end_day):
+                trading_days.add(row["date"])
+        if not trading_days:
+            return self._iter_days(start_day, end_day)
+
+        return [date.fromisoformat(day) for day in sorted(trading_days)]
 
     async def _resolve_fill(
         self,
@@ -202,8 +240,13 @@ class AgentBacktestEngine:
         execution = ExecutionCoordinator(backtest_portfolio_id, self.service)
         days: list[dict] = []
         trades: list[dict] = []
+        trading_days = await self._resolve_trading_days(
+            portfolio_id=portfolio_id,
+            start_day=start_day,
+            end_day=end_day,
+        )
 
-        for trade_day in self._iter_days(start_day, end_day):
+        for trade_day in trading_days:
             trade_day_iso = trade_day.isoformat()
             await self.db.execute_write(
                 """

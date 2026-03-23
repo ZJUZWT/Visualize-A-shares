@@ -206,6 +206,15 @@ class TestAgentBacktestRun:
             ]
         }
 
+    @staticmethod
+    def _history_with_non_trading_gap():
+        return {
+            "600519": [
+                {"date": "2026-03-18", "open": 99.0, "close": 100.0},
+                {"date": "2026-03-20", "open": 103.0, "close": 104.0},
+            ]
+        }
+
     def test_run_backtest_writes_daily_rows_for_each_trade_day(self):
         from engine.agent.backtest import AgentBacktestEngine
 
@@ -356,3 +365,55 @@ class TestAgentBacktestRun:
 
         assert len(result["trades"]) == 1
         assert result["trades"][0]["price"] == 101.0
+
+    def test_run_backtest_skips_non_trading_calendar_days(self):
+        from engine.agent.backtest import AgentBacktestEngine
+        from engine.agent.models import WatchlistInput
+
+        class FakeAgentBrain:
+            def __init__(self, portfolio_id: str):
+                self.portfolio_id = portfolio_id
+
+            async def execute(self, run_id: str):
+                await self_ref.svc.update_brain_run(
+                    run_id,
+                    {
+                        "status": "completed",
+                        "decisions": [],
+                    },
+                )
+
+        run(
+            self.svc.add_watchlist(
+                WatchlistInput(stock_code="600519", stock_name="贵州茅台")
+            )
+        )
+
+        self_ref = self
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
+            "engine.agent.backtest.get_data_engine",
+            return_value=FakeDataEngine(self._history_with_non_trading_gap()),
+        ):
+            result = run(
+                engine.run_backtest(
+                    portfolio_id="live",
+                    start_date="2026-03-18",
+                    end_date="2026-03-20",
+                )
+            )
+
+        rows = run(
+            self.db.execute_read(
+                "SELECT trade_date FROM agent.backtest_days WHERE run_id = ? ORDER BY trade_date",
+                [result["id"]],
+            )
+        )
+        assert [row["trade_date"] for row in rows] == [
+            "2026-03-18",
+            "2026-03-20",
+        ]
+        assert [item["date"] for item in result["days"]] == [
+            "2026-03-18",
+            "2026-03-20",
+        ]
