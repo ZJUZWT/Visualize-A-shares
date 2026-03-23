@@ -1,17 +1,19 @@
 """
 AgentDB — Main Agent 数据库单例
-独立 DuckDB 文件 (data/agent.duckdb)，长连接 + asyncio.Lock 写锁
+独立 DuckDB 文件 (data/main_agent.duckdb)，长连接 + asyncio.Lock 写锁。
+若检测到旧版 data/agent.duckdb 且新库不存在，则自动迁移。
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import math
+import shutil
 
 import duckdb
 from loguru import logger
 
-from config import AGENT_DB_PATH
+from config import AGENT_DB_LEGACY_PATH, AGENT_DB_PATH
 
 
 def _normalize_read_value(value):
@@ -63,6 +65,8 @@ class AgentDB:
     def init_instance(cls) -> AgentDB:
         if cls._instance is not None:
             return cls._instance
+        if not AGENT_DB_PATH.exists() and AGENT_DB_LEGACY_PATH.exists():
+            shutil.copy2(AGENT_DB_LEGACY_PATH, AGENT_DB_PATH)
         inst = cls.__new__(cls)
         inst._conn = duckdb.connect(str(AGENT_DB_PATH))
         inst._write_lock = asyncio.Lock()

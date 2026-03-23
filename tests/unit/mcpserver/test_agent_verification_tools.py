@@ -98,6 +98,7 @@ async def test_verify_agent_cycle_recreates_harness_per_call(monkeypatch):
             }
 
     monkeypatch.setattr(agent_verification, "AgentVerificationHarness", FakeHarness)
+    monkeypatch.setattr(agent_verification.AgentDB, "get_instance", staticmethod(lambda: object()))
 
     await agent_verification.verify_agent_cycle("live")
     await agent_verification.verify_agent_cycle("live")
@@ -275,3 +276,30 @@ async def test_get_demo_agent_cycle_summary_returns_compact_json(monkeypatch):
     assert data["review_effect"]["review_type"] == "weekly"
     assert data["review_effect"]["summary_written"] is True
     assert data["review_effect"]["reflection_written"] is True
+
+
+def test_get_harness_initializes_agent_db_on_demand(monkeypatch):
+    agent_verification = _import_backend_module("mcpserver.agent_verification")
+
+    calls: list[str] = []
+
+    class FakeHarness:
+        def __init__(self):
+            calls.append("harness")
+
+    def fake_get_instance():
+        calls.append("get_instance")
+        raise RuntimeError("AgentDB not initialized. Call init_instance() first.")
+
+    def fake_init_instance():
+        calls.append("init_instance")
+        return object()
+
+    monkeypatch.setattr(agent_verification, "AgentVerificationHarness", FakeHarness)
+    monkeypatch.setattr(agent_verification.AgentDB, "get_instance", staticmethod(fake_get_instance))
+    monkeypatch.setattr(agent_verification.AgentDB, "init_instance", staticmethod(fake_init_instance))
+
+    harness = agent_verification._get_harness()
+
+    assert isinstance(harness, FakeHarness)
+    assert calls == ["get_instance", "init_instance", "harness"]

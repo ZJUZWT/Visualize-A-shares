@@ -4,9 +4,16 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from engine.agent.db import AgentDB
 from engine.agent.verification import AgentVerificationHarness
 
 def _get_harness() -> AgentVerificationHarness:
+    try:
+        AgentDB.get_instance()
+    except RuntimeError as exc:
+        if "not initialized" not in str(exc):
+            raise
+        AgentDB.init_instance()
     return AgentVerificationHarness()
 
 
