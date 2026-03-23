@@ -371,3 +371,30 @@ export function buildEquityChartPoints(
     };
   });
 }
+
+export function summarizeSelectedEquityPoint(
+  markPoints: Array<{ date: string; equity: number | null; isSelected: boolean }>,
+  realizedPoints: Array<{ date: string; equity: number | null; isSelected: boolean }>,
+  selectedDate: string | null
+): {
+  date: string | null;
+  mark_to_market: number | null;
+  realized_only: number | null;
+} {
+  if (!selectedDate) {
+    return {
+      date: null,
+      mark_to_market: null,
+      realized_only: null,
+    };
+  }
+
+  const markPoint = markPoints.find((point) => point.date === selectedDate) ?? null;
+  const realizedPoint = realizedPoints.find((point) => point.date === selectedDate) ?? null;
+
+  return {
+    date: selectedDate,
+    mark_to_market: markPoint?.equity ?? null,
+    realized_only: realizedPoint?.equity ?? null,
+  };
+}

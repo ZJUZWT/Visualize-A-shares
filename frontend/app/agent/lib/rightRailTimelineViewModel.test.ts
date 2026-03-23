@@ -8,6 +8,7 @@ import {
   normalizeEquityTimeline,
   normalizeReplaySnapshot,
   pickDefaultReplayDate,
+  summarizeSelectedEquityPoint,
   summarizeEquityTimeline,
 } from "./rightRailTimelineViewModel.ts";
 
@@ -122,4 +123,35 @@ test("buildEquityChartPoints marks the selected date and keeps point payload", (
 
 test("buildEquityChartPoints returns empty array for empty series", () => {
   assert.deepEqual(buildEquityChartPoints([], 320, 120, "2026-03-19"), []);
+});
+
+test("summarizeSelectedEquityPoint returns selected date and both series values", () => {
+  const markPoints = buildEquityChartPoints(
+    normalizeEquityTimeline("live", {
+      mark_to_market: [
+        { date: "2026-03-18", equity: 1000000 },
+        { date: "2026-03-19", equity: 1000500 },
+      ],
+    }).mark_to_market,
+    320,
+    120,
+    "2026-03-19"
+  );
+  const realizedPoints = buildEquityChartPoints(
+    normalizeEquityTimeline("live", {
+      realized_only: [
+        { date: "2026-03-18", equity: 1000000 },
+        { date: "2026-03-19", equity: 1000000 },
+      ],
+    }).realized_only,
+    320,
+    120,
+    "2026-03-19"
+  );
+
+  const summary = summarizeSelectedEquityPoint(markPoints, realizedPoints, "2026-03-19");
+
+  assert.equal(summary.date, "2026-03-19");
+  assert.equal(summary.mark_to_market, 1000500);
+  assert.equal(summary.realized_only, 1000000);
 });

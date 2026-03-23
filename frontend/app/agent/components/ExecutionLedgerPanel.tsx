@@ -6,6 +6,7 @@ import {
 import {
   buildEquityChartPoints,
   buildEquityPolylinePoints,
+  summarizeSelectedEquityPoint,
   summarizeEquityTimeline,
 } from "../lib/rightRailTimelineViewModel";
 
@@ -103,6 +104,11 @@ export default function ExecutionLedgerPanel({
     120,
     replayDate || null
   );
+  const selectedPointSummary = summarizeSelectedEquityPoint(
+    markPoints,
+    realizedPoints,
+    replayDate || null
+  );
   const hasTimelineData = Boolean(
     timeline && (timeline.mark_to_market.length > 0 || timeline.realized_only.length > 0)
   );
@@ -162,6 +168,21 @@ export default function ExecutionLedgerPanel({
           ) : null}
         </div>
 
+        <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
+          <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
+            当前回放日期 {replayDate || "--"}
+          </span>
+          <span>
+            选中点 {selectedPointSummary.date || "--"}
+          </span>
+          <span>
+            市值口径 {formatNumber(selectedPointSummary.mark_to_market)}
+          </span>
+          <span>
+            已实现口径 {formatNumber(selectedPointSummary.realized_only)}
+          </span>
+        </div>
+
         {timelineLoading && !timeline ? (
           <div className="text-sm text-gray-500">加载收益曲线中...</div>
         ) : timelineError ? (
@@ -213,15 +234,16 @@ export default function ExecutionLedgerPanel({
                     <circle
                       cx={point.x}
                       cy={point.y}
-                      r={point.isSelected ? 5 : 2.5}
+                      r={point.isSelected ? 5.5 : 2.5}
                       fill="rgb(52 211 153)"
                       stroke={point.isSelected ? "white" : "none"}
-                      strokeWidth={point.isSelected ? 1.5 : 0}
+                      strokeWidth={point.isSelected ? 2 : 0}
+                      opacity={point.isSelected ? 1 : 0.95}
                     />
                     <circle
                       cx={point.x}
                       cy={point.y}
-                      r={12}
+                      r={9}
                       fill="transparent"
                       className="cursor-pointer"
                       onClick={() => onReplayDateChange(point.date)}
@@ -241,15 +263,16 @@ export default function ExecutionLedgerPanel({
                     <circle
                       cx={point.x}
                       cy={point.y}
-                      r={point.isSelected ? 5 : 2.5}
+                      r={point.isSelected ? 5.5 : 2.5}
                       fill="rgb(252 211 77)"
                       stroke={point.isSelected ? "white" : "none"}
-                      strokeWidth={point.isSelected ? 1.5 : 0}
+                      strokeWidth={point.isSelected ? 2 : 0}
+                      opacity={point.isSelected ? 1 : 0.95}
                     />
                     <circle
                       cx={point.x}
                       cy={point.y}
-                      r={12}
+                      r={9}
                       fill="transparent"
                       className="cursor-pointer"
                       onClick={() => onReplayDateChange(point.date)}
