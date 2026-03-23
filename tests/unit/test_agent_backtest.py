@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import asyncio
 import duckdb
+import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "backend"))
@@ -25,8 +26,27 @@ def _make_service(tmp_dir):
     from engine.agent.service import AgentService
     from engine.agent.validator import TradeValidator
 
-    svc = AgentService(db=db, validator=TradeValidator())
+    validator = TradeValidator()
+    validator.SLIPPAGE_BUY = 0.0
+    validator.SLIPPAGE_SELL = 0.0
+    validator.COMMISSION_RATE = 0.0
+    validator.MIN_COMMISSION = 0.0
+    validator.STAMP_TAX_RATE = 0.0
+    validator.TRANSFER_FEE_RATE = 0.0
+    svc = AgentService(db=db, validator=validator)
     return db, svc, db_path
+
+
+class FakeDataEngine:
+    def __init__(self, history_by_code):
+        self.history_by_code = history_by_code
+
+    def get_daily_history(self, code: str, start: str, end: str) -> pd.DataFrame:
+        rows = []
+        for row in self.history_by_code.get(code, []):
+            if start <= row["date"] <= end:
+                rows.append(row)
+        return pd.DataFrame(rows)
 
 
 class TestAgentBacktestBootstrap:
@@ -165,3 +185,174 @@ class TestAgentBacktestBootstrap:
             )
         )
         assert backtest_rows == []
+
+
+class TestAgentBacktestRun:
+    def setup_method(self):
+        self._tmp = tempfile.mkdtemp()
+        self.db, self.svc, self.db_path = _make_service(self._tmp)
+        run(self.svc.create_portfolio("live", "live", 1000000.0, "2026-03-18"))
+
+    def teardown_method(self):
+        self.db.close()
+
+    @staticmethod
+    def _history_by_code():
+        return {
+            "600519": [
+                {"date": "2026-03-18", "open": 99.0, "close": 100.0},
+                {"date": "2026-03-19", "open": 101.0, "close": 102.0},
+                {"date": "2026-03-20", "open": 103.0, "close": 104.0},
+            ]
+        }
+
+    def test_run_backtest_writes_daily_rows_for_each_trade_day(self):
+        from engine.agent.backtest import AgentBacktestEngine
+
+        class FakeAgentBrain:
+            def __init__(self, portfolio_id: str):
+                self.portfolio_id = portfolio_id
+
+            async def execute(self, run_id: str):
+                portfolio = await self_ref.svc.get_portfolio(self.portfolio_id)
+                trade_day = portfolio["config"]["sim_current_date"]
+                decisions = []
+                if trade_day == "2026-03-18":
+                    decisions.append(
+                        {
+                            "action": "buy",
+                            "stock_code": "600519",
+                            "stock_name": "贵州茅台",
+                            "quantity": 100,
+                            "holding_type": "mid_term",
+                            "reasoning": "首日建仓",
+                            "risk_note": "test risk",
+                            "invalidation": "test invalidation",
+                        }
+                    )
+                await self_ref.svc.update_brain_run(
+                    run_id,
+                    {
+                        "status": "completed",
+                        "decisions": decisions,
+                    },
+                )
+
+        self_ref = self
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
+            "engine.agent.backtest.get_data_engine",
+            return_value=FakeDataEngine(self._history_by_code()),
+        ):
+            result = run(
+                engine.run_backtest(
+                    portfolio_id="live",
+                    start_date="2026-03-18",
+                    end_date="2026-03-20",
+                )
+            )
+
+        rows = run(
+            self.db.execute_read(
+                "SELECT * FROM agent.backtest_days WHERE run_id = ? ORDER BY trade_date",
+                [result["id"]],
+            )
+        )
+        assert result["status"] == "completed"
+        assert len(result["days"]) == 3
+        assert len(rows) == 3
+        assert [row["trade_date"] for row in rows] == [
+            "2026-03-18",
+            "2026-03-19",
+            "2026-03-20",
+        ]
+
+    def test_same_close_execution_uses_same_day_close(self):
+        from engine.agent.backtest import AgentBacktestEngine
+
+        class FakeAgentBrain:
+            def __init__(self, portfolio_id: str):
+                self.portfolio_id = portfolio_id
+
+            async def execute(self, run_id: str):
+                await self_ref.svc.update_brain_run(
+                    run_id,
+                    {
+                        "status": "completed",
+                        "decisions": [
+                            {
+                                "action": "buy",
+                                "stock_code": "600519",
+                                "stock_name": "贵州茅台",
+                                "quantity": 100,
+                                "holding_type": "mid_term",
+                                "reasoning": "same close",
+                                "risk_note": "test risk",
+                                "invalidation": "test invalidation",
+                            }
+                        ],
+                    },
+                )
+
+        self_ref = self
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
+            "engine.agent.backtest.get_data_engine",
+            return_value=FakeDataEngine(self._history_by_code()),
+        ):
+            result = run(
+                engine.run_backtest(
+                    portfolio_id="live",
+                    start_date="2026-03-18",
+                    end_date="2026-03-18",
+                    execution_price_mode="same_close",
+                )
+            )
+
+        assert len(result["trades"]) == 1
+        assert result["trades"][0]["price"] == 100.0
+
+    def test_next_open_execution_uses_next_day_open(self):
+        from engine.agent.backtest import AgentBacktestEngine
+
+        class FakeAgentBrain:
+            def __init__(self, portfolio_id: str):
+                self.portfolio_id = portfolio_id
+
+            async def execute(self, run_id: str):
+                await self_ref.svc.update_brain_run(
+                    run_id,
+                    {
+                        "status": "completed",
+                        "decisions": [
+                            {
+                                "action": "buy",
+                                "stock_code": "600519",
+                                "stock_name": "贵州茅台",
+                                "quantity": 100,
+                                "holding_type": "mid_term",
+                                "reasoning": "next open",
+                                "risk_note": "test risk",
+                                "invalidation": "test invalidation",
+                            }
+                        ],
+                    },
+                )
+
+        self_ref = self
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
+            "engine.agent.backtest.get_data_engine",
+            return_value=FakeDataEngine(self._history_by_code()),
+        ):
+            result = run(
+                engine.run_backtest(
+                    portfolio_id="live",
+                    start_date="2026-03-18",
+                    end_date="2026-03-18",
+                    execution_price_mode="next_open",
+                )
+            )
+
+        assert len(result["trades"]) == 1
+        assert result["trades"][0]["price"] == 101.0

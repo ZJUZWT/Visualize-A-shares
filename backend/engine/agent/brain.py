@@ -113,7 +113,10 @@ class AgentBrain:
 
             # Step 4: 自动执行
             self._active_run_id = run_id
-            plan_ids, trade_ids = await self._execute_decisions(decisions)
+            if getattr(self, "_skip_execution", False):
+                plan_ids, trade_ids = [], []
+            else:
+                plan_ids, trade_ids = await self._execute_decisions(decisions)
             elapsed = time.monotonic() - start
             state_after = await self.service.get_agent_state(self.portfolio_id)
             await self.service.update_brain_run(run_id, {

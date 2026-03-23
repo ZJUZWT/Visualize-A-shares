@@ -39,7 +39,14 @@ class ExecutionCoordinator:
             source_run_id=run_id,
         )
 
-    async def execute_plan(self, run_id: str, plan_id: str, decision: dict) -> dict:
+    async def execute_plan(
+        self,
+        run_id: str,
+        plan_id: str,
+        decision: dict,
+        trade_date: str | None = None,
+        price_override: float | None = None,
+    ) -> dict:
         action = decision.get("action", "")
         position_id = None
         holding_type = decision.get("holding_type", "mid_term")
@@ -71,7 +78,7 @@ class ExecutionCoordinator:
         trade_input = TradeInput(
             action=action,
             stock_code=decision["stock_code"],
-            price=decision.get("price", 0),
+            price=price_override if price_override is not None else decision.get("price", 0),
             quantity=decision.get("quantity", 100),
             holding_type=holding_type if action == "buy" else None,
             reason=decision.get("reasoning", "Agent 自动决策"),
@@ -85,7 +92,7 @@ class ExecutionCoordinator:
         trade_result = await self.service.execute_trade(
             self.portfolio_id,
             trade_input,
-            date.today().isoformat(),
+            trade_date or date.today().isoformat(),
             position_id=position_id,
             stock_name=decision.get("stock_name"),
             source_run_id=run_id,
