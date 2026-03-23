@@ -138,13 +138,6 @@ class AgentBacktestEngine:
         start_day: date,
         end_day: date,
     ) -> list[date]:
-        code_rows = await self.db.execute_read(
-            """
-            SELECT DISTINCT stock_code
-            FROM agent.watchlist
-            WHERE stock_code IS NOT NULL
-            """,
-        )
         position_rows = await self.db.execute_read(
             """
             SELECT DISTINCT stock_code
@@ -153,9 +146,17 @@ class AgentBacktestEngine:
             """,
             [portfolio_id],
         )
+        trade_rows = await self.db.execute_read(
+            """
+            SELECT DISTINCT stock_code
+            FROM agent.trades
+            WHERE portfolio_id = ?
+            """,
+            [portfolio_id],
+        )
         codes = {
             row["stock_code"]
-            for row in [*code_rows, *position_rows]
+            for row in [*position_rows, *trade_rows]
             if row.get("stock_code")
         }
         if not codes:
@@ -169,6 +170,14 @@ class AgentBacktestEngine:
             return []
 
         return [date.fromisoformat(day) for day in sorted(trading_days)]
+
+    @staticmethod
+    def _merge_unique(existing: list[str], added: list[str]) -> list[str]:
+        merged: list[str] = []
+        for item in [*existing, *added]:
+            if item and item not in merged:
+                merged.append(item)
+        return merged
 
     async def _resolve_fill(
         self,
@@ -267,6 +276,8 @@ class AgentBacktestEngine:
 
             run_state = await self.service.get_brain_run(brain_run["id"])
             day_trade_rows: list[dict] = []
+            day_plan_ids: list[str] = []
+            day_trade_ids: list[str] = []
             for decision in run_state.get("decisions") or []:
                 action = decision.get("action", "")
                 if action in ("hold", "ignore", ""):
@@ -280,6 +291,7 @@ class AgentBacktestEngine:
                 decision_with_fill["price"] = fill_price
 
                 plan = await execution.create_plan_from_decision(brain_run["id"], decision_with_fill)
+                day_plan_ids.append(plan["id"])
                 execute_result = await execution.execute_plan(
                     brain_run["id"],
                     plan["id"],
@@ -290,6 +302,7 @@ class AgentBacktestEngine:
                 trade_id = execute_result.get("trade_id")
                 if not trade_id:
                     continue
+                day_trade_ids.append(trade_id)
                 trade_rows = await self.db.execute_read(
                     "SELECT * FROM agent.trades WHERE id = ?",
                     [trade_id],
@@ -297,6 +310,20 @@ class AgentBacktestEngine:
                 if trade_rows:
                     day_trade_rows.append(trade_rows[0])
                     trades.append(trade_rows[0])
+
+            merged_plan_ids = self._merge_unique(run_state.get("plan_ids") or [], day_plan_ids)
+            merged_trade_ids = self._merge_unique(run_state.get("trade_ids") or [], day_trade_ids)
+            execution_summary = dict(run_state.get("execution_summary") or {})
+            execution_summary["plan_count"] = len(merged_plan_ids)
+            execution_summary["trade_count"] = len(merged_trade_ids)
+            await self.service.update_brain_run(
+                brain_run["id"],
+                {
+                    "plan_ids": merged_plan_ids,
+                    "trade_ids": merged_trade_ids,
+                    "execution_summary": execution_summary,
+                },
+            )
 
             await self._insert_backtest_day(run_id, backtest_portfolio_id, trade_day_iso)
             days.append({"date": trade_day_iso, "trade_count": len(day_trade_rows)})

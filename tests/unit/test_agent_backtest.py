@@ -215,9 +215,44 @@ class TestAgentBacktestRun:
             ]
         }
 
+    @staticmethod
+    def _history_with_unrelated_watchlist_symbol():
+        return {
+            "600519": [
+                {"date": "2026-03-18", "open": 99.0, "close": 100.0},
+                {"date": "2026-03-20", "open": 103.0, "close": 104.0},
+            ],
+            "000001": [
+                {"date": "2026-03-19", "open": 10.0, "close": 10.2},
+            ],
+        }
+
+    def _seed_source_trade(self):
+        from engine.agent.models import TradeInput
+
+        run(
+            self.svc.execute_trade(
+                "live",
+                TradeInput(
+                    action="buy",
+                    stock_code="600519",
+                    stock_name="贵州茅台",
+                    price=100.0,
+                    quantity=100,
+                    holding_type="mid_term",
+                    reason="source seed",
+                    thesis="source seed",
+                    data_basis=["seed"],
+                    risk_note="seed",
+                    invalidation="seed",
+                    triggered_by="manual",
+                ),
+                "2026-03-17",
+            )
+        )
+
     def test_run_backtest_writes_daily_rows_for_each_trade_day(self):
         from engine.agent.backtest import AgentBacktestEngine
-        from engine.agent.models import WatchlistInput
 
         class FakeAgentBrain:
             def __init__(self, portfolio_id: str):
@@ -248,11 +283,7 @@ class TestAgentBacktestRun:
                     },
                 )
 
-        run(
-            self.svc.add_watchlist(
-                WatchlistInput(stock_code="600519", stock_name="贵州茅台")
-            )
-        )
+        self._seed_source_trade()
         self_ref = self
         engine = AgentBacktestEngine(db=self.db, service=self.svc)
         with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
@@ -284,7 +315,6 @@ class TestAgentBacktestRun:
 
     def test_same_close_execution_uses_same_day_close(self):
         from engine.agent.backtest import AgentBacktestEngine
-        from engine.agent.models import WatchlistInput
 
         class FakeAgentBrain:
             def __init__(self, portfolio_id: str):
@@ -310,11 +340,7 @@ class TestAgentBacktestRun:
                     },
                 )
 
-        run(
-            self.svc.add_watchlist(
-                WatchlistInput(stock_code="600519", stock_name="贵州茅台")
-            )
-        )
+        self._seed_source_trade()
         self_ref = self
         engine = AgentBacktestEngine(db=self.db, service=self.svc)
         with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
@@ -335,7 +361,6 @@ class TestAgentBacktestRun:
 
     def test_next_open_execution_uses_next_day_open(self):
         from engine.agent.backtest import AgentBacktestEngine
-        from engine.agent.models import WatchlistInput
 
         class FakeAgentBrain:
             def __init__(self, portfolio_id: str):
@@ -361,11 +386,7 @@ class TestAgentBacktestRun:
                     },
                 )
 
-        run(
-            self.svc.add_watchlist(
-                WatchlistInput(stock_code="600519", stock_name="贵州茅台")
-            )
-        )
+        self._seed_source_trade()
         self_ref = self
         engine = AgentBacktestEngine(db=self.db, service=self.svc)
         with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
@@ -386,7 +407,6 @@ class TestAgentBacktestRun:
 
     def test_run_backtest_skips_non_trading_calendar_days(self):
         from engine.agent.backtest import AgentBacktestEngine
-        from engine.agent.models import WatchlistInput
 
         class FakeAgentBrain:
             def __init__(self, portfolio_id: str):
@@ -401,11 +421,7 @@ class TestAgentBacktestRun:
                     },
                 )
 
-        run(
-            self.svc.add_watchlist(
-                WatchlistInput(stock_code="600519", stock_name="贵州茅台")
-            )
-        )
+        self._seed_source_trade()
 
         self_ref = self
         engine = AgentBacktestEngine(db=self.db, service=self.svc)
@@ -474,3 +490,108 @@ class TestAgentBacktestRun:
         )
         assert rows == []
         assert result["days"] == []
+
+    def test_run_backtest_brain_run_tracks_executed_plan_and_trade_ids(self):
+        from engine.agent.backtest import AgentBacktestEngine
+
+        class FakeAgentBrain:
+            def __init__(self, portfolio_id: str):
+                self.portfolio_id = portfolio_id
+
+            async def execute(self, run_id: str):
+                await self_ref.svc.update_brain_run(
+                    run_id,
+                    {
+                        "status": "completed",
+                        "decisions": [
+                            {
+                                "action": "buy",
+                                "stock_code": "600519",
+                                "stock_name": "贵州茅台",
+                                "quantity": 100,
+                                "holding_type": "mid_term",
+                                "reasoning": "sync ids",
+                                "risk_note": "test risk",
+                                "invalidation": "test invalidation",
+                            }
+                        ],
+                        "execution_summary": {"trade_count": 0, "plan_count": 0},
+                    },
+                )
+
+        self._seed_source_trade()
+        self_ref = self
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
+            "engine.agent.backtest.get_data_engine",
+            return_value=FakeDataEngine(self._history_by_code()),
+        ):
+            result = run(
+                engine.run_backtest(
+                    portfolio_id="live",
+                    start_date="2026-03-18",
+                    end_date="2026-03-18",
+                    execution_price_mode="same_close",
+                )
+            )
+
+        run_rows = run(
+            self.db.execute_read(
+                "SELECT backtest_portfolio_id FROM agent.backtest_runs WHERE id = ?",
+                [result["id"]],
+            )
+        )
+        backtest_portfolio_id = run_rows[0]["backtest_portfolio_id"]
+        brain_runs = run(self.svc.list_brain_runs(backtest_portfolio_id, limit=10))
+        brain_run = brain_runs[0]
+        assert len(brain_run.get("plan_ids") or []) == 1
+        assert len(brain_run.get("trade_ids") or []) == 1
+        assert brain_run["trade_ids"][0] == result["trades"][0]["id"]
+        summary = brain_run.get("execution_summary") or {}
+        assert summary.get("plan_count") == 1
+        assert summary.get("trade_count") == 1
+
+    def test_run_backtest_ignores_unrelated_global_watchlist_symbols(self):
+        from engine.agent.backtest import AgentBacktestEngine
+        from engine.agent.models import WatchlistInput
+
+        class FakeAgentBrain:
+            def __init__(self, portfolio_id: str):
+                self.portfolio_id = portfolio_id
+
+            async def execute(self, run_id: str):
+                await self_ref.svc.update_brain_run(
+                    run_id,
+                    {"status": "completed", "decisions": []},
+                )
+
+        self._seed_source_trade()
+        run(
+            self.svc.add_watchlist(
+                WatchlistInput(stock_code="000001", stock_name="平安银行")
+            )
+        )
+        self_ref = self
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
+            "engine.agent.backtest.get_data_engine",
+            return_value=FakeDataEngine(self._history_with_unrelated_watchlist_symbol()),
+        ):
+            result = run(
+                engine.run_backtest(
+                    portfolio_id="live",
+                    start_date="2026-03-18",
+                    end_date="2026-03-20",
+                )
+            )
+
+        rows = run(
+            self.db.execute_read(
+                "SELECT trade_date FROM agent.backtest_days WHERE run_id = ? ORDER BY trade_date",
+                [result["id"]],
+            )
+        )
+        assert [row["trade_date"] for row in rows] == [
+            "2026-03-18",
+            "2026-03-20",
+        ]
