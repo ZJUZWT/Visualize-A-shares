@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildEquityChartPoints,
   buildEquityPolylinePoints,
   clampReplayDate,
   normalizeEquityTimeline,
@@ -99,4 +100,26 @@ test("summarizeEquityTimeline and buildEquityPolylinePoints expose chart-ready v
 
   const points = buildEquityPolylinePoints(timeline.mark_to_market, 300, 100);
   assert.match(points, /^\d+(\.\d+)?,\d+(\.\d+)? \d+(\.\d+)?,\d+(\.\d+)? \d+(\.\d+)?,\d+(\.\d+)?$/);
+});
+
+test("buildEquityChartPoints marks the selected date and keeps point payload", () => {
+  const series = normalizeEquityTimeline("live", {
+    mark_to_market: [
+      { date: "2026-03-18", equity: 1000000 },
+      { date: "2026-03-19", equity: 1000500 },
+      { date: "2026-03-20", equity: 1002200 },
+    ],
+  }).mark_to_market;
+
+  const points = buildEquityChartPoints(series, 320, 120, "2026-03-19");
+
+  assert.equal(points.length, 3);
+  assert.equal(points[0].date, "2026-03-18");
+  assert.equal(points[0].equity, 1000000);
+  assert.equal(points[1].isSelected, true);
+  assert.equal(points[2].isSelected, false);
+});
+
+test("buildEquityChartPoints returns empty array for empty series", () => {
+  assert.deepEqual(buildEquityChartPoints([], 320, 120, "2026-03-19"), []);
 });

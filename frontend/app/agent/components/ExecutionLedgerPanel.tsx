@@ -4,6 +4,7 @@ import {
   LedgerOverview,
 } from "../types";
 import {
+  buildEquityChartPoints,
   buildEquityPolylinePoints,
   summarizeEquityTimeline,
 } from "../lib/rightRailTimelineViewModel";
@@ -90,6 +91,18 @@ export default function ExecutionLedgerPanel({
   const timelineSummary = summarizeEquityTimeline(timeline);
   const markPolyline = buildEquityPolylinePoints(timeline?.mark_to_market ?? [], 320, 120);
   const realizedPolyline = buildEquityPolylinePoints(timeline?.realized_only ?? [], 320, 120);
+  const markPoints = buildEquityChartPoints(
+    timeline?.mark_to_market ?? [],
+    320,
+    120,
+    replayDate || null
+  );
+  const realizedPoints = buildEquityChartPoints(
+    timeline?.realized_only ?? [],
+    320,
+    120,
+    replayDate || null
+  );
   const hasTimelineData = Boolean(
     timeline && (timeline.mark_to_market.length > 0 || timeline.realized_only.length > 0)
   );
@@ -195,6 +208,26 @@ export default function ExecutionLedgerPanel({
                   strokeLinejoin="round"
                   strokeLinecap="round"
                 />
+                {markPoints.map((point) => (
+                  <g key={`mark-${point.date}`}>
+                    <circle
+                      cx={point.x}
+                      cy={point.y}
+                      r={point.isSelected ? 5 : 2.5}
+                      fill="rgb(52 211 153)"
+                      stroke={point.isSelected ? "white" : "none"}
+                      strokeWidth={point.isSelected ? 1.5 : 0}
+                    />
+                    <circle
+                      cx={point.x}
+                      cy={point.y}
+                      r={12}
+                      fill="transparent"
+                      className="cursor-pointer"
+                      onClick={() => onReplayDateChange(point.date)}
+                    />
+                  </g>
+                ))}
                 <polyline
                   points={realizedPolyline}
                   fill="none"
@@ -203,6 +236,26 @@ export default function ExecutionLedgerPanel({
                   strokeLinejoin="round"
                   strokeLinecap="round"
                 />
+                {realizedPoints.map((point) => (
+                  <g key={`realized-${point.date}`}>
+                    <circle
+                      cx={point.x}
+                      cy={point.y}
+                      r={point.isSelected ? 5 : 2.5}
+                      fill="rgb(252 211 77)"
+                      stroke={point.isSelected ? "white" : "none"}
+                      strokeWidth={point.isSelected ? 1.5 : 0}
+                    />
+                    <circle
+                      cx={point.x}
+                      cy={point.y}
+                      r={12}
+                      fill="transparent"
+                      className="cursor-pointer"
+                      onClick={() => onReplayDateChange(point.date)}
+                    />
+                  </g>
+                ))}
               </svg>
               <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500">
                 <span>{timeline?.start_date ?? "--"}</span>

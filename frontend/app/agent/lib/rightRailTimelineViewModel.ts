@@ -330,3 +330,44 @@ export function buildEquityPolylinePoints(
     })
     .join(" ");
 }
+
+export function buildEquityChartPoints(
+  points: EquityTimelinePoint[],
+  width: number,
+  height: number,
+  selectedDate: string | null
+): Array<{
+  date: string;
+  equity: number | null;
+  x: number;
+  y: number;
+  isSelected: boolean;
+}> {
+  if (points.length === 0) {
+    return [];
+  }
+
+  const values = points
+    .map((point) => point.equity)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (values.length === 0) {
+    return [];
+  }
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+
+  return points.map((point, index) => {
+    const value = point.equity ?? min;
+    const x = points.length === 1 ? width / 2 : (index / (points.length - 1)) * width;
+    const y = height - ((value - min) / range) * height;
+    return {
+      date: point.date,
+      equity: point.equity,
+      x,
+      y,
+      isSelected: point.date === selectedDate,
+    };
+  });
+}
