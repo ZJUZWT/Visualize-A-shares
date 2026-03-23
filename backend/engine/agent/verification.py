@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Callable
 
 from engine.agent.brain import AgentBrain
 from engine.agent.db import AgentDB
@@ -277,6 +277,7 @@ class AgentVerificationHarness:
         include_weekly: bool = False,
         require_trade: bool = False,
         timeout_seconds: int = 30,
+        brain_factory: Callable[[str], Any] | None = None,
     ) -> dict[str, Any]:
         stages: list[dict[str, Any]] = []
         checks: list[dict[str, Any]] = []
@@ -318,7 +319,7 @@ class AgentVerificationHarness:
         run_id = run_record["id"]
         evidence["brain_run_created"] = run_record
         checks.append({"name": "brain_run_created", "status": "pass"})
-        brain = AgentBrain(portfolio_id)
+        brain = brain_factory(portfolio_id) if brain_factory else AgentBrain(portfolio_id)
         try:
             await asyncio.wait_for(brain.execute(run_id), timeout=timeout_seconds)
         except asyncio.TimeoutError:
@@ -532,3 +533,33 @@ class AgentVerificationHarness:
         run_id: str | None = None,
     ) -> dict[str, Any]:
         return await self._collect_snapshot(portfolio_id, run_id=run_id)
+
+    async def prepare_demo_portfolio(
+        self,
+        scenario_id: str = "demo-evolution",
+    ) -> dict[str, Any]:
+        from engine.agent.demo_scenarios import DemoAgentScenarioSeeder
+
+        seeder = DemoAgentScenarioSeeder(service=self.service, db=self.db)
+        return await seeder.prepare_scenario(scenario_id)
+
+    async def verify_demo_cycle(
+        self,
+        scenario_id: str = "demo-evolution",
+        timeout_seconds: int = 30,
+    ) -> dict[str, Any]:
+        from engine.agent.demo_scenarios import DemoAgentScenarioSeeder
+
+        seeder = DemoAgentScenarioSeeder(service=self.service, db=self.db)
+        seed_summary = await seeder.prepare_scenario(scenario_id)
+        result = await self.verify_cycle(
+            portfolio_id=seed_summary["portfolio_id"],
+            as_of_date=seed_summary["as_of_date"],
+            include_review=True,
+            include_weekly=True,
+            require_trade=True,
+            timeout_seconds=timeout_seconds,
+            brain_factory=seeder.build_brain_factory(seed_summary),
+        )
+        result["seed_summary"] = seed_summary
+        return result

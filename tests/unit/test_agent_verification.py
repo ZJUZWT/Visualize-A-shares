@@ -687,3 +687,16 @@ class TestAgentVerificationHarness:
             check["name"] == "state_after_present" and check["status"] == "fail"
             for check in result["checks"]
         )
+
+    def test_verify_demo_cycle_returns_seed_summary_and_pass(self):
+        from engine.agent.verification import AgentVerificationHarness
+
+        harness = AgentVerificationHarness(service=self.svc, db=self.db)
+        result = run(harness.verify_demo_cycle("demo-evolution"))
+
+        assert result["verification_status"] == "pass"
+        assert result["seed_summary"]["scenario_id"] == "demo-evolution"
+        assert result["seed_summary"]["portfolio_id"] == "demo-evolution"
+        assert result["evolution_diff"]["review_records_delta"] >= 1
+        assert result["evolution_diff"]["memories_retired"] >= 1
+        assert result["evolution_diff"]["weekly_summaries_delta"] >= 1

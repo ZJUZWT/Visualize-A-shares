@@ -143,3 +143,74 @@ async def test_inspect_agent_snapshot_tool_formats_sections(monkeypatch):
     assert "Review Stats" in text
     assert "Memories" in text
     assert "run-2" in text
+
+
+@pytest.mark.asyncio
+async def test_prepare_demo_agent_portfolio_formats_seed_summary(monkeypatch):
+    agent_verification = _import_backend_module("mcpserver.agent_verification")
+
+    class FakeHarness:
+        async def prepare_demo_portfolio(self, scenario_id: str):
+            assert scenario_id == "demo-evolution"
+            return {
+                "scenario_id": "demo-evolution",
+                "portfolio_id": "demo-evolution",
+                "as_of_date": "2042-01-10",
+                "week_start": "2042-01-05",
+                "seed_run_id": "demo-seed:demo-evolution",
+                "seeded_counts": {
+                    "watchlist_items": 2,
+                    "baseline_review_records": 2,
+                    "baseline_memories": 1,
+                },
+            }
+
+    monkeypatch.setattr(agent_verification, "_get_harness", lambda: FakeHarness())
+
+    text = await agent_verification.prepare_demo_agent_portfolio("demo-evolution")
+
+    assert "Demo Seed" in text
+    assert "demo-evolution" in text
+    assert "watchlist_items" in text
+
+
+@pytest.mark.asyncio
+async def test_verify_demo_agent_cycle_formats_seed_and_verification(monkeypatch):
+    agent_verification = _import_backend_module("mcpserver.agent_verification")
+
+    class FakeHarness:
+        async def verify_demo_cycle(self, scenario_id: str, timeout_seconds: int = 30):
+            assert scenario_id == "demo-evolution"
+            assert timeout_seconds == 30
+            return {
+                "verification_status": "pass",
+                "portfolio_id": "demo-evolution",
+                "run_id": "run-demo",
+                "brain_run_status": "completed",
+                "failed_stage": None,
+                "stages": [{"name": "brain_execute", "status": "pass"}],
+                "checks": [{"name": "brain_run_completed", "status": "pass"}],
+                "evolution_diff": {
+                    "review_records_delta": 1,
+                    "memories_retired": 1,
+                    "weekly_summaries_delta": 1,
+                    "signals": ["review_records_delta", "memories_retired"],
+                },
+                "evidence": {},
+                "next_actions": [],
+                "seed_summary": {
+                    "scenario_id": "demo-evolution",
+                    "portfolio_id": "demo-evolution",
+                    "as_of_date": "2042-01-10",
+                    "week_start": "2042-01-05",
+                    "seeded_counts": {"baseline_review_records": 2},
+                },
+            }
+
+    monkeypatch.setattr(agent_verification, "_get_harness", lambda: FakeHarness())
+
+    text = await agent_verification.verify_demo_agent_cycle("demo-evolution")
+
+    assert "Demo Seed" in text
+    assert "run-demo" in text
+    assert "Evolution Diff" in text

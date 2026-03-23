@@ -212,6 +212,32 @@ async def inspect_agent_snapshot(
     )
 
 
+@server.tool()
+async def prepare_demo_agent_portfolio(
+    scenario_id: str = "demo-evolution",
+) -> str:
+    """准备一套 deterministic demo portfolio 基线，用于后续 Main Agent 进化闭环验证。"""
+    from . import agent_verification
+
+    return await agent_verification.prepare_demo_agent_portfolio(
+        scenario_id=scenario_id,
+    )
+
+
+@server.tool()
+async def verify_demo_agent_cycle(
+    scenario_id: str = "demo-evolution",
+    timeout_seconds: int = 30,
+) -> str:
+    """使用 deterministic demo scenario 触发并验证 Main Agent 完整进化闭环。"""
+    from . import agent_verification
+
+    return await agent_verification.verify_demo_agent_cycle(
+        scenario_id=scenario_id,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 # ─── IndustryEngine Tools ──────────────────────────────
 
 @server.tool()

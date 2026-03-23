@@ -71,6 +71,25 @@ def _render_evolution_diff(evolution_diff: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _render_seed_summary(seed_summary: dict[str, Any]) -> str:
+    lines = ["## Demo Seed", ""]
+    if not seed_summary:
+        lines.append("- None")
+        return "\n".join(lines)
+
+    for key in (
+        "scenario_id",
+        "portfolio_id",
+        "as_of_date",
+        "week_start",
+        "seed_run_id",
+        "seeded_counts",
+    ):
+        if key in seed_summary:
+            lines.append(f"- {key}: {_fmt_value(seed_summary.get(key))}")
+    return "\n".join(lines)
+
+
 def _render_verification_result(result: dict[str, Any]) -> str:
     lines = [
         "# Agent Cycle Verification",
@@ -80,13 +99,27 @@ def _render_verification_result(result: dict[str, Any]) -> str:
         f"- Run ID: `{result.get('run_id', '-')}`",
         f"- Brain Run Status: `{result.get('brain_run_status', '-')}`",
         f"- Failed Stage: `{result.get('failed_stage') or '-'}`",
+    ]
+
+    seed_summary = result.get("seed_summary") or {}
+    if seed_summary:
+        lines.extend(
+            [
+                "",
+                _render_seed_summary(seed_summary),
+            ]
+        )
+
+    lines.extend(
+        [
         "",
         _render_stages(result.get("stages") or []),
         "",
         _render_checks(result.get("checks") or []),
         "",
         _render_evolution_diff(result.get("evolution_diff") or {}),
-    ]
+        ]
+    )
 
     evidence = result.get("evidence") or {}
     if evidence:
@@ -170,6 +203,16 @@ def _render_snapshot(snapshot: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _render_prepare_summary(seed_summary: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            "# Demo Agent Portfolio Prepared",
+            "",
+            _render_seed_summary(seed_summary),
+        ]
+    )
+
+
 async def verify_agent_cycle(
     portfolio_id: str,
     as_of_date: str | None = None,
@@ -198,3 +241,21 @@ async def inspect_agent_snapshot(
         run_id=run_id,
     )
     return _render_snapshot(snapshot)
+
+
+async def prepare_demo_agent_portfolio(
+    scenario_id: str = "demo-evolution",
+) -> str:
+    seed_summary = await _get_harness().prepare_demo_portfolio(scenario_id=scenario_id)
+    return _render_prepare_summary(seed_summary)
+
+
+async def verify_demo_agent_cycle(
+    scenario_id: str = "demo-evolution",
+    timeout_seconds: int = 30,
+) -> str:
+    result = await _get_harness().verify_demo_cycle(
+        scenario_id=scenario_id,
+        timeout_seconds=timeout_seconds,
+    )
+    return _render_verification_result(result)
