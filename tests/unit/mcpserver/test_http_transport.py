@@ -37,7 +37,8 @@ def test_mcp_tools_registered():
     assert "inspect_agent_snapshot" in tools
     assert "prepare_demo_agent_portfolio" in tools
     assert "verify_demo_agent_cycle" in tools
-    assert len(tools) >= 26
+    assert "get_demo_agent_cycle_summary" in tools
+    assert len(tools) >= 27
 
 
 def test_mcp_server_does_not_eager_import_agent_verification():

@@ -1,6 +1,7 @@
 """MCP wrappers for Main Agent verification tools."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from engine.agent.verification import AgentVerificationHarness
@@ -261,6 +262,42 @@ def _render_prepare_summary(seed_summary: dict[str, Any]) -> str:
     )
 
 
+def _build_demo_cycle_summary(result: dict[str, Any]) -> dict[str, Any]:
+    seed_summary = result.get("seed_summary") or {}
+    evolution_diff = result.get("evolution_diff") or {}
+    review_result = result.get("review_result") or {}
+    proof = {
+        "review_records_delta": int(evolution_diff.get("review_records_delta") or 0),
+        "daily_reviews_delta": int(evolution_diff.get("daily_reviews_delta") or 0),
+        "weekly_reflections_delta": int(evolution_diff.get("weekly_reflections_delta") or 0),
+        "weekly_summaries_delta": int(evolution_diff.get("weekly_summaries_delta") or 0),
+        "memories_added": int(evolution_diff.get("memories_added") or 0),
+        "memories_updated": int(evolution_diff.get("memories_updated") or 0),
+        "memories_retired": int(evolution_diff.get("memories_retired") or 0),
+    }
+    ready = (
+        result.get("verification_status") == "pass"
+        and proof["review_records_delta"] >= 1
+        and proof["daily_reviews_delta"] >= 1
+        and proof["weekly_reflections_delta"] >= 1
+        and proof["weekly_summaries_delta"] >= 1
+    )
+    return {
+        "scenario_id": seed_summary.get("scenario_id"),
+        "portfolio_id": seed_summary.get("portfolio_id") or result.get("portfolio_id"),
+        "verification_status": result.get("verification_status"),
+        "run_id": result.get("run_id"),
+        "failed_stage": result.get("failed_stage"),
+        "ready": ready,
+        "proof": proof,
+        "review_effect": {
+            "review_type": review_result.get("review_type"),
+            "summary_written": bool(review_result.get("summary_id")),
+            "reflection_written": bool(review_result.get("reflection_id")),
+        },
+    }
+
+
 async def verify_agent_cycle(
     portfolio_id: str,
     as_of_date: str | None = None,
@@ -307,3 +344,15 @@ async def verify_demo_agent_cycle(
         timeout_seconds=timeout_seconds,
     )
     return _render_verification_result(result)
+
+
+async def get_demo_agent_cycle_summary(
+    scenario_id: str = "demo-evolution",
+    timeout_seconds: int = 30,
+) -> str:
+    result = await _get_harness().verify_demo_cycle(
+        scenario_id=scenario_id,
+        timeout_seconds=timeout_seconds,
+    )
+    summary = _build_demo_cycle_summary(result)
+    return json.dumps(summary, ensure_ascii=False, indent=2)

@@ -238,6 +238,20 @@ async def verify_demo_agent_cycle(
     )
 
 
+@server.tool()
+async def get_demo_agent_cycle_summary(
+    scenario_id: str = "demo-evolution",
+    timeout_seconds: int = 30,
+) -> str:
+    """返回 demo agent 闭环验证的结构化摘要，供自动验收和 agent 机器消费。"""
+    from . import agent_verification
+
+    return await agent_verification.get_demo_agent_cycle_summary(
+        scenario_id=scenario_id,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 # ─── IndustryEngine Tools ──────────────────────────────
 
 @server.tool()

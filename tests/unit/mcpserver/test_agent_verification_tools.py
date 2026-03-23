@@ -1,5 +1,6 @@
 """Agent verification MCP wrapper tests."""
 import importlib
+import json
 import sys
 from pathlib import Path
 
@@ -224,3 +225,53 @@ async def test_verify_demo_agent_cycle_formats_seed_and_verification(monkeypatch
     assert "daily_reviews_delta" in text
     assert "weekly_reflections_delta" in text
     assert text.index("Summary") < text.index("Stages")
+
+
+@pytest.mark.asyncio
+async def test_get_demo_agent_cycle_summary_returns_compact_json(monkeypatch):
+    agent_verification = _import_backend_module("mcpserver.agent_verification")
+
+    class FakeHarness:
+        async def verify_demo_cycle(self, scenario_id: str, timeout_seconds: int = 30):
+            assert scenario_id == "demo-evolution"
+            assert timeout_seconds == 30
+            return {
+                "verification_status": "pass",
+                "portfolio_id": "demo-evolution",
+                "run_id": "run-demo",
+                "brain_run_status": "completed",
+                "failed_stage": None,
+                "evolution_diff": {
+                    "review_records_delta": 1,
+                    "daily_reviews_delta": 1,
+                    "weekly_reflections_delta": 1,
+                    "weekly_summaries_delta": 1,
+                    "memories_added": 1,
+                    "memories_updated": 1,
+                    "memories_retired": 1,
+                },
+                "review_result": {
+                    "review_type": "weekly",
+                    "summary_id": "summary-1",
+                    "reflection_id": "reflection-1",
+                },
+                "seed_summary": {
+                    "scenario_id": "demo-evolution",
+                    "portfolio_id": "demo-evolution",
+                },
+            }
+
+    monkeypatch.setattr(agent_verification, "_get_harness", lambda: FakeHarness())
+
+    text = await agent_verification.get_demo_agent_cycle_summary("demo-evolution")
+    data = json.loads(text)
+
+    assert data["scenario_id"] == "demo-evolution"
+    assert data["portfolio_id"] == "demo-evolution"
+    assert data["verification_status"] == "pass"
+    assert data["ready"] is True
+    assert data["proof"]["review_records_delta"] == 1
+    assert data["proof"]["weekly_reflections_delta"] == 1
+    assert data["review_effect"]["review_type"] == "weekly"
+    assert data["review_effect"]["summary_written"] is True
+    assert data["review_effect"]["reflection_written"] is True
