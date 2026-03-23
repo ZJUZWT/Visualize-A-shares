@@ -305,10 +305,10 @@ class TestAgentVerificationHarness:
         assert result["failed_stage"] is None
         assert result["review_result"]["review_type"] == "weekly"
         assert result["evolution_diff"]["memories_added"] == 1
-        assert result["evolution_diff"]["reflections_added"] == 1
+        assert result["evolution_diff"]["weekly_reflections_delta"] == 1
         assert result["evolution_diff"]["weekly_summaries_delta"] == 1
         assert "memories_added" in result["evolution_diff"]["signals"]
-        assert "reflections_added" in result["evolution_diff"]["signals"]
+        assert "weekly_reflections_delta" in result["evolution_diff"]["signals"]
         assert [stage["name"] for stage in result["stages"]] == [
             "snapshot_before",
             "brain_execute",
@@ -698,5 +698,7 @@ class TestAgentVerificationHarness:
         assert result["seed_summary"]["scenario_id"] == "demo-evolution"
         assert result["seed_summary"]["portfolio_id"] == "demo-evolution"
         assert result["evolution_diff"]["review_records_delta"] >= 1
+        assert result["evolution_diff"]["daily_reviews_delta"] == 1
         assert result["evolution_diff"]["memories_retired"] >= 1
+        assert result["evolution_diff"]["weekly_reflections_delta"] == 1
         assert result["evolution_diff"]["weekly_summaries_delta"] >= 1

@@ -41,10 +41,11 @@ async def test_verify_agent_cycle_tool_formats_result(monkeypatch):
             "evolution_diff": {
                 "brain_runs_delta": 1,
                 "review_records_delta": 0,
+                "daily_reviews_delta": 0,
                 "memories_added": 0,
                 "memories_updated": 0,
                 "memories_retired": 0,
-                "reflections_added": 0,
+                "weekly_reflections_delta": 0,
                 "weekly_summaries_delta": 0,
                 "strategy_history_changed": False,
                 "signals": [],
@@ -192,7 +193,9 @@ async def test_verify_demo_agent_cycle_formats_seed_and_verification(monkeypatch
                 "checks": [{"name": "brain_run_completed", "status": "pass"}],
                 "evolution_diff": {
                     "review_records_delta": 1,
+                    "daily_reviews_delta": 1,
                     "memories_retired": 1,
+                    "weekly_reflections_delta": 1,
                     "weekly_summaries_delta": 1,
                     "signals": ["review_records_delta", "memories_retired"],
                 },
@@ -214,3 +217,5 @@ async def test_verify_demo_agent_cycle_formats_seed_and_verification(monkeypatch
     assert "Demo Seed" in text
     assert "run-demo" in text
     assert "Evolution Diff" in text
+    assert "daily_reviews_delta" in text
+    assert "weekly_reflections_delta" in text

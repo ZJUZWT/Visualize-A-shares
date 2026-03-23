@@ -56,8 +56,9 @@ def _render_evolution_diff(evolution_diff: dict[str, Any]) -> str:
     for key in (
         "brain_runs_delta",
         "review_records_delta",
+        "daily_reviews_delta",
         "weekly_summaries_delta",
-        "reflections_added",
+        "weekly_reflections_delta",
         "strategy_history_count_delta",
         "strategy_history_changed",
         "memories_added",
@@ -151,7 +152,8 @@ def _render_snapshot(snapshot: dict[str, Any]) -> str:
     asset_summary = (snapshot.get("ledger") or {}).get("asset_summary") or {}
     review_stats = snapshot.get("review_stats") or {}
     memories = snapshot.get("memories") or []
-    reflections = snapshot.get("reflections") or []
+    daily_reviews = snapshot.get("daily_reviews") or []
+    weekly_reflections = snapshot.get("weekly_reflections") or []
     strategy_history = snapshot.get("strategy_history") or []
     weekly_summaries = snapshot.get("weekly_summaries") or []
 
@@ -186,7 +188,8 @@ def _render_snapshot(snapshot: dict[str, Any]) -> str:
         "## Evolution State",
         "",
         f"- Strategy History Entries: {_fmt_value(len(strategy_history))}",
-        f"- Reflection Entries: {_fmt_value(len(reflections))}",
+        f"- Daily Review Entries: {_fmt_value(len(daily_reviews))}",
+        f"- Weekly Reflection Entries: {_fmt_value(len(weekly_reflections))}",
         f"- Weekly Summaries: {_fmt_value(len(weekly_summaries))}",
         "",
         "## Memories",

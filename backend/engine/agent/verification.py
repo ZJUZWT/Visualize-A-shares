@@ -73,7 +73,8 @@ class AgentVerificationHarness:
             "latest_run_id": (snapshot.get("latest_run") or {}).get("id"),
             "memory_count": len(snapshot.get("memories") or []),
             "review_record_count": len(snapshot.get("review_records") or []),
-            "reflection_count": len(snapshot.get("reflections") or []),
+            "daily_review_count": len(snapshot.get("daily_reviews") or []),
+            "weekly_reflection_count": len(snapshot.get("weekly_reflections") or []),
             "weekly_summary_count": len(snapshot.get("weekly_summaries") or []),
             "strategy_history_count": len(snapshot.get("strategy_history") or []),
         }
@@ -133,8 +134,9 @@ class AgentVerificationHarness:
         diff = {
             "brain_runs_delta": len(after.get("brain_runs") or []) - len(before.get("brain_runs") or []),
             "review_records_delta": len(after.get("review_records") or []) - len(before.get("review_records") or []),
+            "daily_reviews_delta": len(after.get("daily_reviews") or []) - len(before.get("daily_reviews") or []),
             "weekly_summaries_delta": len(after.get("weekly_summaries") or []) - len(before.get("weekly_summaries") or []),
-            "reflections_added": len(after.get("reflections") or []) - len(before.get("reflections") or []),
+            "weekly_reflections_delta": len(after.get("weekly_reflections") or []) - len(before.get("weekly_reflections") or []),
             "strategy_history_count_delta": len(after.get("strategy_history") or []) - len(before.get("strategy_history") or []),
             "strategy_history_changed": strategy_history_changed,
             **memory_diff,
@@ -143,14 +145,16 @@ class AgentVerificationHarness:
         signals: list[str] = []
         if diff["review_records_delta"] > 0:
             signals.append("review_records_delta")
+        if diff["daily_reviews_delta"] > 0:
+            signals.append("daily_reviews_delta")
         if diff["memories_added"] > 0:
             signals.append("memories_added")
         if diff["memories_updated"] > 0:
             signals.append("memories_updated")
         if diff["memories_retired"] > 0:
             signals.append("memories_retired")
-        if diff["reflections_added"] > 0:
-            signals.append("reflections_added")
+        if diff["weekly_reflections_delta"] > 0:
+            signals.append("weekly_reflections_delta")
         if diff["weekly_summaries_delta"] > 0:
             signals.append("weekly_summaries_delta")
         if strategy_history_changed:
@@ -183,7 +187,22 @@ class AgentVerificationHarness:
         review_stats = await self.service.get_review_stats(portfolio_id, days=30)
         memories = await self.service.list_memories(status="all")
         strategy_history = await self.service.list_strategy_history(portfolio_id, limit=50)
-        reflections = await self.service.list_reflections(limit=50)
+        daily_reviews = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.daily_reviews
+            ORDER BY review_date DESC, created_at DESC
+            LIMIT 50
+            """
+        )
+        weekly_reflections = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.weekly_reflections
+            ORDER BY week_end DESC, created_at DESC
+            LIMIT 50
+            """
+        )
         weekly_summaries = await self.service.list_weekly_summaries(limit=50)
 
         return {
@@ -196,7 +215,8 @@ class AgentVerificationHarness:
             "review_stats": review_stats,
             "memories": memories,
             "strategy_history": strategy_history,
-            "reflections": reflections,
+            "daily_reviews": daily_reviews,
+            "weekly_reflections": weekly_reflections,
             "weekly_summaries": weekly_summaries,
         }
 
