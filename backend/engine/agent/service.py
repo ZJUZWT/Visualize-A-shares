@@ -3,6 +3,7 @@ AgentService — Main Agent 业务逻辑层
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import date, datetime, timedelta
@@ -15,6 +16,7 @@ from pydantic import ValidationError
 from engine.agent.models import StrategyMemoInput, TradeInput
 from engine.agent.state import get_state, upsert_state
 from engine.agent.validator import TradeValidator
+from engine.data import get_data_engine
 
 
 BRAIN_RUN_JSON_FIELDS = (
@@ -34,6 +36,7 @@ WATCH_SIGNAL_JSON_FIELDS = ("keywords", "trigger_evidence")
 INFO_DIGEST_JSON_FIELDS = ("raw_summary", "structured_summary", "missing_sources")
 REFLECTION_JSON_FIELDS = ("info_review_details",)
 STRATEGY_MEMO_JSON_FIELDS = ("plan_snapshot",)
+TRADE_JSON_FIELDS = ("data_basis",)
 STRATEGY_MEMO_STATUSES = {"saved", "ignored", "archived"}
 WATCH_SIGNAL_STATUSES = {
     "watching",
@@ -89,6 +92,14 @@ def _normalize_record(row: dict) -> dict:
     return normalized
 
 
+def _normalize_trade_record(row: dict) -> dict:
+    normalized = _normalize_record(row)
+    for field in TRADE_JSON_FIELDS:
+        normalized[field] = _decode_json_value(normalized.get(field))
+        normalized[field] = _normalize_json_safe(normalized[field])
+    return normalized
+
+
 def _build_info_review_payload(row: dict) -> dict | None:
     summary = row.get("info_review_summary")
     details = row.get("info_review_details")
@@ -122,6 +133,60 @@ def _normalize_strategy_memo(row: dict) -> dict:
         normalized[field] = _decode_json_value(normalized.get(field))
         normalized[field] = _normalize_json_safe(normalized[field])
     return normalized
+
+
+def _coerce_to_date(value) -> date:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if value is None:
+        raise ValueError("缺少日期")
+    text = str(value)
+    try:
+        return datetime.fromisoformat(text).date()
+    except ValueError:
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError as exc:
+            raise ValueError(f"非法日期: {value}") from exc
+
+
+def _round_money(value: float) -> float:
+    return round(float(value), 2)
+
+
+def _daterange(start_day: date, end_day: date) -> list[date]:
+    days = []
+    current = start_day
+    while current <= end_day:
+        days.append(current)
+        current += timedelta(days=1)
+    return days
+
+
+def _lookup_close_on_or_before(
+    price_history: dict[str, float],
+    target_day: date,
+    fallback: float,
+) -> float:
+    target_iso = target_day.isoformat()
+    candidates = [day for day in price_history.keys() if day <= target_iso]
+    if not candidates:
+        return _round_money(fallback)
+    return _round_money(price_history[max(candidates)])
+
+
+def _lookup_next_close_after(
+    price_history: dict[str, float],
+    target_day: date,
+) -> tuple[str, float] | None:
+    target_iso = target_day.isoformat()
+    candidates = [day for day in price_history.keys() if day > target_iso]
+    if not candidates:
+        return None
+    next_day = min(candidates)
+    return next_day, _round_money(price_history[next_day])
 
 
 def _build_position_read_model(position: dict) -> dict:
@@ -1161,6 +1226,435 @@ class AgentService:
         source_run_id: str | None = None,
     ) -> dict:
         return await upsert_state(self.db, portfolio_id, updates, source_run_id)
+
+    async def _get_portfolio_config(self, portfolio_id: str) -> dict:
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.portfolio_config WHERE id = ?",
+            [portfolio_id],
+        )
+        if not rows:
+            raise ValueError(f"账户 {portfolio_id} 不存在")
+        return _normalize_record(rows[0])
+
+    async def _list_timeline_positions(self, portfolio_id: str) -> list[dict]:
+        rows = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.positions
+            WHERE portfolio_id = ?
+            ORDER BY created_at ASC, entry_date ASC, id ASC
+            """,
+            [portfolio_id],
+        )
+        return [_normalize_record(row) for row in rows]
+
+    async def _list_timeline_trades(self, portfolio_id: str) -> list[dict]:
+        rows = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.trades
+            WHERE portfolio_id = ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            [portfolio_id],
+        )
+        return [_normalize_trade_record(row) for row in rows]
+
+    def _resolve_timeline_start_date(self, config: dict, trades: list[dict]) -> date:
+        if config.get("sim_start_date"):
+            return _coerce_to_date(config["sim_start_date"])
+        if trades:
+            return _coerce_to_date(trades[0]["created_at"])
+        return _coerce_to_date(config["created_at"])
+
+    def _resolve_timeline_end_date(
+        self,
+        config: dict,
+        trades: list[dict],
+        start_day: date,
+    ) -> date:
+        if trades:
+            return max(_coerce_to_date(trades[-1]["created_at"]), start_day)
+        if config.get("sim_current_date"):
+            return max(_coerce_to_date(config["sim_current_date"]), start_day)
+        return start_day
+
+    async def _load_price_history(
+        self,
+        stock_codes: list[str],
+        start_day: date,
+        end_day: date,
+    ) -> dict[str, dict[str, float]]:
+        if not stock_codes:
+            return {}
+
+        engine = get_data_engine()
+        start_iso = start_day.isoformat()
+        end_iso = end_day.isoformat()
+        result: dict[str, dict[str, float]] = {}
+
+        for code in sorted(set(stock_codes)):
+            df = await asyncio.to_thread(engine.get_daily_history, code, start_iso, end_iso)
+            history: dict[str, float] = {}
+            if df is not None and not df.empty:
+                date_col = "date" if "date" in df.columns else "trade_date" if "trade_date" in df.columns else None
+                close_col = "close" if "close" in df.columns else None
+                if date_col and close_col:
+                    for _, row in df.iterrows():
+                        day_key = _coerce_to_date(row[date_col]).isoformat()
+                        history[day_key] = float(row[close_col])
+            result[code] = history
+
+        return result
+
+    def _rebuild_daily_ledger(
+        self,
+        config: dict,
+        positions: list[dict],
+        trades: list[dict],
+        price_history: dict[str, dict[str, float]],
+        start_day: date,
+        end_day: date,
+    ) -> dict[str, dict]:
+        positions_by_id = {row["id"]: row for row in positions}
+        events_by_day: dict[str, list[dict]] = {}
+        for trade in trades:
+            trade_day = _coerce_to_date(trade["created_at"]).isoformat()
+            events_by_day.setdefault(trade_day, []).append(trade)
+
+        cash_balance = float(config["initial_capital"])
+        realized_pnl = 0.0
+        position_state: dict[str, dict] = {}
+        states: dict[str, dict] = {}
+
+        for current_day in _daterange(start_day, end_day):
+            day_key = current_day.isoformat()
+            for trade in events_by_day.get(day_key, []):
+                position_id = trade["position_id"]
+                quantity = int(trade["quantity"])
+                fee = float(
+                    self.validator.calc_fee(
+                        trade["action"],
+                        float(trade["price"]),
+                        quantity,
+                        str(trade["stock_code"]),
+                    )
+                )
+                meta = positions_by_id.get(position_id, {})
+                state = position_state.setdefault(
+                    position_id,
+                    {
+                        "id": position_id,
+                        "stock_code": trade["stock_code"],
+                        "stock_name": trade["stock_name"],
+                        "holding_type": meta.get("holding_type"),
+                        "entry_date": meta.get("entry_date"),
+                        "qty": 0,
+                        "open_cost_basis": 0.0,
+                    },
+                )
+
+                if trade["action"] in ("buy", "add"):
+                    cash_balance -= float(trade["amount"]) + fee
+                    state["qty"] += quantity
+                    state["open_cost_basis"] += float(trade["amount"]) + fee
+                elif trade["action"] in ("sell", "reduce"):
+                    previous_qty = int(state["qty"])
+                    if previous_qty <= 0:
+                        continue
+                    allocated_cost = state["open_cost_basis"] * quantity / previous_qty
+                    proceeds = float(trade["amount"]) - fee
+                    cash_balance += proceeds
+                    state["qty"] = max(previous_qty - quantity, 0)
+                    state["open_cost_basis"] = max(state["open_cost_basis"] - allocated_cost, 0.0)
+                    realized_pnl += proceeds - allocated_cost
+                    if state["qty"] == 0:
+                        state["open_cost_basis"] = 0.0
+
+            open_positions = []
+            position_value = 0.0
+            open_cost_basis = 0.0
+
+            for item in position_state.values():
+                if item["qty"] <= 0:
+                    continue
+                avg_entry_price = (
+                    float(item["open_cost_basis"]) / int(item["qty"])
+                    if item["qty"] else 0.0
+                )
+                close_price = _lookup_close_on_or_before(
+                    price_history.get(item["stock_code"], {}),
+                    current_day,
+                    avg_entry_price,
+                )
+                market_value = close_price * int(item["qty"])
+                unrealized_pnl = market_value - float(item["open_cost_basis"])
+                open_positions.append(
+                    {
+                        "id": item["id"],
+                        "stock_code": item["stock_code"],
+                        "stock_name": item["stock_name"],
+                        "holding_type": item.get("holding_type"),
+                        "entry_date": item.get("entry_date"),
+                        "current_qty": int(item["qty"]),
+                        "avg_entry_price": _round_money(avg_entry_price),
+                        "cost_basis": _round_money(item["open_cost_basis"]),
+                        "close_price": _round_money(close_price),
+                        "market_value": _round_money(market_value),
+                        "unrealized_pnl": _round_money(unrealized_pnl),
+                    }
+                )
+                position_value += market_value
+                open_cost_basis += float(item["open_cost_basis"])
+
+            total_asset_mark_to_market = cash_balance + position_value
+            total_asset_realized_only = cash_balance + open_cost_basis
+            states[day_key] = {
+                "date": day_key,
+                "cash_balance": _round_money(cash_balance),
+                "position_value": _round_money(position_value),
+                "position_cost_basis_open": _round_money(open_cost_basis),
+                "realized_pnl": _round_money(realized_pnl),
+                "unrealized_pnl": _round_money(position_value - open_cost_basis),
+                "total_asset_mark_to_market": _round_money(total_asset_mark_to_market),
+                "total_asset_realized_only": _round_money(total_asset_realized_only),
+                "positions": open_positions,
+            }
+
+        return states
+
+    async def get_equity_timeline(
+        self,
+        portfolio_id: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict:
+        config = await self._get_portfolio_config(portfolio_id)
+        positions = await self._list_timeline_positions(portfolio_id)
+        trades = await self._list_timeline_trades(portfolio_id)
+
+        default_start = self._resolve_timeline_start_date(config, trades)
+        default_end = self._resolve_timeline_end_date(config, trades, default_start)
+        start_day = _coerce_to_date(start_date) if start_date else default_start
+        end_day = _coerce_to_date(end_date) if end_date else default_end
+        if end_day < start_day:
+            raise ValueError("结束日期不能早于开始日期")
+
+        price_history = await self._load_price_history(
+            [row["stock_code"] for row in trades],
+            start_day,
+            end_day,
+        )
+        states = self._rebuild_daily_ledger(
+            config,
+            positions,
+            trades,
+            price_history,
+            start_day,
+            end_day,
+        )
+
+        mark_to_market = []
+        realized_only = []
+        for day_key in [item.isoformat() for item in _daterange(start_day, end_day)]:
+            state = states[day_key]
+            mark_to_market.append(
+                {
+                    "date": day_key,
+                    "equity": state["total_asset_mark_to_market"],
+                    "cash_balance": state["cash_balance"],
+                    "position_value": state["position_value"],
+                    "realized_pnl": state["realized_pnl"],
+                    "unrealized_pnl": state["unrealized_pnl"],
+                }
+            )
+            realized_only.append(
+                {
+                    "date": day_key,
+                    "equity": state["total_asset_realized_only"],
+                    "cash_balance": state["cash_balance"],
+                    "position_cost_basis_open": state["position_cost_basis_open"],
+                    "realized_pnl": state["realized_pnl"],
+                }
+            )
+
+        return {
+            "portfolio_id": portfolio_id,
+            "start_date": start_day.isoformat(),
+            "end_date": end_day.isoformat(),
+            "mark_to_market": mark_to_market,
+            "realized_only": realized_only,
+        }
+
+    async def get_replay_snapshot(
+        self,
+        portfolio_id: str,
+        replay_date: str,
+    ) -> dict:
+        config = await self._get_portfolio_config(portfolio_id)
+        positions = await self._list_timeline_positions(portfolio_id)
+        trades = await self._list_timeline_trades(portfolio_id)
+        start_day = self._resolve_timeline_start_date(config, trades)
+        replay_day = _coerce_to_date(replay_date)
+        if replay_day < start_day:
+            raise ValueError("回放日期早于组合起始")
+
+        codes = {row["stock_code"] for row in trades}
+        timeline_prices = await self._load_price_history(
+            list(codes),
+            start_day,
+            replay_day + timedelta(days=7),
+        )
+        states = self._rebuild_daily_ledger(
+            config,
+            positions,
+            trades,
+            timeline_prices,
+            start_day,
+            replay_day,
+        )
+        state = states[replay_day.isoformat()]
+
+        day_start = f"{replay_day.isoformat()}T00:00:00"
+        day_end = f"{(replay_day + timedelta(days=1)).isoformat()}T00:00:00"
+        runs = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.brain_runs
+            WHERE portfolio_id = ?
+              AND (
+                    (started_at >= ? AND started_at < ?)
+                 OR (completed_at >= ? AND completed_at < ?)
+              )
+            ORDER BY COALESCE(completed_at, started_at) DESC, id DESC
+            """,
+            [portfolio_id, day_start, day_end, day_start, day_end],
+        )
+        normalized_runs = [_normalize_brain_run(row) for row in runs]
+
+        plan_rows = await self.db.execute_read(
+            """
+            SELECT p.*
+            FROM agent.trade_plans p
+            JOIN agent.brain_runs r
+              ON p.source_run_id = r.id
+            WHERE r.portfolio_id = ?
+              AND (
+                    (p.created_at >= ? AND p.created_at < ?)
+                 OR (p.updated_at >= ? AND p.updated_at < ?)
+              )
+            ORDER BY p.updated_at DESC, p.id DESC
+            """,
+            [portfolio_id, day_start, day_end, day_start, day_end],
+        )
+        normalized_plans = [_normalize_record(row) for row in plan_rows]
+
+        trade_rows = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.trades
+            WHERE portfolio_id = ?
+              AND created_at >= ?
+              AND created_at < ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            [portfolio_id, day_start, day_end],
+        )
+        normalized_trades = [_normalize_trade_record(row) for row in trade_rows]
+
+        review_rows = await self.db.execute_read(
+            """
+            SELECT rr.*, br.portfolio_id
+            FROM agent.review_records rr
+            JOIN agent.brain_runs br
+              ON rr.brain_run_id = br.id
+            WHERE br.portfolio_id = ?
+              AND rr.review_date = ?
+            ORDER BY rr.created_at DESC, rr.id DESC
+            """,
+            [portfolio_id, replay_day.isoformat()],
+        )
+        normalized_reviews = [_normalize_record(row) for row in review_rows]
+
+        reflection_rows = await self._safe_reflection_query(
+            """
+            SELECT *
+            FROM agent.daily_reviews
+            WHERE review_date = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            [replay_day.isoformat()],
+        )
+        reflection_items = [
+            _build_daily_reflection_item(_normalize_record(row))
+            for row in reflection_rows
+        ]
+
+        trade_models = [_build_trade_read_model(row) for row in normalized_trades]
+        plan_models = [_build_plan_read_model(row) for row in normalized_plans]
+        next_day_move_pct = None
+        next_day_price = None
+        next_day_date = None
+        target_code = None
+        if normalized_trades:
+            target_code = normalized_trades[0]["stock_code"]
+        elif state["positions"]:
+            target_code = state["positions"][0]["stock_code"]
+        if target_code:
+            current_close = _lookup_close_on_or_before(
+                timeline_prices.get(target_code, {}),
+                replay_day,
+                state["positions"][0]["avg_entry_price"] if state["positions"] else 0.0,
+            )
+            next_close = _lookup_next_close_after(timeline_prices.get(target_code, {}), replay_day)
+            if next_close and current_close:
+                next_day_date, next_day_price = next_close
+                next_day_move_pct = _round_money((next_day_price - current_close) / current_close * 100)
+
+        what_ai_knew = {
+            "run_ids": [row["id"] for row in normalized_runs],
+            "thinking_process": [row.get("thinking_process") for row in normalized_runs if row.get("thinking_process")],
+            "state_before": [row.get("state_before") for row in normalized_runs if row.get("state_before")],
+            "state_after": [row.get("state_after") for row in normalized_runs if row.get("state_after")],
+            "plan_reasoning": [row.get("reasoning") for row in normalized_plans if row.get("reasoning")],
+            "trade_theses": [row.get("thesis") for row in normalized_trades if row.get("thesis")],
+            "trade_reasons": [row.get("reason") for row in normalized_trades if row.get("reason")],
+            "trade_data_basis": [row.get("data_basis") for row in normalized_trades if row.get("data_basis")],
+        }
+        what_happened = {
+            "trade_count": len(normalized_trades),
+            "review_statuses": [row.get("status") for row in normalized_reviews if row.get("status")],
+            "total_asset_mark_to_market_close": state["total_asset_mark_to_market"],
+            "total_asset_realized_only_close": state["total_asset_realized_only"],
+            "realized_pnl": state["realized_pnl"],
+            "unrealized_pnl": state["unrealized_pnl"],
+            "next_day_move_pct": next_day_move_pct,
+            "next_day_price": next_day_price,
+            "next_day_date": next_day_date,
+            "next_day_move_stock_code": target_code,
+        }
+
+        return {
+            "portfolio_id": portfolio_id,
+            "date": replay_day.isoformat(),
+            "account": {
+                "cash_balance": state["cash_balance"],
+                "position_value_mark_to_market": state["position_value"],
+                "position_cost_basis_open": state["position_cost_basis_open"],
+                "total_asset_mark_to_market": state["total_asset_mark_to_market"],
+                "total_asset_realized_only": state["total_asset_realized_only"],
+                "realized_pnl": state["realized_pnl"],
+                "unrealized_pnl": state["unrealized_pnl"],
+            },
+            "positions": state["positions"],
+            "brain_runs": normalized_runs,
+            "plans": plan_models,
+            "trades": trade_models,
+            "reviews": normalized_reviews,
+            "reflections": reflection_items,
+            "what_ai_knew": what_ai_knew,
+            "what_happened": what_happened,
+        }
 
     # ── Ledger Read Model ────────────────────────────
 

@@ -332,6 +332,33 @@ def create_agent_router() -> APIRouter:
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
+    @router.get("/timeline/equity")
+    async def get_equity_timeline(
+        portfolio_id: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ):
+        svc = _get_service()
+        try:
+            return await svc.get_equity_timeline(
+                portfolio_id,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
+
+    @router.get("/timeline/replay")
+    async def get_timeline_replay(
+        portfolio_id: str,
+        date: str,
+    ):
+        svc = _get_service()
+        try:
+            return await svc.get_replay_snapshot(portfolio_id, date)
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
+
     # ── Review / Memory Read Models ──
 
     @router.get("/reviews")
