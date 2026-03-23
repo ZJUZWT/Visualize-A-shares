@@ -47,6 +47,7 @@ class TestAgentDB:
             "trade_groups",
             "llm_calls",
             "trade_plans",
+            "strategy_memos",
             "watchlist",
             "agent_state",
             "brain_runs",

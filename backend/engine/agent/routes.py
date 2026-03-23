@@ -7,10 +7,13 @@ from datetime import date
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
+from pydantic import ValidationError
 
 from engine.agent.chat_routes import create_agent_chat_router
 from engine.agent.db import AgentDB
 from engine.agent.models import (
+    StrategyMemoInput,
+    StrategyMemoUpdate,
     TradeInput,
     TradePlanInput,
     TradePlanUpdate,
@@ -40,6 +43,10 @@ class CreateStrategyRequest(BaseModel):
 
 class CreateWatchSignalRequest(WatchSignalInput):
     portfolio_id: str
+
+
+def _http_status_for_value_error(error: ValueError) -> int:
+    return 404 if "不存在" in str(error) else 400
 
 
 # ── 路由工厂 ──────────────────────────────────────────
@@ -207,6 +214,48 @@ def create_agent_router() -> APIRouter:
             return {"ok": True}
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
+
+    @router.post("/strategy-memos")
+    async def create_strategy_memo(req: StrategyMemoInput):
+        svc = _get_service()
+        try:
+            return await svc.create_strategy_memo(req)
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
+
+    @router.get("/strategy-memos")
+    async def list_strategy_memos(
+        portfolio_id: str,
+        status: str | None = Query(None),
+        limit: int = Query(50, ge=1, le=200),
+    ):
+        svc = _get_service()
+        try:
+            return await svc.list_strategy_memos(portfolio_id, status=status, limit=limit)
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
+
+    @router.patch("/strategy-memos/{memo_id}")
+    async def update_strategy_memo(memo_id: str, req: dict):
+        svc = _get_service()
+        try:
+            return await svc.update_strategy_memo(
+                memo_id,
+                StrategyMemoUpdate(**req).model_dump(exclude_none=True),
+            )
+        except ValidationError:
+            raise HTTPException(status_code=400, detail="策略备忘更新参数非法")
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
+
+    @router.delete("/strategy-memos/{memo_id}")
+    async def delete_strategy_memo(memo_id: str):
+        svc = _get_service()
+        try:
+            await svc.delete_strategy_memo(memo_id)
+            return {"ok": True}
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
 
     @router.post("/watch-signals")
     async def create_watch_signal(req: CreateWatchSignalRequest):

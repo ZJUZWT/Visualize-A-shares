@@ -293,8 +293,10 @@ export interface AgentChatEntry {
   is_persisted?: boolean;
 }
 
-export type AgentStrategyDecision = "adopted" | "rejected";
-export type AgentStrategyActionIntent = "adopt" | "reject";
+export type AgentLeftPanelTab = "console" | "memo_inbox";
+
+export type AgentStrategyDecision = "saved" | "ignored";
+export type AgentStrategyActionIntent = "save" | "ignore";
 
 export interface AgentStrategyActionRecord {
   id: string;
@@ -326,8 +328,25 @@ export interface AgentStrategyActionRequest {
   message_id: string;
   strategy_key: string;
   plan: TradePlanData;
-  reason?: string | null;
-  source_run_id?: string | null;
+  note?: string | null;
+}
+
+export interface StrategyMemoEntry {
+  id: string;
+  portfolio_id: string | null;
+  source_agent: string | null;
+  source_session_id: string | null;
+  source_message_id: string | null;
+  session_id: string | null;
+  message_id: string | null;
+  strategy_key: string;
+  stock_code: string;
+  stock_name: string | null;
+  plan_snapshot: TradePlanData | null;
+  note: string | null;
+  status: "saved" | "ignored" | "archived" | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export type WakeDigestMode = "selected_run" | "recent";

@@ -182,6 +182,42 @@ class TradePlanUpdate(BaseModel):
     status: Literal["pending", "executing", "completed", "expired", "ignored"] | None = None
 
 
+# ── 策略备忘录 ────────────────────────────────────────
+
+class StrategyMemo(BaseModel):
+    id: str
+    portfolio_id: str
+    source_agent: str | None = None
+    source_session_id: str | None = None
+    source_message_id: str | None = None
+    strategy_key: str
+    stock_code: str
+    stock_name: str | None = None
+    plan_snapshot: dict[str, Any]
+    note: str | None = None
+    status: Literal["saved", "ignored", "archived"] = "saved"
+    created_at: str
+    updated_at: str
+
+
+class StrategyMemoInput(BaseModel):
+    portfolio_id: str
+    source_agent: str | None = None
+    source_session_id: str | None = None
+    source_message_id: str | None = None
+    strategy_key: str
+    stock_code: str
+    stock_name: str | None = None
+    plan_snapshot: dict[str, Any]
+    note: str | None = None
+    status: Literal["saved", "ignored", "archived"] = "saved"
+
+
+class StrategyMemoUpdate(BaseModel):
+    note: str | None = None
+    status: Literal["saved", "ignored", "archived"] | None = None
+
+
 # ── 关注列表 ──────────────────────────────────────────
 
 class WatchlistItem(BaseModel):

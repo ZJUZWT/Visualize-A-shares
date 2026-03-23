@@ -10,7 +10,9 @@ from datetime import date, datetime, timedelta
 from loguru import logger
 
 from engine.agent.db import AgentDB
-from engine.agent.models import TradeInput
+from pydantic import ValidationError
+
+from engine.agent.models import StrategyMemoInput, TradeInput
 from engine.agent.state import get_state, upsert_state
 from engine.agent.validator import TradeValidator
 
@@ -31,6 +33,8 @@ BRAIN_RUN_JSON_FIELDS = (
 WATCH_SIGNAL_JSON_FIELDS = ("keywords", "trigger_evidence")
 INFO_DIGEST_JSON_FIELDS = ("raw_summary", "structured_summary", "missing_sources")
 REFLECTION_JSON_FIELDS = ("info_review_details",)
+STRATEGY_MEMO_JSON_FIELDS = ("plan_snapshot",)
+STRATEGY_MEMO_STATUSES = {"saved", "ignored", "archived"}
 WATCH_SIGNAL_STATUSES = {
     "watching",
     "analyzing",
@@ -107,6 +111,14 @@ def _normalize_watch_signal(row: dict) -> dict:
 def _normalize_info_digest(row: dict) -> dict:
     normalized = _normalize_record(row)
     for field in INFO_DIGEST_JSON_FIELDS:
+        normalized[field] = _decode_json_value(normalized.get(field))
+        normalized[field] = _normalize_json_safe(normalized[field])
+    return normalized
+
+
+def _normalize_strategy_memo(row: dict) -> dict:
+    normalized = _normalize_record(row)
+    for field in STRATEGY_MEMO_JSON_FIELDS:
         normalized[field] = _decode_json_value(normalized.get(field))
         normalized[field] = _normalize_json_safe(normalized[field])
     return normalized
@@ -799,6 +811,145 @@ class AgentService:
             raise ValueError(f"关注项 {item_id} 不存在")
         await self.db.execute_write(
             "DELETE FROM agent.watchlist WHERE id = ?", [item_id]
+        )
+
+    async def create_strategy_memo(self, payload) -> dict:
+        try:
+            if isinstance(payload, StrategyMemoInput):
+                memo_input = payload
+            elif hasattr(payload, "model_dump"):
+                memo_input = StrategyMemoInput(**payload.model_dump())
+            else:
+                memo_input = StrategyMemoInput(**dict(payload))
+        except ValidationError as exc:
+            raise ValueError("策略备忘参数非法") from exc
+
+        data = memo_input.model_dump()
+        await self.get_portfolio(data["portfolio_id"])
+
+        status = data.get("status") or "saved"
+        if status not in STRATEGY_MEMO_STATUSES:
+            raise ValueError(f"非法状态: {status}")
+
+        source_message_id = data.get("source_message_id")
+        if source_message_id:
+            rows = await self.db.execute_read(
+                """
+                SELECT *
+                FROM agent.strategy_memos
+                WHERE portfolio_id = ?
+                  AND source_message_id = ?
+                  AND strategy_key = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                [data["portfolio_id"], source_message_id, data["strategy_key"]],
+            )
+            if rows:
+                return _normalize_strategy_memo(rows[0])
+
+        memo_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        plan_snapshot = _normalize_json_safe(data["plan_snapshot"])
+        await self.db.execute_write(
+            """
+            INSERT INTO agent.strategy_memos (
+                id, portfolio_id, source_agent, source_session_id, source_message_id,
+                strategy_key, stock_code, stock_name, plan_snapshot, note, status, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                memo_id,
+                data["portfolio_id"],
+                data.get("source_agent"),
+                data.get("source_session_id"),
+                source_message_id,
+                data["strategy_key"],
+                data["stock_code"],
+                data.get("stock_name"),
+                json.dumps(plan_snapshot, ensure_ascii=False),
+                data.get("note"),
+                status,
+                now,
+                now,
+            ],
+        )
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.strategy_memos WHERE id = ?",
+            [memo_id],
+        )
+        return _normalize_strategy_memo(rows[0])
+
+    async def list_strategy_memos(
+        self,
+        portfolio_id: str,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        await self.get_portfolio(portfolio_id)
+        if status is not None and status not in STRATEGY_MEMO_STATUSES:
+            raise ValueError(f"非法状态: {status}")
+
+        sql = """
+            SELECT *
+            FROM agent.strategy_memos
+            WHERE portfolio_id = ?
+        """
+        params: list = [portfolio_id]
+        if status is not None:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY updated_at DESC, created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = await self.db.execute_read(sql, params)
+        return [_normalize_strategy_memo(row) for row in rows]
+
+    async def update_strategy_memo(self, memo_id: str, updates: dict) -> dict:
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.strategy_memos WHERE id = ?",
+            [memo_id],
+        )
+        if not rows:
+            raise ValueError(f"策略备忘 {memo_id} 不存在")
+
+        sets = []
+        params = []
+        if "note" in updates:
+            sets.append("note = ?")
+            params.append(updates["note"])
+        if "status" in updates:
+            status = updates["status"]
+            if status not in STRATEGY_MEMO_STATUSES:
+                raise ValueError(f"非法状态: {status}")
+            sets.append("status = ?")
+            params.append(status)
+
+        if sets:
+            sets.append("updated_at = ?")
+            params.append(datetime.now().isoformat())
+            params.append(memo_id)
+            await self.db.execute_write(
+                f"UPDATE agent.strategy_memos SET {', '.join(sets)} WHERE id = ?",
+                params,
+            )
+
+        refreshed = await self.db.execute_read(
+            "SELECT * FROM agent.strategy_memos WHERE id = ?",
+            [memo_id],
+        )
+        return _normalize_strategy_memo(refreshed[0])
+
+    async def delete_strategy_memo(self, memo_id: str):
+        rows = await self.db.execute_read(
+            "SELECT id FROM agent.strategy_memos WHERE id = ?",
+            [memo_id],
+        )
+        if not rows:
+            raise ValueError(f"策略备忘 {memo_id} 不存在")
+        await self.db.execute_write(
+            "DELETE FROM agent.strategy_memos WHERE id = ?",
+            [memo_id],
         )
 
     async def create_watch_signal(
