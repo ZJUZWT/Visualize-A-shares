@@ -217,6 +217,7 @@ class TestAgentBacktestRun:
 
     def test_run_backtest_writes_daily_rows_for_each_trade_day(self):
         from engine.agent.backtest import AgentBacktestEngine
+        from engine.agent.models import WatchlistInput
 
         class FakeAgentBrain:
             def __init__(self, portfolio_id: str):
@@ -247,6 +248,11 @@ class TestAgentBacktestRun:
                     },
                 )
 
+        run(
+            self.svc.add_watchlist(
+                WatchlistInput(stock_code="600519", stock_name="贵州茅台")
+            )
+        )
         self_ref = self
         engine = AgentBacktestEngine(db=self.db, service=self.svc)
         with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
@@ -278,6 +284,7 @@ class TestAgentBacktestRun:
 
     def test_same_close_execution_uses_same_day_close(self):
         from engine.agent.backtest import AgentBacktestEngine
+        from engine.agent.models import WatchlistInput
 
         class FakeAgentBrain:
             def __init__(self, portfolio_id: str):
@@ -303,6 +310,11 @@ class TestAgentBacktestRun:
                     },
                 )
 
+        run(
+            self.svc.add_watchlist(
+                WatchlistInput(stock_code="600519", stock_name="贵州茅台")
+            )
+        )
         self_ref = self
         engine = AgentBacktestEngine(db=self.db, service=self.svc)
         with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
@@ -323,6 +335,7 @@ class TestAgentBacktestRun:
 
     def test_next_open_execution_uses_next_day_open(self):
         from engine.agent.backtest import AgentBacktestEngine
+        from engine.agent.models import WatchlistInput
 
         class FakeAgentBrain:
             def __init__(self, portfolio_id: str):
@@ -348,6 +361,11 @@ class TestAgentBacktestRun:
                     },
                 )
 
+        run(
+            self.svc.add_watchlist(
+                WatchlistInput(stock_code="600519", stock_name="贵州茅台")
+            )
+        )
         self_ref = self
         engine = AgentBacktestEngine(db=self.db, service=self.svc)
         with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
@@ -417,3 +435,42 @@ class TestAgentBacktestRun:
             "2026-03-18",
             "2026-03-20",
         ]
+
+    def test_run_backtest_without_source_symbols_uses_no_calendar_fallback(self):
+        from engine.agent.backtest import AgentBacktestEngine
+
+        class FakeAgentBrain:
+            def __init__(self, portfolio_id: str):
+                self.portfolio_id = portfolio_id
+
+            async def execute(self, run_id: str):
+                await self_ref.svc.update_brain_run(
+                    run_id,
+                    {
+                        "status": "completed",
+                        "decisions": [],
+                    },
+                )
+
+        self_ref = self
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
+            "engine.agent.backtest.get_data_engine",
+            return_value=FakeDataEngine(self._history_by_code()),
+        ):
+            result = run(
+                engine.run_backtest(
+                    portfolio_id="live",
+                    start_date="2026-03-18",
+                    end_date="2026-03-20",
+                )
+            )
+
+        rows = run(
+            self.db.execute_read(
+                "SELECT trade_date FROM agent.backtest_days WHERE run_id = ? ORDER BY trade_date",
+                [result["id"]],
+            )
+        )
+        assert rows == []
+        assert result["days"] == []

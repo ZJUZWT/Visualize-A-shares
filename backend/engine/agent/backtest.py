@@ -159,14 +159,14 @@ class AgentBacktestEngine:
             if row.get("stock_code")
         }
         if not codes:
-            return self._iter_days(start_day, end_day)
+            return []
 
         trading_days: set[str] = set()
         for code in sorted(codes):
             for row in await self._get_history_rows(code, start_day, end_day):
                 trading_days.add(row["date"])
         if not trading_days:
-            return self._iter_days(start_day, end_day)
+            return []
 
         return [date.fromisoformat(day) for day in sorted(trading_days)]
 
