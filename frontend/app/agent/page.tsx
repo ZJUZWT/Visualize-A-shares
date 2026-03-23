@@ -13,6 +13,7 @@ import ReviewRecordsPanel from "./components/ReviewRecordsPanel";
 import MemoryRulesPanel from "./components/MemoryRulesPanel";
 import ReflectionFeedPanel from "./components/ReflectionFeedPanel";
 import StrategyHistoryPanel from "./components/StrategyHistoryPanel";
+import StrategyMemoPanel from "./components/StrategyMemoPanel";
 import {
   buildWatchSignalPayload,
   filterInfoDigestsForRun,
@@ -21,6 +22,7 @@ import {
   summarizeWatchSignals,
 } from "./lib/wakeViewModel";
 import {
+  AgentLeftPanelTab,
   AgentChatEntry,
   AgentChatSession,
   AgentConsoleTab,
@@ -41,6 +43,7 @@ import {
   WatchSignalFormState,
   WatchlistItem,
   WeeklySummary,
+  StrategyMemoEntry,
   buildAgentStrategyActionLookupKey,
   buildAgentStrategyKey,
 } from "./types";
@@ -506,21 +509,11 @@ function normalizeStrategyDecision(value: unknown): AgentStrategyActionRecord["a
     return null;
   }
   const normalized = value.trim().toLowerCase();
-  if (
-    [
-      "adopt",
-      "adopted",
-      "accept",
-      "accepted",
-      "active",
-      "executing",
-      "completed",
-    ].includes(normalized)
-  ) {
-    return "adopted";
+  if (["save", "saved", "collect", "collected"].includes(normalized)) {
+    return "saved";
   }
-  if (["reject", "rejected", "dismiss", "dismissed", "ignored"].includes(normalized)) {
-    return "rejected";
+  if (["ignore", "ignored", "dismiss", "dismissed"].includes(normalized)) {
+    return "ignored";
   }
   return null;
 }
@@ -551,7 +544,7 @@ function buildStrategyPlanFromRaw(raw: Record<string, unknown>): TradePlanData |
   };
 }
 
-function normalizeStrategyActions(raw: unknown): AgentStrategyActionRecord[] {
+function normalizeStrategyMemos(raw: unknown): StrategyMemoEntry[] {
   const items = Array.isArray(raw)
     ? raw
     : isRecord(raw) && Array.isArray(raw.items)
@@ -563,50 +556,93 @@ function normalizeStrategyActions(raw: unknown): AgentStrategyActionRecord[] {
           : isRecord(raw)
             ? [raw]
             : [];
+  const normalized: StrategyMemoEntry[] = [];
 
-  return items
-    .map((item, index) => {
-      const data = isRecord(item) ? item : {};
-      const planSource = isRecord(data.plan_snapshot)
-        ? data.plan_snapshot
-        : isRecord(data.plan)
-          ? data.plan
-          : isRecord(data.trade_plan)
-            ? data.trade_plan
-            : isRecord(data.strategy)
-              ? data.strategy
-              : data;
-      const plan = buildStrategyPlanFromRaw(planSource);
-      const strategyKey =
-        typeof data.strategy_key === "string"
-          ? data.strategy_key
-          : typeof data.plan_key === "string"
-            ? data.plan_key
-            : plan
-              ? buildAgentStrategyKey(plan)
-              : null;
-      const action =
-        normalizeStrategyDecision(data.decision)
-        ?? normalizeStrategyDecision(data.action)
-        ?? normalizeStrategyDecision(data.status);
+  for (const [index, item] of items.entries()) {
+    const data = isRecord(item) ? item : {};
+    const planSource = isRecord(data.plan_snapshot)
+      ? data.plan_snapshot
+      : isRecord(data.plan)
+        ? data.plan
+        : isRecord(data.trade_plan)
+          ? data.trade_plan
+          : isRecord(data.strategy)
+            ? data.strategy
+            : data;
+    const plan = buildStrategyPlanFromRaw(planSource);
+    const strategyKey =
+      typeof data.strategy_key === "string"
+        ? data.strategy_key
+        : typeof data.plan_key === "string"
+          ? data.plan_key
+          : plan
+            ? buildAgentStrategyKey(plan)
+            : null;
+    const stockCode =
+      plan?.stock_code || (typeof data.stock_code === "string" ? data.stock_code : "");
 
-      if (!strategyKey || !action) {
-        return null;
-      }
+    if (!strategyKey || !stockCode) {
+      continue;
+    }
 
-      return {
-        id: typeof data.id === "string" ? data.id : `strategy-action-${index}`,
-        session_id: typeof data.session_id === "string" ? data.session_id : null,
-        message_id: typeof data.message_id === "string" ? data.message_id : null,
-        strategy_key: strategyKey,
-        action,
-        status: typeof data.status === "string" ? data.status : null,
-        reason: typeof data.reason === "string" ? data.reason : null,
-        created_at: typeof data.created_at === "string" ? data.created_at : null,
-        updated_at: typeof data.updated_at === "string" ? data.updated_at : null,
-      };
-    })
-    .filter((value): value is AgentStrategyActionRecord => value !== null);
+    normalized.push({
+      id: typeof data.id === "string" ? data.id : `strategy-memo-${index}`,
+      portfolio_id: typeof data.portfolio_id === "string" ? data.portfolio_id : null,
+      source_agent: typeof data.source_agent === "string" ? data.source_agent : null,
+      source_session_id:
+        typeof data.source_session_id === "string" ? data.source_session_id : null,
+      source_message_id:
+        typeof data.source_message_id === "string" ? data.source_message_id : null,
+      session_id:
+        typeof data.source_session_id === "string"
+          ? data.source_session_id
+          : typeof data.session_id === "string"
+            ? data.session_id
+            : null,
+      message_id:
+        typeof data.source_message_id === "string"
+          ? data.source_message_id
+          : typeof data.message_id === "string"
+            ? data.message_id
+            : null,
+      strategy_key: strategyKey,
+      stock_code: stockCode,
+      stock_name:
+        plan?.stock_name
+        || (typeof data.stock_name === "string" ? data.stock_name : null),
+      plan_snapshot: plan,
+      note: typeof data.note === "string" ? data.note : null,
+      status:
+        typeof data.status === "string"
+          ? (data.status as StrategyMemoEntry["status"])
+          : null,
+      created_at: typeof data.created_at === "string" ? data.created_at : null,
+      updated_at: typeof data.updated_at === "string" ? data.updated_at : null,
+    });
+  }
+
+  return normalized;
+}
+
+function mapMemoToActionRecord(memo: StrategyMemoEntry): AgentStrategyActionRecord | null {
+  const action =
+    normalizeStrategyDecision(memo.status)
+    ?? normalizeStrategyDecision(memo.note)
+    ?? normalizeStrategyDecision(memo.status === "saved" ? "saved" : memo.status === "ignored" ? "ignored" : null);
+  if (!action) {
+    return null;
+  }
+  return {
+    id: memo.id,
+    session_id: memo.session_id,
+    message_id: memo.message_id,
+    strategy_key: memo.strategy_key,
+    action,
+    status: memo.status,
+    reason: memo.note,
+    created_at: memo.created_at,
+    updated_at: memo.updated_at,
+  };
 }
 
 function applyStrategyRecord(
@@ -647,10 +683,15 @@ export default function AgentPage() {
   const [chatMessagesLoading, setChatMessagesLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
-  const [strategyActions, setStrategyActions] = useState<
+  const [memoActions, setMemoActions] = useState<
     Record<string, AgentStrategyActionState>
   >({});
-  const [strategyActionsError, setStrategyActionsError] = useState<string | null>(null);
+  const [memoActionsError, setMemoActionsError] = useState<string | null>(null);
+  const [memoInboxItems, setMemoInboxItems] = useState<StrategyMemoEntry[]>([]);
+  const [memoInboxLoading, setMemoInboxLoading] = useState(false);
+  const [memoInboxError, setMemoInboxError] = useState<string | null>(null);
+  const [memoMutatingId, setMemoMutatingId] = useState<string | null>(null);
+  const [leftPanelTab, setLeftPanelTab] = useState<AgentLeftPanelTab>("console");
   const [loading, setLoading] = useState(true);
   const [wakeLoading, setWakeLoading] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -957,36 +998,61 @@ export default function AgentPage() {
     [portfolioId]
   );
 
-  const fetchStrategyActions = useCallback(async (sessionId: string | null) => {
-    if (!sessionId) {
-      setStrategyActions({});
-      setStrategyActionsError(null);
+  const fetchMemoActions = useCallback(async (sessionId: string | null) => {
+    if (!portfolioId) {
+      setMemoActions({});
+      setMemoActionsError(null);
+      setMemoInboxItems([]);
       return {};
     }
+    setMemoInboxLoading(true);
     try {
       const raw = await fetchJson<unknown>(
-        `${API_BASE}/api/v1/agent/strategy-actions?session_id=${sessionId}`
+        `${API_BASE}/api/v1/agent/strategy-memos?portfolio_id=${portfolioId}&limit=200`
       );
-      const records = normalizeStrategyActions(raw);
+      const memos = normalizeStrategyMemos(raw);
+      setMemoInboxItems(memos.filter((memo) => memo.status === "saved"));
+      setMemoInboxError(null);
+
+      if (!sessionId) {
+        setMemoActions({});
+        setMemoActionsError(null);
+        return {};
+      }
+
+      const currentSessionMessageIds = new Set(
+        chatEntries
+          .filter((entry) => entry.session_id === sessionId)
+          .map((entry) => entry.id)
+      );
       const next: Record<string, AgentStrategyActionState> = {};
-      for (const record of records) {
-        const lookupKey = buildAgentStrategyActionLookupKey(
-          record.message_id,
-          record.strategy_key
-        );
+      for (const memo of memos) {
+        const matchesSession =
+          memo.session_id === sessionId
+          || (!memo.session_id && memo.message_id && currentSessionMessageIds.has(memo.message_id));
+        if (!matchesSession) {
+          continue;
+        }
+        const record = mapMemoToActionRecord(memo);
+        if (!record) {
+          continue;
+        }
+        const lookupKey = buildAgentStrategyActionLookupKey(record.message_id, record.strategy_key);
         next[lookupKey] = applyStrategyRecord(next[lookupKey], record);
       }
-      setStrategyActions(next);
-      setStrategyActionsError(null);
+      setMemoActions(next);
+      setMemoActionsError(null);
       return next;
     } catch {
-      setStrategyActions({});
-      setStrategyActionsError(
-        "策略动作记录暂不可用，`/api/v1/agent/strategy-actions?session_id=...` 尚未就绪。"
-      );
+      setMemoActions({});
+      setMemoActionsError("策略备忘记录暂不可用，`/api/v1/agent/strategy-memos` 尚未就绪。");
+      setMemoInboxItems([]);
+      setMemoInboxError("策略备忘列表读取失败。");
       return {};
+    } finally {
+      setMemoInboxLoading(false);
     }
-  }, []);
+  }, [chatEntries, portfolioId]);
 
   const createSession = useCallback(
     async (seedTitle?: string) => {
@@ -1013,7 +1079,7 @@ export default function AgentPage() {
         setChatSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
         setActiveSessionId(session.id);
         setChatEntries([]);
-        setStrategyActions({});
+        setMemoActions({});
         setSessionError(null);
         return session.id;
       } catch (error) {
@@ -1061,12 +1127,13 @@ export default function AgentPage() {
   useEffect(() => {
     if (!activeSessionId) {
       setChatEntries([]);
-      setStrategyActions({});
+      setMemoActions({});
+      fetchMemoActions(null);
       return;
     }
     fetchSessionMessages(activeSessionId);
-    fetchStrategyActions(activeSessionId);
-  }, [activeSessionId, fetchSessionMessages, fetchStrategyActions]);
+    fetchMemoActions(activeSessionId);
+  }, [activeSessionId, fetchSessionMessages, fetchMemoActions]);
 
   const fetchWatchlist = useCallback(async () => {
     const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist`);
@@ -1305,7 +1372,7 @@ export default function AgentPage() {
             await Promise.all([
               fetchChatSessions(sessionId),
               fetchSessionMessages(sessionId),
-              fetchStrategyActions(sessionId),
+              fetchMemoActions(sessionId),
             ]);
             setChatStreaming(false);
             return;
@@ -1318,7 +1385,7 @@ export default function AgentPage() {
       await Promise.all([
         fetchChatSessions(sessionId),
         fetchSessionMessages(sessionId),
-        fetchStrategyActions(sessionId),
+        fetchMemoActions(sessionId),
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "发送消息失败";
@@ -1340,11 +1407,11 @@ export default function AgentPage() {
     createSession,
     fetchChatSessions,
     fetchSessionMessages,
-    fetchStrategyActions,
+    fetchMemoActions,
     portfolioId,
   ]);
 
-  const handleStrategyAction = useCallback(
+  const handleMemoAction = useCallback(
     async (request: AgentStrategyActionRequest) => {
       if (!portfolioId) {
         return;
@@ -1354,8 +1421,8 @@ export default function AgentPage() {
         request.message_id,
         request.strategy_key
       );
-      const pendingState = strategyActions[lookupKey];
-      setStrategyActions((current) => ({
+      const pendingState = memoActions[lookupKey];
+      setMemoActions((current) => ({
         ...current,
         [lookupKey]: {
           id: pendingState?.id ?? null,
@@ -1369,23 +1436,37 @@ export default function AgentPage() {
       }));
 
       const endpoint =
-        request.intent === "adopt"
-          ? `${API_BASE}/api/v1/agent/adopt-strategy`
-          : `${API_BASE}/api/v1/agent/reject-strategy`;
+        request.intent === "save"
+          ? `${API_BASE}/api/v1/agent/strategy-memos`
+          : pendingState?.id
+            ? `${API_BASE}/api/v1/agent/strategy-memos/${pendingState.id}`
+            : `${API_BASE}/api/v1/agent/strategy-memos`;
+
+      const method = request.intent === "ignore" && pendingState?.id ? "PATCH" : "POST";
 
       try {
         const resp = await fetch(endpoint, {
-          method: "POST",
+          method,
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            portfolio_id: portfolioId,
-            session_id: request.session_id,
-            message_id: request.message_id,
-            strategy_key: request.strategy_key,
-            plan: request.plan,
-            reason: request.reason ?? null,
-            source_run_id: request.source_run_id ?? undefined,
-          }),
+          body: JSON.stringify(
+            method === "PATCH"
+              ? {
+                  status: "ignored",
+                  note: request.note ?? null,
+                }
+              : {
+                  portfolio_id: portfolioId,
+                  source_agent: "agent_chat",
+                  source_session_id: request.session_id,
+                  source_message_id: request.message_id,
+                  strategy_key: request.strategy_key,
+                  stock_code: request.plan.stock_code,
+                  stock_name: request.plan.stock_name,
+                  plan_snapshot: request.plan,
+                  note: request.note ?? null,
+                  status: request.intent === "save" ? "saved" : "ignored",
+                }
+          ),
         });
 
         if (!resp.ok) {
@@ -1393,31 +1474,33 @@ export default function AgentPage() {
         }
 
         const raw = await resp.json().catch(() => null);
-        const records = normalizeStrategyActions(raw);
+        const records = normalizeStrategyMemos(raw)
+          .map((memo) => mapMemoToActionRecord(memo))
+          .filter((value): value is AgentStrategyActionRecord => value !== null);
         const matched = records.find(
           (record) =>
             record.message_id === request.message_id
             && record.strategy_key === request.strategy_key
         );
 
-        setStrategyActions((current) => ({
+        setMemoActions((current) => ({
           ...current,
           [lookupKey]: matched
             ? applyStrategyRecord(current[lookupKey], matched)
             : {
                 id: current[lookupKey]?.id ?? null,
-                action: request.intent === "adopt" ? "adopted" : "rejected",
-                status: request.intent === "adopt" ? "adopted" : "rejected",
-                reason: request.reason ?? null,
+                action: request.intent === "save" ? "saved" : "ignored",
+                status: request.intent === "save" ? "saved" : "ignored",
+                reason: request.note ?? null,
                 updated_at: new Date().toISOString(),
                 is_submitting: false,
                 error: null,
               },
         }));
-        fetchStrategyActions(request.session_id).catch(() => {});
+        fetchMemoActions(request.session_id).catch(() => {});
       } catch (error) {
         const message = error instanceof Error ? error.message : "策略动作提交失败";
-        setStrategyActions((current) => ({
+        setMemoActions((current) => ({
           ...current,
           [lookupKey]: {
             ...(current[lookupKey] ?? {
@@ -1433,7 +1516,55 @@ export default function AgentPage() {
         }));
       }
     },
-    [portfolioId, strategyActions, fetchStrategyActions]
+    [portfolioId, memoActions, fetchMemoActions]
+  );
+
+  const handleArchiveMemo = useCallback(
+    async (memoId: string) => {
+      if (!portfolioId) {
+        return;
+      }
+      setMemoMutatingId(memoId);
+      try {
+        const resp = await fetch(`${API_BASE}/api/v1/agent/strategy-memos/${memoId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "archived" }),
+        });
+        if (!resp.ok) {
+          throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+        }
+        await fetchMemoActions(activeSessionId);
+      } catch (error) {
+        setMemoInboxError(error instanceof Error ? error.message : "归档备忘失败");
+      } finally {
+        setMemoMutatingId(null);
+      }
+    },
+    [activeSessionId, fetchMemoActions, portfolioId]
+  );
+
+  const handleDeleteMemo = useCallback(
+    async (memoId: string) => {
+      if (!portfolioId) {
+        return;
+      }
+      setMemoMutatingId(memoId);
+      try {
+        const resp = await fetch(`${API_BASE}/api/v1/agent/strategy-memos/${memoId}`, {
+          method: "DELETE",
+        });
+        if (!resp.ok) {
+          throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+        }
+        await fetchMemoActions(activeSessionId);
+      } catch (error) {
+        setMemoInboxError(error instanceof Error ? error.message : "删除备忘失败");
+      } finally {
+        setMemoMutatingId(null);
+      }
+    },
+    [activeSessionId, fetchMemoActions, portfolioId]
   );
 
   const handleAddWatch = async () => {
@@ -1482,7 +1613,7 @@ export default function AgentPage() {
     }
     return rule.status === memoryStatus;
   });
-  const chatNotices = [sessionError, chatError, strategyActionsError].filter(
+  const chatNotices = [sessionError, chatError, memoActionsError].filter(
     (value): value is string => Boolean(value)
   );
 
@@ -1514,34 +1645,76 @@ export default function AgentPage() {
 
         <div className="flex flex-1 flex-col overflow-hidden xl:flex-row">
           <div className="min-h-0 border-b border-white/10 xl:w-[430px] xl:min-w-[430px] xl:border-b-0 xl:border-r">
-            <AgentChatPanel
-              portfolioReady={Boolean(portfolioId)}
-              sessions={chatSessions}
-              activeSessionId={activeSessionId}
-              sessionsLoading={chatSessionsLoading}
-              messagesLoading={chatMessagesLoading}
-              messages={chatEntries}
-              notices={chatNotices}
-              isStreaming={chatStreaming}
-              draft={chatDraft}
-              onDraftChange={setChatDraft}
-              onSend={handleSendChat}
-              onCreateSession={handleCreateSession}
-              onSelectSession={setActiveSessionId}
-              runs={runs}
-              selectedRunId={activeRun?.id || null}
-              onSelectRun={setSelectedRun}
-              statusColor={statusColor}
-              watchlist={watchlist}
-              newCode={newCode}
-              newName={newName}
-              onNewCodeChange={setNewCode}
-              onNewNameChange={setNewName}
-              onAddWatch={handleAddWatch}
-              onRemoveWatch={handleRemoveWatch}
-              strategyActions={strategyActions}
-              onStrategyAction={handleStrategyAction}
-            />
+            <div className="flex h-full min-h-0 flex-col bg-[#090a10]">
+              <div className="border-b border-white/10 px-4 py-3">
+                <div className="inline-flex w-full rounded-xl border border-white/10 bg-white/5 p-1 text-sm">
+                  <button
+                    type="button"
+                    onClick={() => setLeftPanelTab("console")}
+                    className={`flex-1 rounded-lg px-3 py-2 transition-colors ${
+                      leftPanelTab === "console"
+                        ? "bg-white/15 text-white"
+                        : "text-gray-400 hover:bg-white/10 hover:text-white"
+                    }`}
+                  >
+                    Main Agent Console
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLeftPanelTab("memo_inbox")}
+                    className={`flex-1 rounded-lg px-3 py-2 transition-colors ${
+                      leftPanelTab === "memo_inbox"
+                        ? "bg-white/15 text-white"
+                        : "text-gray-400 hover:bg-white/10 hover:text-white"
+                    }`}
+                  >
+                    Strategy Memo Inbox
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-0">
+                {leftPanelTab === "console" ? (
+                  <AgentChatPanel
+                    portfolioReady={Boolean(portfolioId)}
+                    sessions={chatSessions}
+                    activeSessionId={activeSessionId}
+                    sessionsLoading={chatSessionsLoading}
+                    messagesLoading={chatMessagesLoading}
+                    messages={chatEntries}
+                    notices={chatNotices}
+                    isStreaming={chatStreaming}
+                    draft={chatDraft}
+                    onDraftChange={setChatDraft}
+                    onSend={handleSendChat}
+                    onCreateSession={handleCreateSession}
+                    onSelectSession={setActiveSessionId}
+                    runs={runs}
+                    selectedRunId={activeRun?.id || null}
+                    onSelectRun={setSelectedRun}
+                    statusColor={statusColor}
+                    watchlist={watchlist}
+                    newCode={newCode}
+                    newName={newName}
+                    onNewCodeChange={setNewCode}
+                    onNewNameChange={setNewName}
+                    onAddWatch={handleAddWatch}
+                    onRemoveWatch={handleRemoveWatch}
+                    memoActions={memoActions}
+                    onMemoAction={handleMemoAction}
+                  />
+                ) : (
+                  <StrategyMemoPanel
+                    loading={memoInboxLoading}
+                    error={memoInboxError}
+                    items={memoInboxItems}
+                    mutatingId={memoMutatingId}
+                    onArchive={handleArchiveMemo}
+                    onDelete={handleDeleteMemo}
+                  />
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="flex-1 overflow-hidden">

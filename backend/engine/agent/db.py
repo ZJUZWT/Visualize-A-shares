@@ -199,6 +199,24 @@ class AgentDB:
             )
         """)
         self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.strategy_memos (
+                id VARCHAR PRIMARY KEY,
+                portfolio_id VARCHAR NOT NULL,
+                source_agent VARCHAR,
+                source_session_id VARCHAR,
+                source_message_id VARCHAR,
+                strategy_key VARCHAR NOT NULL,
+                stock_code VARCHAR NOT NULL,
+                stock_name VARCHAR,
+                plan_snapshot JSON NOT NULL,
+                note TEXT,
+                status VARCHAR NOT NULL DEFAULT 'saved'
+                    CHECK (status IN ('saved', 'ignored', 'archived')),
+                created_at TIMESTAMP DEFAULT now(),
+                updated_at TIMESTAMP DEFAULT now()
+            )
+        """)
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS agent.watchlist (
                 id VARCHAR PRIMARY KEY,
                 stock_code VARCHAR NOT NULL,

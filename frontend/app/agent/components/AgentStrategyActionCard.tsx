@@ -15,8 +15,8 @@ interface AgentStrategyActionCardProps {
 }
 
 const ACTION_BADGES: Record<string, string> = {
-  adopted: "border-green-500/30 bg-green-500/15 text-green-300",
-  rejected: "border-red-500/30 bg-red-500/15 text-red-300",
+  saved: "border-green-500/30 bg-green-500/15 text-green-300",
+  ignored: "border-red-500/30 bg-red-500/15 text-red-300",
 };
 
 export default function AgentStrategyActionCard({
@@ -55,7 +55,7 @@ export default function AgentStrategyActionCard({
               ACTION_BADGES[actionState.action]
             }`}
           >
-            {actionState.action === "adopted" ? "已采纳" : "已否决"}
+            {actionState.action === "saved" ? "已收藏" : "已忽略"}
           </span>
         )}
       </div>
@@ -109,9 +109,9 @@ export default function AgentStrategyActionCard({
         </div>
       </div>
 
-      {actionState?.reason && actionState.action === "rejected" && (
+      {actionState?.reason && actionState.action === "ignored" && (
         <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-          否决原因: {actionState.reason}
+          忽略备注: {actionState.reason}
         </div>
       )}
 
@@ -126,8 +126,8 @@ export default function AgentStrategyActionCard({
           {actionState?.updated_at
             ? `最近更新 ${new Date(actionState.updated_at).toLocaleString()}`
             : interactive
-              ? "可将策略写入后续执行流"
-              : "消息落库并绑定 session 后才能执行动作"}
+              ? "可将策略保存到备忘录"
+              : "消息落库并绑定 session 后才能收藏或忽略"}
         </span>
         <div className="flex items-center gap-2">
           <button
@@ -138,7 +138,7 @@ export default function AgentStrategyActionCard({
                 return;
               }
               void onAction({
-                intent: "adopt",
+                intent: "save",
                 session_id: sessionId,
                 message_id: messageId,
                 strategy_key: strategyKey,
@@ -151,7 +151,7 @@ export default function AgentStrategyActionCard({
                 : "bg-green-500/15 text-green-300 hover:bg-green-500/20"
             }`}
           >
-            {actionState?.is_submitting && !actionState.action ? "提交中..." : "采纳策略"}
+            {actionState?.is_submitting && !actionState.action ? "提交中..." : "收藏策略"}
           </button>
           <button
             type="button"
@@ -160,17 +160,17 @@ export default function AgentStrategyActionCard({
               if (!sessionId) {
                 return;
               }
-              const reason = window.prompt("记录否决原因（可选）", actionState?.reason || "");
-              if (reason === null) {
+              const note = window.prompt("记录忽略备注（可选）", actionState?.reason || "");
+              if (note === null) {
                 return;
               }
               void onAction({
-                intent: "reject",
+                intent: "ignore",
                 session_id: sessionId,
                 message_id: messageId,
                 strategy_key: strategyKey,
                 plan,
-                reason: reason.trim() || null,
+                note: note.trim() || null,
               });
             }}
             className={`rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
@@ -179,7 +179,7 @@ export default function AgentStrategyActionCard({
                 : "bg-red-500/15 text-red-300 hover:bg-red-500/20"
             }`}
           >
-            否决策略
+            忽略策略
           </button>
         </div>
       </div>

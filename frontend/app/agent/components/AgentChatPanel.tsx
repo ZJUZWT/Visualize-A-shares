@@ -37,8 +37,8 @@ interface AgentChatPanelProps {
   onNewNameChange: (value: string) => void;
   onAddWatch: () => void;
   onRemoveWatch: (id: string) => void;
-  strategyActions: AgentStrategyActionLookup;
-  onStrategyAction: (request: AgentStrategyActionRequest) => Promise<void>;
+  memoActions: AgentStrategyActionLookup;
+  onMemoAction: (request: AgentStrategyActionRequest) => Promise<void>;
 }
 
 function formatSessionLabel(session: AgentChatSession) {
@@ -76,8 +76,8 @@ export default function AgentChatPanel({
   onNewNameChange,
   onAddWatch,
   onRemoveWatch,
-  strategyActions,
-  onStrategyAction,
+  memoActions,
+  onMemoAction,
 }: AgentChatPanelProps) {
   const tailRef = useRef<HTMLDivElement | null>(null);
 
@@ -266,8 +266,8 @@ export default function AgentChatPanel({
               <AgentChatMessage
                 key={message.id}
                 message={message}
-                strategyActions={strategyActions}
-                onStrategyAction={onStrategyAction}
+                strategyActions={memoActions}
+                onStrategyAction={onMemoAction}
               />
             ))
           )}
