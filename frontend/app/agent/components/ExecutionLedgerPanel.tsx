@@ -9,6 +9,7 @@ import {
   summarizeSelectedEquityPoint,
   summarizeEquityTimeline,
 } from "../lib/rightRailTimelineViewModel";
+import { buildRightRailPositionGroups } from "../lib/rightRailPositionViewModel";
 
 interface ExecutionLedgerPanelProps {
   overview: LedgerOverview | null;
@@ -109,6 +110,7 @@ export default function ExecutionLedgerPanel({
     realizedPoints,
     replayDate || null
   );
+  const groupedPositions = buildRightRailPositionGroups(overview?.positions ?? []);
   const hasTimelineData = Boolean(
     timeline && (timeline.mark_to_market.length > 0 || timeline.realized_only.length > 0)
   );
@@ -509,23 +511,95 @@ export default function ExecutionLedgerPanel({
               {overview.positions.length === 0 ? (
                 renderListMessage("暂无持仓")
               ) : (
-                <div className="space-y-2">
-                  {overview.positions.slice(0, 6).map((position) => (
-                    <div key={position.id} className="rounded-lg bg-white/5 p-3 text-sm">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <span className="font-mono text-white">{position.stock_code}</span>
-                          <span className="ml-2 text-gray-300">{position.stock_name}</span>
-                        </div>
-                        <span className="text-xs text-gray-500">{position.holding_type || position.status || "open"}</span>
+                <div className="space-y-4">
+                  {groupedPositions.map((group) => (
+                    <section key={group.key} className="space-y-2">
+                      <div className={`text-xs font-medium ${group.accent}`}>{group.label}</div>
+                      <div className="space-y-2">
+                        {group.items.map((position) => (
+                          <article
+                            key={position.id}
+                            className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-sm"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div>
+                                  <span className="font-mono text-white">{position.stockCode}</span>
+                                  <span className="ml-2 text-gray-300">{position.stockName}</span>
+                                </div>
+                                <div className="mt-1 text-[11px] text-gray-500">
+                                  仓位占比 {formatPercent(
+                                    position.positionPct === null ? null : position.positionPct * 100
+                                  )} · strategy v{position.strategyVersion ?? "--"}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div
+                                  className={`inline-flex items-center gap-2 rounded-full px-2 py-1 text-[11px] ${
+                                    position.signal.tone === "healthy"
+                                      ? "bg-emerald-500/15 text-emerald-200"
+                                      : position.signal.tone === "warning"
+                                        ? "bg-amber-500/15 text-amber-200"
+                                        : "bg-red-500/15 text-red-200"
+                                  }`}
+                                >
+                                  <span
+                                    className={`h-2 w-2 rounded-full ${
+                                      position.signal.tone === "healthy"
+                                        ? "bg-emerald-400"
+                                        : position.signal.tone === "warning"
+                                          ? "bg-amber-300"
+                                          : "bg-red-400"
+                                    }`}
+                                  />
+                                  {position.signal.label}
+                                </div>
+                                <div className="mt-1 max-w-[220px] text-[11px] leading-4 text-gray-500">
+                                  {position.signal.reason}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 grid gap-2 text-xs text-gray-400 sm:grid-cols-3">
+                              <div>数量: <span className="text-white">{position.currentQty ?? "--"}</span></div>
+                              <div>成本: <span className="text-white">{formatNumber(position.costBasis)}</span></div>
+                              <div>开仓价: <span className="text-white">{formatNumber(position.entryPrice)}</span></div>
+                              <div>市值: <span className="text-white">{formatNumber(position.marketValue)}</span></div>
+                              <div>
+                                浮盈亏:{" "}
+                                <span className={(position.unrealizedPnl ?? 0) >= 0 ? "text-amber-300" : "text-red-300"}>
+                                  {formatSignedNumber(position.unrealizedPnl)}
+                                </span>
+                              </div>
+                              <div>
+                                盈亏比:{" "}
+                                <span className={(position.unrealizedPnlPct ?? 0) >= 0 ? "text-amber-300" : "text-red-300"}>
+                                  {formatPercent(position.unrealizedPnlPct)}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 grid gap-2 md:grid-cols-2">
+                              {position.highlights.map((highlight) => (
+                                <div key={`${position.id}-${highlight.label}`} className="rounded-lg bg-black/10 px-3 py-2">
+                                  <div className="text-[11px] text-gray-500">{highlight.label}</div>
+                                  <div className="mt-1 text-xs leading-5 text-white">{highlight.value}</div>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-gray-400">
+                              <span className="rounded border border-white/10 px-2 py-1">
+                                止盈 {formatNumber(position.takeProfit)}
+                              </span>
+                              <span className="rounded border border-white/10 px-2 py-1">
+                                止损 {formatNumber(position.stopLoss)}
+                              </span>
+                            </div>
+                          </article>
+                        ))}
                       </div>
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400">
-                        <div>数量: <span className="text-white">{position.current_qty ?? "--"}</span></div>
-                        <div>成本: <span className="text-white">{formatNumber(position.cost_basis ?? null)}</span></div>
-                        <div>开仓价: <span className="text-white">{formatNumber(position.entry_price ?? null)}</span></div>
-                        <div>日期: <span className="text-white">{position.entry_date || "--"}</span></div>
-                      </div>
-                    </div>
+                    </section>
                   ))}
                 </div>
               )}

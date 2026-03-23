@@ -66,6 +66,24 @@ export interface LedgerPosition {
   cost_basis?: number | null;
   status?: string | null;
   entry_date?: string | null;
+  market_value?: number | null;
+  unrealized_pnl?: number | null;
+  unrealized_pnl_pct?: number | null;
+  position_pct?: number | null;
+  status_signal?: "healthy" | "warning" | "danger" | null;
+  status_reason?: string | null;
+  latest_strategy?: {
+    id: string;
+    holding_type?: string | null;
+    take_profit?: number | null;
+    stop_loss?: number | null;
+    reasoning?: string | null;
+    details?: Record<string, unknown> | null;
+    version?: number | null;
+    source_run_id?: string | null;
+    created_at?: string | null;
+    updated_at?: string | null;
+  } | null;
 }
 
 export interface LedgerTrade {

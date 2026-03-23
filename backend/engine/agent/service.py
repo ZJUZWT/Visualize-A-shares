@@ -37,6 +37,7 @@ INFO_DIGEST_JSON_FIELDS = ("raw_summary", "structured_summary", "missing_sources
 REFLECTION_JSON_FIELDS = ("info_review_details",)
 STRATEGY_MEMO_JSON_FIELDS = ("plan_snapshot",)
 TRADE_JSON_FIELDS = ("data_basis",)
+POSITION_STRATEGY_JSON_FIELDS = ("details",)
 STRATEGY_MEMO_STATUSES = {"saved", "ignored", "archived"}
 WATCH_SIGNAL_STATUSES = {
     "watching",
@@ -135,6 +136,14 @@ def _normalize_strategy_memo(row: dict) -> dict:
     return normalized
 
 
+def _normalize_position_strategy(row: dict) -> dict:
+    normalized = _normalize_record(row)
+    for field in POSITION_STRATEGY_JSON_FIELDS:
+        normalized[field] = _decode_json_value(normalized.get(field))
+        normalized[field] = _normalize_json_safe(normalized[field])
+    return normalized
+
+
 def _coerce_to_date(value) -> date:
     if isinstance(value, date) and not isinstance(value, datetime):
         return value
@@ -210,6 +219,50 @@ def _build_position_read_model(position: dict) -> dict:
         "unrealized_pnl": unrealized_pnl,
         "unrealized_pnl_pct": unrealized_pnl_pct,
     }
+
+
+def _build_strategy_summary(strategy: dict | None) -> dict | None:
+    if not strategy:
+        return None
+    return {
+        "id": strategy["id"],
+        "holding_type": strategy.get("holding_type"),
+        "take_profit": strategy.get("take_profit"),
+        "stop_loss": strategy.get("stop_loss"),
+        "reasoning": strategy.get("reasoning"),
+        "details": strategy.get("details") or {},
+        "version": strategy.get("version"),
+        "source_run_id": strategy.get("source_run_id"),
+        "created_at": strategy.get("created_at"),
+        "updated_at": strategy.get("updated_at"),
+    }
+
+
+def _build_position_status_signal(position_model: dict, latest_strategy: dict | None) -> tuple[str, str]:
+    pnl_pct = position_model.get("unrealized_pnl_pct")
+    stop_loss = latest_strategy.get("stop_loss") if latest_strategy else None
+    take_profit = latest_strategy.get("take_profit") if latest_strategy else None
+    entry_price = position_model.get("entry_price")
+
+    if pnl_pct is not None and pnl_pct <= -5:
+        return "danger", "浮亏已超过 5%，接近防守阈值"
+    if (
+        stop_loss is not None
+        and entry_price is not None
+        and entry_price > 0
+        and abs((entry_price - stop_loss) / entry_price * 100) <= 5
+    ):
+        return "warning", "止损阈值距离较近，需要提高警惕"
+    if pnl_pct is not None and pnl_pct >= 8:
+        return "warning", "浮盈已较大，需关注兑现或上调止盈"
+    if (
+        take_profit is not None
+        and entry_price is not None
+        and entry_price > 0
+        and abs((take_profit - entry_price) / entry_price * 100) <= 8
+    ):
+        return "warning", "止盈空间有限，建议关注执行节奏"
+    return "healthy", "策略阈值仍处于正常观察区间"
 
 
 def _build_trade_read_model(trade: dict) -> dict:
@@ -1685,11 +1738,43 @@ class AgentService:
         pending_plans = await self._list_ledger_plans(portfolio_id, status="pending")
         executing_plans = await self._list_ledger_plans(portfolio_id, status="executing")
 
-        position_models = [_build_position_read_model(position) for position in open_positions]
+        latest_strategies: dict[str, dict] = {}
+        for position in open_positions:
+            strategy_rows = await self.db.execute_read(
+                """
+                SELECT *
+                FROM agent.position_strategies
+                WHERE position_id = ?
+                ORDER BY version DESC
+                LIMIT 1
+                """,
+                [position["id"]],
+            )
+            latest_strategies[position["id"]] = (
+                _normalize_position_strategy(strategy_rows[0]) if strategy_rows else None
+            )
+
+        position_models = []
+        for position in open_positions:
+            model = _build_position_read_model(position)
+            model["latest_strategy"] = _build_strategy_summary(latest_strategies[position["id"]])
+            position_models.append(model)
         trade_models = [_build_trade_read_model(trade) for trade in recent_trades]
         pending_models = [_build_plan_read_model(plan) for plan in pending_plans]
         executing_models = [_build_plan_read_model(plan) for plan in executing_plans]
         position_value = round(sum(item["market_value"] for item in position_models), 2)
+
+        for item in position_models:
+            item["position_pct"] = round(
+                (item["market_value"] / position_value) if position_value else 0.0,
+                4,
+            )
+            status_signal, status_reason = _build_position_status_signal(
+                item,
+                item.get("latest_strategy"),
+            )
+            item["status_signal"] = status_signal
+            item["status_reason"] = status_reason
 
         return {
             "portfolio_id": portfolio_id,

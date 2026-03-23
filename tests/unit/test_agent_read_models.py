@@ -135,6 +135,24 @@ class TestLedgerOverviewService:
                 source_strategy_version=1,
             )
         )
+        created_strategy = run(
+            self.svc.create_strategy(
+                "live",
+                trade_result["position"]["id"],
+                {
+                    "take_profit": 1950.0,
+                    "stop_loss": 1700.0,
+                    "reasoning": "沿 20 日线做中线趋势持有",
+                    "details": {
+                        "trend_indicator": "20日均线",
+                        "add_position_price": 1760.0,
+                        "half_exit_price": 1930.0,
+                        "target_catalyst": "业绩继续修复",
+                    },
+                },
+                source_run_id=live_executing_run["id"],
+            )
+        )
 
         overview = run(self.svc.get_ledger_overview("live"))
 
@@ -180,8 +198,18 @@ class TestLedgerOverviewService:
             "market_value",
             "unrealized_pnl",
             "unrealized_pnl_pct",
+            "position_pct",
+            "latest_strategy",
+            "status_signal",
+            "status_reason",
         }
         assert position["stock_code"] == "600519"
+        assert position["position_pct"] == 1.0
+        assert position["status_signal"] in {"healthy", "warning", "danger"}
+        assert isinstance(position["status_reason"], str)
+        assert position["latest_strategy"]["id"] == created_strategy["id"]
+        assert position["latest_strategy"]["version"] == 1
+        assert position["latest_strategy"]["details"]["trend_indicator"] == "20日均线"
 
         trade = overview["recent_trades"][0]
         assert set(trade.keys()) == {
