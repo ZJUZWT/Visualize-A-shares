@@ -453,6 +453,48 @@ class AgentDB:
             INSERT INTO agent.brain_config (id) VALUES ('default')
             ON CONFLICT (id) DO NOTHING
         """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.backtest_runs (
+                id VARCHAR PRIMARY KEY,
+                source_portfolio_id VARCHAR NOT NULL,
+                backtest_portfolio_id VARCHAR NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                execution_price_mode VARCHAR NOT NULL,
+                status VARCHAR NOT NULL DEFAULT 'running',
+                total_return DOUBLE,
+                max_drawdown DOUBLE,
+                trade_count INTEGER DEFAULT 0,
+                win_rate DOUBLE,
+                review_count INTEGER DEFAULT 0,
+                memory_added INTEGER DEFAULT 0,
+                memory_updated INTEGER DEFAULT 0,
+                memory_retired INTEGER DEFAULT 0,
+                buy_and_hold_return DOUBLE,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT now(),
+                completed_at TIMESTAMP
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.backtest_days (
+                id VARCHAR PRIMARY KEY,
+                run_id VARCHAR NOT NULL,
+                portfolio_id VARCHAR NOT NULL,
+                trade_date DATE NOT NULL,
+                brain_run_id VARCHAR,
+                daily_review_id VARCHAR,
+                weekly_summary_id VARCHAR,
+                weekly_reflection_id VARCHAR,
+                equity_close DOUBLE,
+                cash_balance DOUBLE,
+                position_value DOUBLE,
+                trade_count INTEGER DEFAULT 0,
+                review_created BOOLEAN DEFAULT false,
+                memory_delta JSON,
+                created_at TIMESTAMP DEFAULT now()
+            )
+        """)
 
     async def execute_read(self, sql: str, params=None) -> list[dict]:
         return await asyncio.to_thread(self._sync_read, sql, params)
