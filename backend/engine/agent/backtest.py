@@ -39,47 +39,50 @@ class AgentBacktestEngine:
         backtest_portfolio_id = f"bt:{run_id}"
         now = datetime.now().isoformat()
 
-        await self.db.execute_write(
-            """
-            INSERT INTO agent.portfolio_config
-            (id, mode, initial_capital, cash_balance, sim_start_date, sim_current_date, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+        await self.db.execute_transaction(
             [
-                backtest_portfolio_id,
-                source["mode"],
-                source["initial_capital"],
-                source["cash_balance"],
-                source["sim_start_date"],
-                source["sim_current_date"],
-                now,
-            ],
-        )
-
-        await self.db.execute_write(
-            """
-            INSERT INTO agent.backtest_runs
-            (
-                id,
-                source_portfolio_id,
-                backtest_portfolio_id,
-                start_date,
-                end_date,
-                execution_price_mode,
-                status,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, 'running', ?)
-            """,
-            [
-                run_id,
-                portfolio_id,
-                backtest_portfolio_id,
-                start_date,
-                end_date,
-                execution_price_mode,
-                now,
-            ],
+                (
+                    """
+                    INSERT INTO agent.portfolio_config
+                    (id, mode, initial_capital, cash_balance, sim_start_date, sim_current_date, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        backtest_portfolio_id,
+                        "training",
+                        source["initial_capital"],
+                        source["cash_balance"],
+                        source["sim_start_date"],
+                        source["sim_current_date"],
+                        now,
+                    ],
+                ),
+                (
+                    """
+                    INSERT INTO agent.backtest_runs
+                    (
+                        id,
+                        source_portfolio_id,
+                        backtest_portfolio_id,
+                        start_date,
+                        end_date,
+                        execution_price_mode,
+                        status,
+                        created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 'running', ?)
+                    """,
+                    [
+                        run_id,
+                        portfolio_id,
+                        backtest_portfolio_id,
+                        start_date,
+                        end_date,
+                        execution_price_mode,
+                        now,
+                    ],
+                ),
+            ]
         )
 
         rows = await self.db.execute_read(

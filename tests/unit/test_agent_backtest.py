@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import asyncio
 import duckdb
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "backend"))
 
@@ -107,8 +108,60 @@ class TestAgentBacktestBootstrap:
         assert backtest_portfolio_id.startswith("bt:")
         assert len(backtest_rows) == 1
         assert len(source_rows) == 1
-        assert backtest_rows[0]["mode"] == source_rows[0]["mode"]
+        assert backtest_rows[0]["mode"] == "training"
         assert backtest_rows[0]["initial_capital"] == source_rows[0]["initial_capital"]
         assert backtest_rows[0]["cash_balance"] == source_rows[0]["cash_balance"]
         assert backtest_rows[0]["sim_start_date"] == source_rows[0]["sim_start_date"]
         assert backtest_rows[0]["sim_current_date"] == source_rows[0]["sim_current_date"]
+
+    def test_start_run_rolls_back_isolated_portfolio_when_run_insert_fails(self):
+        from engine.agent.backtest import AgentBacktestEngine
+
+        run_id = "fixed-run"
+        backtest_portfolio_id = f"bt:{run_id}"
+        run(
+            self.db.execute_write(
+                """
+                INSERT INTO agent.backtest_runs
+                (
+                    id,
+                    source_portfolio_id,
+                    backtest_portfolio_id,
+                    start_date,
+                    end_date,
+                    execution_price_mode,
+                    status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    run_id,
+                    "existing",
+                    "bt:existing",
+                    "2026-03-10",
+                    "2026-03-11",
+                    "next_open",
+                    "running",
+                ],
+            )
+        )
+
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        with patch("engine.agent.backtest.uuid.uuid4", return_value=run_id):
+            with pytest.raises(Exception):
+                run(
+                    engine.start_run(
+                        portfolio_id="live",
+                        start_date="2026-03-18",
+                        end_date="2026-03-21",
+                        execution_price_mode="next_open",
+                    )
+                )
+
+        backtest_rows = run(
+            self.db.execute_read(
+                "SELECT * FROM agent.portfolio_config WHERE id = ?",
+                [backtest_portfolio_id],
+            )
+        )
+        assert backtest_rows == []
