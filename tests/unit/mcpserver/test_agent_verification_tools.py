@@ -29,10 +29,26 @@ async def test_verify_agent_cycle_tool_formats_result(monkeypatch):
             "run_id": "run-1",
             "brain_run_status": "completed",
             "failed_stage": None,
+            "stages": [
+                {"name": "snapshot_before", "status": "pass"},
+                {"name": "brain_execute", "status": "pass"},
+                {"name": "evolution_diff", "status": "warn", "detail": {"signals": []}},
+            ],
             "checks": [
                 {"name": "brain_run_completed", "status": "pass"},
                 {"name": "has_candidates", "status": "warn", "detail": 0},
             ],
+            "evolution_diff": {
+                "brain_runs_delta": 1,
+                "review_records_delta": 0,
+                "memories_added": 0,
+                "memories_updated": 0,
+                "memories_retired": 0,
+                "reflections_added": 0,
+                "weekly_summaries_delta": 0,
+                "strategy_history_changed": False,
+                "signals": [],
+            },
             "evidence": {
                 "brain_run": {"execution_summary": {"candidate_count": 0, "trade_count": 0}},
                 "review": {"status": "completed", "records_created": 0},
@@ -50,7 +66,10 @@ async def test_verify_agent_cycle_tool_formats_result(monkeypatch):
 
     assert "warn" in text.lower()
     assert "run-1" in text
+    assert "Stages" in text
     assert "Checks" in text
+    assert "Evolution Diff" in text
+    assert "brain_runs_delta" in text
     assert "Next Actions" in text
 
 

@@ -36,6 +36,41 @@ def _render_checks(checks: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _render_stages(stages: list[dict[str, Any]]) -> str:
+    lines = ["## Stages", "", "Name | Status | Detail", "--- | --- | ---"]
+    for stage in stages:
+        lines.append(
+            f"{stage.get('name', '-')}"
+            f" | {stage.get('status', '-')}"
+            f" | {_fmt_value(stage.get('detail'))}"
+        )
+    return "\n".join(lines)
+
+
+def _render_evolution_diff(evolution_diff: dict[str, Any]) -> str:
+    lines = ["## Evolution Diff", ""]
+    if not evolution_diff:
+        lines.append("- None")
+        return "\n".join(lines)
+
+    for key in (
+        "brain_runs_delta",
+        "review_records_delta",
+        "weekly_summaries_delta",
+        "reflections_added",
+        "strategy_history_count_delta",
+        "strategy_history_changed",
+        "memories_added",
+        "memories_updated",
+        "memories_retired",
+        "memory_change_ids",
+        "signals",
+    ):
+        if key in evolution_diff:
+            lines.append(f"- {key}: {_fmt_value(evolution_diff.get(key))}")
+    return "\n".join(lines)
+
+
 def _render_verification_result(result: dict[str, Any]) -> str:
     lines = [
         "# Agent Cycle Verification",
@@ -46,7 +81,11 @@ def _render_verification_result(result: dict[str, Any]) -> str:
         f"- Brain Run Status: `{result.get('brain_run_status', '-')}`",
         f"- Failed Stage: `{result.get('failed_stage') or '-'}`",
         "",
+        _render_stages(result.get("stages") or []),
+        "",
         _render_checks(result.get("checks") or []),
+        "",
+        _render_evolution_diff(result.get("evolution_diff") or {}),
     ]
 
     evidence = result.get("evidence") or {}
@@ -59,6 +98,8 @@ def _render_verification_result(result: dict[str, Any]) -> str:
                 f"- Brain Run: {_fmt_value((evidence.get('brain_run') or {}).get('status'))}",
                 f"- Execution Summary: {_fmt_value((evidence.get('brain_run') or {}).get('execution_summary'))}",
                 f"- Review: {_fmt_value(evidence.get('review'))}",
+                f"- Snapshot Before: {_fmt_value((evidence.get('snapshot_before') or {}).get('portfolio_id'))}",
+                f"- Snapshot After: {_fmt_value((evidence.get('snapshot_after') or {}).get('portfolio_id'))}",
             ]
         )
 
@@ -77,6 +118,9 @@ def _render_snapshot(snapshot: dict[str, Any]) -> str:
     asset_summary = (snapshot.get("ledger") or {}).get("asset_summary") or {}
     review_stats = snapshot.get("review_stats") or {}
     memories = snapshot.get("memories") or []
+    reflections = snapshot.get("reflections") or []
+    strategy_history = snapshot.get("strategy_history") or []
+    weekly_summaries = snapshot.get("weekly_summaries") or []
 
     lines = [
         "# Agent Snapshot",
@@ -105,6 +149,12 @@ def _render_snapshot(snapshot: dict[str, Any]) -> str:
         "",
         f"- Total Reviews: {_fmt_value(review_stats.get('total_reviews'))}",
         f"- Win Rate: {_fmt_value(review_stats.get('win_rate'))}",
+        "",
+        "## Evolution State",
+        "",
+        f"- Strategy History Entries: {_fmt_value(len(strategy_history))}",
+        f"- Reflection Entries: {_fmt_value(len(reflections))}",
+        f"- Weekly Summaries: {_fmt_value(len(weekly_summaries))}",
         "",
         "## Memories",
         "",
