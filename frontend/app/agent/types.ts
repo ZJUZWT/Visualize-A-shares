@@ -112,6 +112,98 @@ export interface LedgerOverview {
   recent_trades: LedgerTrade[];
 }
 
+export interface EquityTimelinePoint {
+  date: string;
+  equity: number | null;
+  cash_balance: number | null;
+  position_value?: number | null;
+  position_cost_basis_open?: number | null;
+  realized_pnl: number | null;
+  unrealized_pnl?: number | null;
+}
+
+export interface AgentEquityTimeline {
+  portfolio_id: string;
+  start_date: string | null;
+  end_date: string | null;
+  mark_to_market: EquityTimelinePoint[];
+  realized_only: EquityTimelinePoint[];
+}
+
+export interface ReplayAccountSummary {
+  cash_balance: number | null;
+  position_value_mark_to_market: number | null;
+  position_cost_basis_open: number | null;
+  total_asset_mark_to_market: number | null;
+  total_asset_realized_only: number | null;
+  realized_pnl: number | null;
+  unrealized_pnl: number | null;
+}
+
+export interface ReplayPosition {
+  id: string;
+  stock_code: string | null;
+  stock_name: string | null;
+  holding_type: string | null;
+  current_qty: number | null;
+  avg_entry_price: number | null;
+  cost_basis: number | null;
+  close_price: number | null;
+  market_value: number | null;
+  unrealized_pnl: number | null;
+}
+
+export interface ReplayTrade {
+  id: string;
+  stock_code: string | null;
+  stock_name: string | null;
+  action: string | null;
+  price: number | null;
+  quantity: number | null;
+  amount: number | null;
+  reason: string | null;
+  thesis: string | null;
+  created_at: string | null;
+}
+
+export interface ReplayPlan {
+  id: string;
+  stock_code: string | null;
+  stock_name: string | null;
+  direction: string | null;
+  status: string | null;
+  reasoning: string | null;
+  entry_price: number | null;
+  current_price: number | null;
+  position_pct: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AgentReplaySnapshot {
+  portfolio_id: string;
+  date: string | null;
+  account: ReplayAccountSummary;
+  positions: ReplayPosition[];
+  trades: ReplayTrade[];
+  plans: ReplayPlan[];
+  brain_runs: BrainRun[];
+  reviews: ReviewRecord[];
+  reflections: ReflectionFeedItem[];
+  what_ai_knew: {
+    run_ids: string[];
+    trade_theses: string[];
+    plan_reasoning: string[];
+    trade_reasons: string[];
+  };
+  what_happened: {
+    review_statuses: string[];
+    next_day_move_pct: number | null;
+    total_asset_mark_to_market_close: number | null;
+    total_asset_realized_only_close: number | null;
+  };
+}
+
 export interface ReviewRecord {
   id: string;
   brain_run_id?: string | null;

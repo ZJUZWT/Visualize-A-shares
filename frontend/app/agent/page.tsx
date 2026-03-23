@@ -22,7 +22,15 @@ import {
   summarizeWatchSignals,
 } from "./lib/wakeViewModel";
 import {
+  clampReplayDate,
+  normalizeEquityTimeline,
+  normalizeReplaySnapshot,
+  pickDefaultReplayDate,
+} from "./lib/rightRailTimelineViewModel";
+import {
+  AgentEquityTimeline,
   AgentLeftPanelTab,
+  AgentReplaySnapshot,
   AgentChatEntry,
   AgentChatSession,
   AgentConsoleTab,
@@ -665,6 +673,9 @@ export default function AgentPage() {
   const [selectedRun, setSelectedRun] = useState<BrainRun | null>(null);
   const [agentState, setAgentState] = useState<AgentState | null>(null);
   const [ledgerOverview, setLedgerOverview] = useState<LedgerOverview | null>(null);
+  const [equityTimeline, setEquityTimeline] = useState<AgentEquityTimeline | null>(null);
+  const [replaySnapshot, setReplaySnapshot] = useState<AgentReplaySnapshot | null>(null);
+  const [replayDate, setReplayDate] = useState("");
   const [reviewRecords, setReviewRecords] = useState<ReviewRecord[]>([]);
   const [reviewStats, setReviewStats] = useState<ReviewStats | null>(null);
   const [weeklySummaries, setWeeklySummaries] = useState<WeeklySummary[]>([]);
@@ -701,6 +712,8 @@ export default function AgentPage() {
   const [portfolioId, setPortfolioId] = useState<string | null>(null);
   const [stateError, setStateError] = useState<string | null>(null);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [replayError, setReplayError] = useState<string | null>(null);
   const [watchSignalsError, setWatchSignalsError] = useState<string | null>(null);
   const [infoDigestsError, setInfoDigestsError] = useState<string | null>(null);
   const [wakeMutationError, setWakeMutationError] = useState<string | null>(null);
@@ -711,6 +724,8 @@ export default function AgentPage() {
   const [ledgerSource, setLedgerSource] = useState<
     "overview" | "fallback" | "unavailable" | null
   >(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [replayLoading, setReplayLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<AgentConsoleTab>("runs");
   const [wakeDigestMode, setWakeDigestMode] = useState<WakeDigestMode>("selected_run");
   const [reviewType, setReviewType] = useState<"all" | "daily" | "weekly">("all");
@@ -800,6 +815,64 @@ export default function AgentPage() {
     }
   }, [portfolioId]);
 
+  const fetchEquityTimeline = useCallback(async () => {
+    if (!portfolioId) {
+      return null;
+    }
+    setTimelineLoading(true);
+    try {
+      const raw = await fetchJson<unknown>(
+        `${API_BASE}/api/v1/agent/timeline/equity?portfolio_id=${portfolioId}`
+      );
+      const normalized = normalizeEquityTimeline(portfolioId, raw);
+      setEquityTimeline(normalized);
+      setTimelineError(null);
+
+      const today = new Date().toISOString().slice(0, 10);
+      const defaultReplayDate = clampReplayDate(
+        pickDefaultReplayDate(normalized, today),
+        normalized.start_date,
+        normalized.end_date
+      );
+      setReplayDate((current) => {
+        if (current) {
+          return clampReplayDate(current, normalized.start_date, normalized.end_date);
+        }
+        return defaultReplayDate;
+      });
+      return normalized;
+    } catch {
+      setEquityTimeline(null);
+      setTimelineError("收益曲线接口暂不可用，`/api/v1/agent/timeline/equity` 读取失败。");
+      setReplayDate((current) => current || new Date().toISOString().slice(0, 10));
+      return null;
+    } finally {
+      setTimelineLoading(false);
+    }
+  }, [portfolioId]);
+
+  const fetchReplaySnapshot = useCallback(async () => {
+    if (!portfolioId || !replayDate) {
+      return null;
+    }
+    setReplayLoading(true);
+    try {
+      const raw = await fetchJson<unknown>(
+        `${API_BASE}/api/v1/agent/timeline/replay?portfolio_id=${portfolioId}&date=${replayDate}`
+      );
+      const normalized = normalizeReplaySnapshot(portfolioId, raw);
+      setReplaySnapshot(normalized);
+      setReplayError(null);
+      return normalized;
+    } catch {
+      setReplaySnapshot(null);
+      setReplayError("历史回放接口暂不可用，`/api/v1/agent/timeline/replay` 读取失败。");
+      return null;
+    } finally {
+      setReplayLoading(false);
+    }
+  }, [portfolioId, replayDate]);
+
   const refreshConsole = useCallback(async () => {
     if (!portfolioId) {
       return;
@@ -808,6 +881,7 @@ export default function AgentPage() {
     const [runsResult, stateResult] = await Promise.allSettled([
       fetchRuns(),
       fetchAgentState(),
+      fetchEquityTimeline(),
     ]);
     await fetchLedgerOverview();
     if (runsResult.status === "rejected") {
@@ -821,7 +895,7 @@ export default function AgentPage() {
       setStateError(null);
     }
     setLoading(false);
-  }, [fetchAgentState, fetchLedgerOverview, fetchRuns, portfolioId]);
+  }, [fetchAgentState, fetchEquityTimeline, fetchLedgerOverview, fetchRuns, portfolioId]);
 
   const fetchReviewData = useCallback(async () => {
     if (!portfolioId) {
@@ -1095,6 +1169,12 @@ export default function AgentPage() {
   }, [refreshConsole]);
 
   useEffect(() => {
+    if (portfolioId && replayDate) {
+      fetchReplaySnapshot();
+    }
+  }, [fetchReplaySnapshot, portfolioId, replayDate]);
+
+  useEffect(() => {
     if (activeTab === "wake" && portfolioId) {
       fetchWakeData();
     }
@@ -1155,6 +1235,19 @@ export default function AgentPage() {
     },
     []
   );
+
+  const handleReplayDateChange = useCallback((value: string) => {
+    if (!value) {
+      return;
+    }
+    setReplayDate(
+      clampReplayDate(
+        value,
+        equityTimeline?.start_date ?? null,
+        equityTimeline?.end_date ?? null
+      )
+    );
+  }, [equityTimeline]);
 
   const handleCreateWatchSignal = useCallback(async () => {
     const payload = buildWatchSignalPayload(portfolioId, watchSignalForm);
@@ -1810,6 +1903,16 @@ export default function AgentPage() {
                       loading={loading}
                       error={ledgerError}
                       source={ledgerSource}
+                      timeline={equityTimeline}
+                      timelineLoading={timelineLoading}
+                      timelineError={timelineError}
+                      replay={replaySnapshot}
+                      replayLoading={replayLoading}
+                      replayError={replayError}
+                      replayDate={replayDate}
+                      replayMinDate={equityTimeline?.start_date ?? null}
+                      replayMaxDate={equityTimeline?.end_date ?? null}
+                      onReplayDateChange={handleReplayDateChange}
                     />
                   ) : activeTab === "wake" ? (
                     <InfoDigestsPanel
