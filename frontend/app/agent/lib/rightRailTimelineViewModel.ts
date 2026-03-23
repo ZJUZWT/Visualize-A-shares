@@ -167,7 +167,14 @@ function normalizeBrainRun(raw: unknown): BrainRun | null {
     decisions: Array.isArray(data?.decisions) ? (data?.decisions as BrainRun["decisions"]) : null,
     plan_ids: Array.isArray(data?.plan_ids) ? (data?.plan_ids as string[]) : null,
     trade_ids: Array.isArray(data?.trade_ids) ? (data?.trade_ids as string[]) : null,
-    thinking_process: data?.thinking_process ?? null,
+    thinking_process:
+      typeof data?.thinking_process === "string"
+        ? data.thinking_process
+        : Array.isArray(data?.thinking_process)
+          ? (data.thinking_process as unknown[])
+          : isRecord(data?.thinking_process)
+            ? (data.thinking_process as Record<string, unknown>)
+            : null,
     state_before: isRecord(data?.state_before) ? (data?.state_before as Record<string, unknown>) : null,
     state_after: isRecord(data?.state_after) ? (data?.state_after as Record<string, unknown>) : null,
     execution_summary: isRecord(data?.execution_summary) ? (data?.execution_summary as Record<string, unknown>) : null,

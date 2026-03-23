@@ -14,6 +14,7 @@ import MemoryRulesPanel from "./components/MemoryRulesPanel";
 import ReflectionFeedPanel from "./components/ReflectionFeedPanel";
 import StrategyHistoryPanel from "./components/StrategyHistoryPanel";
 import StrategyMemoPanel from "./components/StrategyMemoPanel";
+import StrategyBrainPanel from "./components/StrategyBrainPanel";
 import {
   buildWatchSignalPayload,
   filterInfoDigestsForRun,
@@ -32,6 +33,7 @@ import {
   buildStrategyExecutionRequestConfig,
   mapExecutionRecord,
 } from "./lib/strategyActionViewModel";
+import { buildStrategyBrainViewModel } from "./lib/strategyBrainViewModel";
 import {
   AgentEquityTimeline,
   AgentLeftPanelTab,
@@ -1246,6 +1248,13 @@ export default function AgentPage() {
 
   useEffect(() => {
     if (portfolioId) {
+      fetchMemoryData();
+      fetchReflectionData();
+    }
+  }, [fetchMemoryData, fetchReflectionData, portfolioId]);
+
+  useEffect(() => {
+    if (portfolioId) {
       fetchChatSessions();
     }
   }, [fetchChatSessions, portfolioId]);
@@ -1815,6 +1824,14 @@ export default function AgentPage() {
     }
     return rule.status === memoryStatus;
   });
+  const strategyBrain = buildStrategyBrainViewModel({
+    state: agentState,
+    runs,
+    memoryRules: filteredMemoryRules,
+    reflectionFeed,
+    strategyHistory,
+    activeRun,
+  });
   const chatNotices = [sessionError, chatError, executionActionsError, memoStatesError].filter(
     (value): value is string => Boolean(value)
   );
@@ -1927,128 +1944,35 @@ export default function AgentPage() {
             ) : (
               <div className="grid h-full grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
                 <div className="overflow-y-auto border-r border-white/10 p-6">
-                  <div className="space-y-6">
-                    <div className="inline-flex rounded-xl border border-white/10 bg-white/5 p-1 text-sm">
-                      {([
-                        { key: "runs", label: "运行记录" },
-                        { key: "wake", label: "Wake 观察" },
-                        { key: "reviews", label: "复盘记录" },
-                        { key: "memory", label: "经验规则" },
-                        { key: "reflection", label: "反思演进" },
-                      ] as const).map((tab) => (
-                        <button
-                          key={tab.key}
-                          type="button"
-                          onClick={() => setActiveTab(tab.key)}
-                          className={`rounded-lg px-4 py-2 transition-colors ${
-                            activeTab === tab.key
-                              ? "bg-white/15 text-white"
-                              : "text-gray-400 hover:bg-white/10 hover:text-white"
-                          }`}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {activeTab === "runs" ? (
-                      <>
-                        <AgentStatePanel
-                          state={agentState}
-                          run={activeRun}
-                          loading={loading}
-                          error={stateError}
-                        />
-                        <DecisionRunPanel
-                          run={activeRun}
-                          loading={loading}
-                          statusColor={statusColor}
-                        />
-                      </>
-                    ) : activeTab === "wake" ? (
-                      <WatchSignalsPanel
-                        loading={wakeLoading}
-                        error={watchSignalsError}
-                        mutationError={wakeMutationError}
-                        signals={watchSignals}
-                        summary={wakeSummary}
-                        form={watchSignalForm}
-                        submitting={watchSignalSubmitting}
-                        updatingSignalId={watchSignalUpdatingId}
-                        onFormChange={handleWatchSignalFormChange}
-                        onSubmit={handleCreateWatchSignal}
-                        onStatusChange={handleWatchSignalStatusChange}
-                      />
-                    ) : activeTab === "reviews" ? (
-                      <ReviewRecordsPanel
-                        loading={reviewLoading}
-                        error={reviewError}
-                        records={filteredReviewRecords}
-                        stats={reviewStats}
-                        weeklySummaries={weeklySummaries}
-                        reviewType={reviewType}
-                        onReviewTypeChange={setReviewType}
-                      />
-                    ) : activeTab === "memory" ? (
-                      <MemoryRulesPanel
-                        loading={memoryLoading}
-                        error={memoryError}
-                        rules={filteredMemoryRules}
-                        statusFilter={memoryStatus}
-                        onStatusFilterChange={setMemoryStatus}
-                      />
-                    ) : (
-                      <ReflectionFeedPanel
-                        loading={reflectionLoading}
-                        error={reflectionError}
-                        items={reflectionFeed}
-                      />
-                    )}
-                  </div>
+                  <StrategyBrainPanel
+                    viewModel={strategyBrain}
+                    loading={loading}
+                    stateError={stateError}
+                    memoryLoading={memoryLoading}
+                    memoryError={memoryError}
+                    reflectionLoading={reflectionLoading}
+                    reflectionError={reflectionError}
+                    strategyHistoryError={strategyHistoryError}
+                  />
                 </div>
 
                 <div className="overflow-y-auto p-6">
-                  {activeTab === "runs" ? (
-                    <ExecutionLedgerPanel
-                      overview={ledgerOverview}
-                      loading={loading}
-                      error={ledgerError}
-                      source={ledgerSource}
-                      timeline={equityTimeline}
-                      timelineLoading={timelineLoading}
-                      timelineError={timelineError}
-                      replay={replaySnapshot}
-                      replayLoading={replayLoading}
-                      replayError={replayError}
-                      replayDate={replayDate}
-                      replayMinDate={equityTimeline?.start_date ?? null}
-                      replayMaxDate={equityTimeline?.end_date ?? null}
-                      onReplayDateChange={handleReplayDateChange}
-                    />
-                  ) : activeTab === "wake" ? (
-                    <InfoDigestsPanel
-                      loading={wakeLoading}
-                      error={infoDigestsError}
-                      items={visibleInfoDigests}
-                      mode={wakeDigestMode}
-                      selectedRunId={activeRun?.id || null}
-                      onModeChange={setWakeDigestMode}
-                    />
-                  ) : activeTab === "reviews" ? (
-                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
-                      右栏保留给执行台账。当前 tab 聚焦复盘摘要、记录列表和 weekly summaries。
-                    </div>
-                  ) : activeTab === "memory" ? (
-                    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-gray-400">
-                      经验规则 tab 为只读规则库视图，不展示执行台账。
-                    </div>
-                  ) : (
-                    <StrategyHistoryPanel
-                      loading={reflectionLoading}
-                      error={strategyHistoryError}
-                      items={strategyHistory}
-                    />
-                  )}
+                  <ExecutionLedgerPanel
+                    overview={ledgerOverview}
+                    loading={loading}
+                    error={ledgerError}
+                    source={ledgerSource}
+                    timeline={equityTimeline}
+                    timelineLoading={timelineLoading}
+                    timelineError={timelineError}
+                    replay={replaySnapshot}
+                    replayLoading={replayLoading}
+                    replayError={replayError}
+                    replayDate={replayDate}
+                    replayMinDate={equityTimeline?.start_date ?? null}
+                    replayMaxDate={equityTimeline?.end_date ?? null}
+                    onReplayDateChange={handleReplayDateChange}
+                  />
                 </div>
               </div>
             )}
