@@ -176,6 +176,42 @@ def get_analysis_history(code: str, limit: int = 5) -> str:
     return tools.get_analysis_history(code, limit)
 
 
+@server.tool()
+async def verify_agent_cycle(
+    portfolio_id: str,
+    as_of_date: str | None = None,
+    include_review: bool = True,
+    include_weekly: bool = False,
+    require_trade: bool = False,
+    timeout_seconds: int = 30,
+) -> str:
+    """验证 Main Agent 一次真实轮回是否能跑通，并返回 pass/warn/fail 与关键证据。"""
+    from . import agent_verification
+
+    return await agent_verification.verify_agent_cycle(
+        portfolio_id=portfolio_id,
+        as_of_date=as_of_date,
+        include_review=include_review,
+        include_weekly=include_weekly,
+        require_trade=require_trade,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+@server.tool()
+async def inspect_agent_snapshot(
+    portfolio_id: str,
+    run_id: str | None = None,
+) -> str:
+    """聚合当前 Main Agent 的 state、latest run、ledger、review 和 memories 快照。"""
+    from . import agent_verification
+
+    return await agent_verification.inspect_agent_snapshot(
+        portfolio_id=portfolio_id,
+        run_id=run_id,
+    )
+
+
 # ─── IndustryEngine Tools ──────────────────────────────
 
 @server.tool()
