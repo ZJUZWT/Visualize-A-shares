@@ -28,6 +28,11 @@ import {
   pickDefaultReplayDate,
 } from "./lib/rightRailTimelineViewModel";
 import {
+  buildMemoRequestConfig,
+  buildStrategyExecutionRequestConfig,
+  mapExecutionRecord,
+} from "./lib/strategyActionViewModel";
+import {
   AgentEquityTimeline,
   AgentLeftPanelTab,
   AgentReplaySnapshot,
@@ -35,9 +40,11 @@ import {
   AgentChatSession,
   AgentConsoleTab,
   AgentState,
-  AgentStrategyActionRecord,
-  AgentStrategyActionRequest,
-  AgentStrategyActionState,
+  AgentStrategyExecutionRecord,
+  AgentStrategyExecutionRequest,
+  AgentStrategyExecutionState,
+  AgentStrategyMemoSaveRequest,
+  AgentStrategyMemoState,
   BrainRun,
   LedgerOverview,
   MemoryRule,
@@ -512,20 +519,6 @@ function normalizeAgentChatMessages(sessionId: string, raw: unknown): AgentChatE
   });
 }
 
-function normalizeStrategyDecision(value: unknown): AgentStrategyActionRecord["action"] | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (["save", "saved", "collect", "collected"].includes(normalized)) {
-    return "saved";
-  }
-  if (["ignore", "ignored", "dismiss", "dismissed"].includes(normalized)) {
-    return "ignored";
-  }
-  return null;
-}
-
 function buildStrategyPlanFromRaw(raw: Record<string, unknown>): TradePlanData | null {
   const stockCode = typeof raw.stock_code === "string" ? raw.stock_code : null;
   if (!stockCode) {
@@ -632,37 +625,59 @@ function normalizeStrategyMemos(raw: unknown): StrategyMemoEntry[] {
   return normalized;
 }
 
-function mapMemoToActionRecord(memo: StrategyMemoEntry): AgentStrategyActionRecord | null {
-  const action =
-    normalizeStrategyDecision(memo.status)
-    ?? normalizeStrategyDecision(memo.note)
-    ?? normalizeStrategyDecision(memo.status === "saved" ? "saved" : memo.status === "ignored" ? "ignored" : null);
-  if (!action) {
+function normalizeStrategyExecutionActions(raw: unknown): AgentStrategyExecutionRecord[] {
+  const items = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.items)
+      ? raw.items
+      : isRecord(raw) && Array.isArray(raw.actions)
+        ? raw.actions
+        : isRecord(raw)
+          ? [raw]
+          : [];
+  return items
+    .map((item) => mapExecutionRecord(isRecord(item) ? item : {}))
+    .filter((value): value is AgentStrategyExecutionRecord => value !== null);
+}
+
+function mapMemoToState(memo: StrategyMemoEntry): AgentStrategyMemoState | null {
+  if (memo.status !== "saved") {
     return null;
   }
   return {
     id: memo.id,
-    session_id: memo.session_id,
-    message_id: memo.message_id,
-    strategy_key: memo.strategy_key,
-    action,
-    status: memo.status,
-    reason: memo.note,
-    created_at: memo.created_at,
-    updated_at: memo.updated_at,
+    saved: true,
+    note: memo.note,
+    updated_at: memo.updated_at ?? memo.created_at,
+    is_submitting: false,
+    error: null,
   };
 }
 
-function applyStrategyRecord(
-  current: AgentStrategyActionState | undefined,
-  record: AgentStrategyActionRecord
-): AgentStrategyActionState {
+function applyExecutionRecordState(
+  current: AgentStrategyExecutionState | undefined,
+  record: AgentStrategyExecutionRecord
+): AgentStrategyExecutionState {
   return {
     id: record.id,
-    action: record.action,
+    decision: record.decision,
     status: record.status,
     reason: record.reason,
     updated_at: record.updated_at ?? record.created_at,
+    is_submitting: current?.is_submitting ?? false,
+    error: null,
+  };
+}
+
+function applyMemoState(
+  current: AgentStrategyMemoState | undefined,
+  state: AgentStrategyMemoState
+): AgentStrategyMemoState {
+  return {
+    id: state.id,
+    saved: state.saved,
+    note: state.note,
+    updated_at: state.updated_at,
     is_submitting: current?.is_submitting ?? false,
     error: null,
   };
@@ -694,10 +709,14 @@ export default function AgentPage() {
   const [chatMessagesLoading, setChatMessagesLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
-  const [memoActions, setMemoActions] = useState<
-    Record<string, AgentStrategyActionState>
+  const [executionActions, setExecutionActions] = useState<
+    Record<string, AgentStrategyExecutionState>
   >({});
-  const [memoActionsError, setMemoActionsError] = useState<string | null>(null);
+  const [executionActionsError, setExecutionActionsError] = useState<string | null>(null);
+  const [memoStates, setMemoStates] = useState<
+    Record<string, AgentStrategyMemoState>
+  >({});
+  const [memoStatesError, setMemoStatesError] = useState<string | null>(null);
   const [memoInboxItems, setMemoInboxItems] = useState<StrategyMemoEntry[]>([]);
   const [memoInboxLoading, setMemoInboxLoading] = useState(false);
   const [memoInboxError, setMemoInboxError] = useState<string | null>(null);
@@ -1072,10 +1091,36 @@ export default function AgentPage() {
     [portfolioId]
   );
 
-  const fetchMemoActions = useCallback(async (sessionId: string | null) => {
+  const fetchExecutionActions = useCallback(async (sessionId: string | null) => {
+    if (!sessionId) {
+      setExecutionActions({});
+      setExecutionActionsError(null);
+      return {};
+    }
+    try {
+      const raw = await fetchJson<unknown>(
+        `${API_BASE}/api/v1/agent/strategy-actions?session_id=${sessionId}`
+      );
+      const actions = normalizeStrategyExecutionActions(raw);
+      const next: Record<string, AgentStrategyExecutionState> = {};
+      for (const action of actions) {
+        const lookupKey = buildAgentStrategyActionLookupKey(action.message_id, action.strategy_key);
+        next[lookupKey] = applyExecutionRecordState(next[lookupKey], action);
+      }
+      setExecutionActions(next);
+      setExecutionActionsError(null);
+      return next;
+    } catch {
+      setExecutionActions({});
+      setExecutionActionsError("策略执行记录暂不可用，`/api/v1/agent/strategy-actions` 尚未就绪。");
+      return {};
+    }
+  }, []);
+
+  const fetchMemoStates = useCallback(async (sessionId: string | null) => {
     if (!portfolioId) {
-      setMemoActions({});
-      setMemoActionsError(null);
+      setMemoStates({});
+      setMemoStatesError(null);
       setMemoInboxItems([]);
       return {};
     }
@@ -1089,8 +1134,8 @@ export default function AgentPage() {
       setMemoInboxError(null);
 
       if (!sessionId) {
-        setMemoActions({});
-        setMemoActionsError(null);
+        setMemoStates({});
+        setMemoStatesError(null);
         return {};
       }
 
@@ -1099,27 +1144,27 @@ export default function AgentPage() {
           .filter((entry) => entry.session_id === sessionId)
           .map((entry) => entry.id)
       );
-      const next: Record<string, AgentStrategyActionState> = {};
+      const next: Record<string, AgentStrategyMemoState> = {};
       for (const memo of memos) {
         const matchesSession =
           memo.session_id === sessionId
           || (!memo.session_id && memo.message_id && currentSessionMessageIds.has(memo.message_id));
-        if (!matchesSession) {
+        if (!matchesSession || !memo.message_id) {
           continue;
         }
-        const record = mapMemoToActionRecord(memo);
-        if (!record) {
+        const state = mapMemoToState(memo);
+        if (!state) {
           continue;
         }
-        const lookupKey = buildAgentStrategyActionLookupKey(record.message_id, record.strategy_key);
-        next[lookupKey] = applyStrategyRecord(next[lookupKey], record);
+        const lookupKey = buildAgentStrategyActionLookupKey(memo.message_id, memo.strategy_key);
+        next[lookupKey] = applyMemoState(next[lookupKey], state);
       }
-      setMemoActions(next);
-      setMemoActionsError(null);
+      setMemoStates(next);
+      setMemoStatesError(null);
       return next;
     } catch {
-      setMemoActions({});
-      setMemoActionsError("策略备忘记录暂不可用，`/api/v1/agent/strategy-memos` 尚未就绪。");
+      setMemoStates({});
+      setMemoStatesError("策略备忘记录暂不可用，`/api/v1/agent/strategy-memos` 尚未就绪。");
       setMemoInboxItems([]);
       setMemoInboxError("策略备忘列表读取失败。");
       return {};
@@ -1153,7 +1198,8 @@ export default function AgentPage() {
         setChatSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
         setActiveSessionId(session.id);
         setChatEntries([]);
-        setMemoActions({});
+        setExecutionActions({});
+        setMemoStates({});
         setSessionError(null);
         return session.id;
       } catch (error) {
@@ -1207,13 +1253,16 @@ export default function AgentPage() {
   useEffect(() => {
     if (!activeSessionId) {
       setChatEntries([]);
-      setMemoActions({});
-      fetchMemoActions(null);
+      setExecutionActions({});
+      setMemoStates({});
+      fetchExecutionActions(null);
+      fetchMemoStates(null);
       return;
     }
     fetchSessionMessages(activeSessionId);
-    fetchMemoActions(activeSessionId);
-  }, [activeSessionId, fetchSessionMessages, fetchMemoActions]);
+    fetchExecutionActions(activeSessionId);
+    fetchMemoStates(activeSessionId);
+  }, [activeSessionId, fetchExecutionActions, fetchMemoStates, fetchSessionMessages]);
 
   const fetchWatchlist = useCallback(async () => {
     const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist`);
@@ -1465,7 +1514,8 @@ export default function AgentPage() {
             await Promise.all([
               fetchChatSessions(sessionId),
               fetchSessionMessages(sessionId),
-              fetchMemoActions(sessionId),
+              fetchExecutionActions(sessionId),
+              fetchMemoStates(sessionId),
             ]);
             setChatStreaming(false);
             return;
@@ -1478,7 +1528,8 @@ export default function AgentPage() {
       await Promise.all([
         fetchChatSessions(sessionId),
         fetchSessionMessages(sessionId),
-        fetchMemoActions(sessionId),
+        fetchExecutionActions(sessionId),
+        fetchMemoStates(sessionId),
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "发送消息失败";
@@ -1499,13 +1550,14 @@ export default function AgentPage() {
     chatStreaming,
     createSession,
     fetchChatSessions,
+    fetchExecutionActions,
+    fetchMemoStates,
     fetchSessionMessages,
-    fetchMemoActions,
     portfolioId,
   ]);
 
-  const handleMemoAction = useCallback(
-    async (request: AgentStrategyActionRequest) => {
+  const handleExecutionAction = useCallback(
+    async (request: AgentStrategyExecutionRequest) => {
       if (!portfolioId) {
         return;
       }
@@ -1514,12 +1566,12 @@ export default function AgentPage() {
         request.message_id,
         request.strategy_key
       );
-      const pendingState = memoActions[lookupKey];
-      setMemoActions((current) => ({
+      const pendingState = executionActions[lookupKey];
+      setExecutionActions((current) => ({
         ...current,
         [lookupKey]: {
           id: pendingState?.id ?? null,
-          action: pendingState?.action ?? null,
+          decision: pendingState?.decision ?? null,
           status: pendingState?.status ?? null,
           reason: pendingState?.reason ?? null,
           updated_at: pendingState?.updated_at ?? null,
@@ -1528,38 +1580,24 @@ export default function AgentPage() {
         },
       }));
 
-      const endpoint =
-        request.intent === "save"
-          ? `${API_BASE}/api/v1/agent/strategy-memos`
-          : pendingState?.id
-            ? `${API_BASE}/api/v1/agent/strategy-memos/${pendingState.id}`
-            : `${API_BASE}/api/v1/agent/strategy-memos`;
-
-      const method = request.intent === "ignore" && pendingState?.id ? "PATCH" : "POST";
+      const config = buildStrategyExecutionRequestConfig(
+        request.intent,
+        {
+          portfolio_id: portfolioId,
+          session_id: request.session_id,
+          message_id: request.message_id,
+          strategy_key: request.strategy_key,
+          plan: request.plan,
+          source_run_id: request.source_run_id ?? null,
+          ...(request.intent === "reject" ? { reason: request.reason ?? null } : {}),
+        }
+      );
 
       try {
-        const resp = await fetch(endpoint, {
-          method,
+        const resp = await fetch(`${API_BASE}${config.endpoint}`, {
+          method: config.method,
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            method === "PATCH"
-              ? {
-                  status: "ignored",
-                  note: request.note ?? null,
-                }
-              : {
-                  portfolio_id: portfolioId,
-                  source_agent: "agent_chat",
-                  source_session_id: request.session_id,
-                  source_message_id: request.message_id,
-                  strategy_key: request.strategy_key,
-                  stock_code: request.plan.stock_code,
-                  stock_name: request.plan.stock_name,
-                  plan_snapshot: request.plan,
-                  note: request.note ?? null,
-                  status: request.intent === "save" ? "saved" : "ignored",
-                }
-          ),
+          body: JSON.stringify(config.body),
         });
 
         if (!resp.ok) {
@@ -1567,38 +1605,31 @@ export default function AgentPage() {
         }
 
         const raw = await resp.json().catch(() => null);
-        const records = normalizeStrategyMemos(raw)
-          .map((memo) => mapMemoToActionRecord(memo))
-          .filter((value): value is AgentStrategyActionRecord => value !== null);
-        const matched = records.find(
-          (record) =>
-            record.message_id === request.message_id
-            && record.strategy_key === request.strategy_key
-        );
+        const record = mapExecutionRecord(isRecord(raw) ? raw : {});
 
-        setMemoActions((current) => ({
+        setExecutionActions((current) => ({
           ...current,
-          [lookupKey]: matched
-            ? applyStrategyRecord(current[lookupKey], matched)
+          [lookupKey]: record
+            ? applyExecutionRecordState(current[lookupKey], record)
             : {
                 id: current[lookupKey]?.id ?? null,
-                action: request.intent === "save" ? "saved" : "ignored",
-                status: request.intent === "save" ? "saved" : "ignored",
-                reason: request.note ?? null,
+                decision: request.intent === "adopt" ? "adopted" : "rejected",
+                status: request.intent === "adopt" ? "adopted" : "rejected",
+                reason: request.intent === "reject" ? request.reason ?? null : null,
                 updated_at: new Date().toISOString(),
                 is_submitting: false,
                 error: null,
               },
         }));
-        fetchMemoActions(request.session_id).catch(() => {});
+        fetchExecutionActions(request.session_id).catch(() => {});
       } catch (error) {
-        const message = error instanceof Error ? error.message : "策略动作提交失败";
-        setMemoActions((current) => ({
+        const message = error instanceof Error ? error.message : "策略执行提交失败";
+        setExecutionActions((current) => ({
           ...current,
           [lookupKey]: {
             ...(current[lookupKey] ?? {
               id: null,
-              action: null,
+              decision: null,
               status: null,
               reason: null,
               updated_at: null,
@@ -1609,7 +1640,85 @@ export default function AgentPage() {
         }));
       }
     },
-    [portfolioId, memoActions, fetchMemoActions]
+    [executionActions, fetchExecutionActions, portfolioId]
+  );
+
+  const handleSaveMemo = useCallback(
+    async (request: AgentStrategyMemoSaveRequest) => {
+      if (!portfolioId) {
+        return;
+      }
+
+      const lookupKey = buildAgentStrategyActionLookupKey(
+        request.message_id,
+        request.strategy_key
+      );
+      const pendingState = memoStates[lookupKey];
+      setMemoStates((current) => ({
+        ...current,
+        [lookupKey]: {
+          id: pendingState?.id ?? null,
+          saved: pendingState?.saved ?? false,
+          note: pendingState?.note ?? null,
+          updated_at: pendingState?.updated_at ?? null,
+          is_submitting: true,
+          error: null,
+        },
+      }));
+
+      const config = buildMemoRequestConfig(portfolioId, request);
+
+      try {
+        const resp = await fetch(`${API_BASE}${config.endpoint}`, {
+          method: config.method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(config.body),
+        });
+
+        if (!resp.ok) {
+          throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+        }
+
+        const raw = await resp.json().catch(() => null);
+        const memo = normalizeStrategyMemos(raw).find(
+          (item) =>
+            item.message_id === request.message_id
+            && item.strategy_key === request.strategy_key
+        ) ?? null;
+        const state = memo ? mapMemoToState(memo) : null;
+
+        setMemoStates((current) => ({
+          ...current,
+          [lookupKey]: state
+            ? applyMemoState(current[lookupKey], state)
+            : {
+                id: current[lookupKey]?.id ?? null,
+                saved: true,
+                note: request.note ?? null,
+                updated_at: new Date().toISOString(),
+                is_submitting: false,
+                error: null,
+              },
+        }));
+        fetchMemoStates(request.session_id).catch(() => {});
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "策略收藏提交失败";
+        setMemoStates((current) => ({
+          ...current,
+          [lookupKey]: {
+            ...(current[lookupKey] ?? {
+              id: null,
+              saved: false,
+              note: null,
+              updated_at: null,
+            }),
+            is_submitting: false,
+            error: message,
+          },
+        }));
+      }
+    },
+    [fetchMemoStates, memoStates, portfolioId]
   );
 
   const handleArchiveMemo = useCallback(
@@ -1627,14 +1736,14 @@ export default function AgentPage() {
         if (!resp.ok) {
           throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
         }
-        await fetchMemoActions(activeSessionId);
+        await fetchMemoStates(activeSessionId);
       } catch (error) {
         setMemoInboxError(error instanceof Error ? error.message : "归档备忘失败");
       } finally {
         setMemoMutatingId(null);
       }
     },
-    [activeSessionId, fetchMemoActions, portfolioId]
+    [activeSessionId, fetchMemoStates, portfolioId]
   );
 
   const handleDeleteMemo = useCallback(
@@ -1650,14 +1759,14 @@ export default function AgentPage() {
         if (!resp.ok) {
           throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
         }
-        await fetchMemoActions(activeSessionId);
+        await fetchMemoStates(activeSessionId);
       } catch (error) {
         setMemoInboxError(error instanceof Error ? error.message : "删除备忘失败");
       } finally {
         setMemoMutatingId(null);
       }
     },
-    [activeSessionId, fetchMemoActions, portfolioId]
+    [activeSessionId, fetchMemoStates, portfolioId]
   );
 
   const handleAddWatch = async () => {
@@ -1706,7 +1815,7 @@ export default function AgentPage() {
     }
     return rule.status === memoryStatus;
   });
-  const chatNotices = [sessionError, chatError, memoActionsError].filter(
+  const chatNotices = [sessionError, chatError, executionActionsError, memoStatesError].filter(
     (value): value is string => Boolean(value)
   );
 
@@ -1793,8 +1902,10 @@ export default function AgentPage() {
                     onNewNameChange={setNewName}
                     onAddWatch={handleAddWatch}
                     onRemoveWatch={handleRemoveWatch}
-                    memoActions={memoActions}
-                    onMemoAction={handleMemoAction}
+                    executionActions={executionActions}
+                    memoStates={memoStates}
+                    onExecutionAction={handleExecutionAction}
+                    onSaveMemo={handleSaveMemo}
                   />
                 ) : (
                   <StrategyMemoPanel

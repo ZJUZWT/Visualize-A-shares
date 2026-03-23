@@ -387,24 +387,24 @@ export interface AgentChatEntry {
 
 export type AgentLeftPanelTab = "console" | "memo_inbox";
 
-export type AgentStrategyDecision = "saved" | "ignored";
-export type AgentStrategyActionIntent = "save" | "ignore";
+export type AgentStrategyExecutionDecision = "adopted" | "rejected";
+export type AgentStrategyExecutionIntent = "adopt" | "reject";
 
-export interface AgentStrategyActionRecord {
+export interface AgentStrategyExecutionRecord {
   id: string;
   session_id: string | null;
   message_id: string | null;
   strategy_key: string;
-  action: AgentStrategyDecision;
+  decision: AgentStrategyExecutionDecision;
   status: string | null;
   reason: string | null;
   created_at: string | null;
   updated_at: string | null;
 }
 
-export interface AgentStrategyActionState {
+export interface AgentStrategyExecutionState {
   id: string | null;
-  action: AgentStrategyDecision | null;
+  decision: AgentStrategyExecutionDecision | null;
   status: string | null;
   reason: string | null;
   updated_at: string | null;
@@ -412,10 +412,30 @@ export interface AgentStrategyActionState {
   error: string | null;
 }
 
-export type AgentStrategyActionLookup = Record<string, AgentStrategyActionState>;
+export type AgentStrategyExecutionLookup = Record<string, AgentStrategyExecutionState>;
 
-export interface AgentStrategyActionRequest {
-  intent: AgentStrategyActionIntent;
+export interface AgentStrategyExecutionRequest {
+  intent: AgentStrategyExecutionIntent;
+  session_id: string;
+  message_id: string;
+  strategy_key: string;
+  plan: TradePlanData;
+  reason?: string | null;
+  source_run_id?: string | null;
+}
+
+export interface AgentStrategyMemoState {
+  id: string | null;
+  saved: boolean;
+  note: string | null;
+  updated_at: string | null;
+  is_submitting: boolean;
+  error: string | null;
+}
+
+export type AgentStrategyMemoLookup = Record<string, AgentStrategyMemoState>;
+
+export interface AgentStrategyMemoSaveRequest {
   session_id: string;
   message_id: string;
   strategy_key: string;

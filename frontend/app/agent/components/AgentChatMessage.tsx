@@ -1,8 +1,10 @@
 import { splitByTradePlan } from "@/lib/parseTradePlan";
 import {
   AgentChatEntry,
-  AgentStrategyActionLookup,
-  AgentStrategyActionRequest,
+  AgentStrategyExecutionLookup,
+  AgentStrategyExecutionRequest,
+  AgentStrategyMemoLookup,
+  AgentStrategyMemoSaveRequest,
   buildAgentStrategyActionLookupKey,
   buildAgentStrategyKey,
 } from "../types";
@@ -10,8 +12,10 @@ import AgentStrategyActionCard from "./AgentStrategyActionCard";
 
 interface AgentChatMessageProps {
   message: AgentChatEntry;
-  strategyActions: AgentStrategyActionLookup;
-  onStrategyAction: (request: AgentStrategyActionRequest) => Promise<void>;
+  executionActions: AgentStrategyExecutionLookup;
+  memoStates: AgentStrategyMemoLookup;
+  onExecutionAction: (request: AgentStrategyExecutionRequest) => Promise<void>;
+  onSaveMemo: (request: AgentStrategyMemoSaveRequest) => Promise<void>;
 }
 
 function formatTime(value: string) {
@@ -27,8 +31,10 @@ function formatTime(value: string) {
 
 export default function AgentChatMessage({
   message,
-  strategyActions,
-  onStrategyAction,
+  executionActions,
+  memoStates,
+  onExecutionAction,
+  onSaveMemo,
 }: AgentChatMessageProps) {
   const isUser = message.role === "user";
   const segments = isUser
@@ -84,9 +90,11 @@ export default function AgentChatMessage({
                     sessionId={message.session_id ?? null}
                     messageId={message.id}
                     plan={segment.plan}
-                    actionState={strategyActions[lookupKey]}
+                    executionState={executionActions[lookupKey]}
+                    memoState={memoStates[lookupKey]}
                     interactive={Boolean(message.is_persisted) && !message.is_streaming}
-                    onAction={onStrategyAction}
+                    onExecutionAction={onExecutionAction}
+                    onSaveMemo={onSaveMemo}
                   />
                 );
               })

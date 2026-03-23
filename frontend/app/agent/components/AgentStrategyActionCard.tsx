@@ -1,31 +1,40 @@
 import type { TradePlanData } from "@/lib/parseTradePlan";
 import {
-  AgentStrategyActionRequest,
-  AgentStrategyActionState,
+  AgentStrategyExecutionRequest,
+  AgentStrategyExecutionState,
+  AgentStrategyMemoSaveRequest,
+  AgentStrategyMemoState,
   buildAgentStrategyKey,
 } from "../types";
+import { mergeStrategyCardState } from "../lib/strategyActionViewModel";
 
 interface AgentStrategyActionCardProps {
   sessionId: string | null;
   messageId: string;
   plan: TradePlanData;
-  actionState?: AgentStrategyActionState;
+  executionState?: AgentStrategyExecutionState;
+  memoState?: AgentStrategyMemoState;
   interactive: boolean;
-  onAction: (request: AgentStrategyActionRequest) => Promise<void>;
+  onExecutionAction: (request: AgentStrategyExecutionRequest) => Promise<void>;
+  onSaveMemo: (request: AgentStrategyMemoSaveRequest) => Promise<void>;
 }
 
-const ACTION_BADGES: Record<string, string> = {
-  saved: "border-green-500/30 bg-green-500/15 text-green-300",
-  ignored: "border-red-500/30 bg-red-500/15 text-red-300",
+const EXECUTION_BADGES: Record<string, string> = {
+  adopted: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300",
+  rejected: "border-amber-500/30 bg-amber-500/15 text-amber-200",
 };
+
+const MEMO_BADGE = "border-sky-500/30 bg-sky-500/15 text-sky-200";
 
 export default function AgentStrategyActionCard({
   sessionId,
   messageId,
   plan,
-  actionState,
+  executionState,
+  memoState,
   interactive,
-  onAction,
+  onExecutionAction,
+  onSaveMemo,
 }: AgentStrategyActionCardProps) {
   const strategyKey = buildAgentStrategyKey(plan);
   const directionLabel = plan.direction === "buy" ? "买入" : "卖出";
@@ -33,8 +42,10 @@ export default function AgentStrategyActionCard({
     plan.direction === "buy"
       ? "border-green-500/30 bg-green-500/15 text-green-300"
       : "border-red-500/30 bg-red-500/15 text-red-300";
-  const isLocked =
-    !interactive || Boolean(actionState?.action) || Boolean(actionState?.is_submitting);
+  const mergedState = mergeStrategyCardState(executionState, memoState);
+  const executionLocked = !interactive || !mergedState.canAdopt;
+  const memoLocked = !interactive || !mergedState.canSaveMemo;
+  const updatedAt = executionState?.updated_at ?? memoState?.updated_at ?? null;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-[#11121a] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.22)]">
@@ -49,15 +60,22 @@ export default function AgentStrategyActionCard({
           </div>
           <p className="mt-1 text-xs text-gray-500">结构化交易计划</p>
         </div>
-        {actionState?.action && (
-          <span
-            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
-              ACTION_BADGES[actionState.action]
-            }`}
-          >
-            {actionState.action === "saved" ? "已收藏" : "已忽略"}
-          </span>
-        )}
+        <div className="flex flex-wrap justify-end gap-2">
+          {executionState?.decision && (
+            <span
+              className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                EXECUTION_BADGES[executionState.decision]
+              }`}
+            >
+              {mergedState.executionLabel}
+            </span>
+          )}
+          {memoState?.saved && (
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${MEMO_BADGE}`}>
+              {mergedState.memoLabel}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 grid gap-3 text-sm text-gray-300 md:grid-cols-3">
@@ -109,36 +127,48 @@ export default function AgentStrategyActionCard({
         </div>
       </div>
 
-      {actionState?.reason && actionState.action === "ignored" && (
-        <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-          忽略备注: {actionState.reason}
+      {executionState?.reason && executionState.decision === "rejected" && (
+        <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+          忽略备注: {executionState.reason}
         </div>
       )}
 
-      {actionState?.error && (
+      {memoState?.note && memoState.saved && (
+        <div className="mt-3 rounded-xl border border-sky-500/20 bg-sky-500/10 px-3 py-2 text-xs text-sky-100">
+          收藏备注: {memoState.note}
+        </div>
+      )}
+
+      {executionState?.error && (
         <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-          {actionState.error}
+          {executionState.error}
+        </div>
+      )}
+
+      {memoState?.error && (
+        <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+          {memoState.error}
         </div>
       )}
 
       <div className="mt-4 flex items-center justify-between gap-3 border-t border-white/10 pt-3">
         <span className="text-[11px] text-gray-500">
-          {actionState?.updated_at
-            ? `最近更新 ${new Date(actionState.updated_at).toLocaleString()}`
+          {updatedAt
+            ? `最近更新 ${new Date(updatedAt).toLocaleString()}`
             : interactive
-              ? "可将策略保存到备忘录"
-              : "消息落库并绑定 session 后才能收藏或忽略"}
+              ? "可执行到虚拟组合，或仅收藏到备忘录"
+              : "消息落库并绑定 session 后才能执行或收藏"}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
-            disabled={isLocked}
+            disabled={executionLocked}
             onClick={() => {
               if (!sessionId) {
                 return;
               }
-              void onAction({
-                intent: "save",
+              void onExecutionAction({
+                intent: "adopt",
                 session_id: sessionId,
                 message_id: messageId,
                 strategy_key: strategyKey,
@@ -146,26 +176,61 @@ export default function AgentStrategyActionCard({
               });
             }}
             className={`rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
-              isLocked
+              executionLocked
                 ? "cursor-not-allowed bg-white/5 text-gray-500"
-                : "bg-green-500/15 text-green-300 hover:bg-green-500/20"
+                : "bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/20"
             }`}
           >
-            {actionState?.is_submitting && !actionState.action ? "提交中..." : "收藏策略"}
+            {executionState?.is_submitting && !executionState.decision
+              ? "提交中..."
+              : mergedState.executionLabel === "已采纳"
+                ? "已采纳"
+                : "采纳"}
           </button>
           <button
             type="button"
-            disabled={isLocked}
+            disabled={executionLocked}
             onClick={() => {
               if (!sessionId) {
                 return;
               }
-              const note = window.prompt("记录忽略备注（可选）", actionState?.reason || "");
+              const reason = window.prompt("记录忽略备注（可选）", executionState?.reason || "");
+              if (reason === null) {
+                return;
+              }
+              void onExecutionAction({
+                intent: "reject",
+                session_id: sessionId,
+                message_id: messageId,
+                strategy_key: strategyKey,
+                plan,
+                reason: reason.trim() || null,
+              });
+            }}
+            className={`rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
+              executionLocked
+                ? "cursor-not-allowed bg-white/5 text-gray-500"
+                : "bg-amber-500/15 text-amber-200 hover:bg-amber-500/20"
+            }`}
+          >
+            {executionState?.is_submitting && !executionState.decision
+              ? "提交中..."
+              : mergedState.executionLabel === "已忽略"
+                ? "已忽略"
+                : "忽略"}
+          </button>
+          <button
+            type="button"
+            disabled={memoLocked}
+            onClick={() => {
+              if (!sessionId) {
+                return;
+              }
+              const note = window.prompt("记录收藏备注（可选）", memoState?.note || "");
               if (note === null) {
                 return;
               }
-              void onAction({
-                intent: "ignore",
+              void onSaveMemo({
                 session_id: sessionId,
                 message_id: messageId,
                 strategy_key: strategyKey,
@@ -174,12 +239,12 @@ export default function AgentStrategyActionCard({
               });
             }}
             className={`rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
-              isLocked
+              memoLocked
                 ? "cursor-not-allowed bg-white/5 text-gray-500"
-                : "bg-red-500/15 text-red-300 hover:bg-red-500/20"
+                : "bg-sky-500/15 text-sky-200 hover:bg-sky-500/20"
             }`}
           >
-            忽略策略
+            {memoState?.is_submitting ? "收藏中..." : memoState?.saved ? "已收藏" : "收藏到备忘录"}
           </button>
         </div>
       </div>

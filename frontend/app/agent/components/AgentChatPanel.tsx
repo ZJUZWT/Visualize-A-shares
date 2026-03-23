@@ -4,8 +4,10 @@ import { useEffect, useRef } from "react";
 import {
   AgentChatEntry,
   AgentChatSession,
-  AgentStrategyActionLookup,
-  AgentStrategyActionRequest,
+  AgentStrategyExecutionLookup,
+  AgentStrategyExecutionRequest,
+  AgentStrategyMemoLookup,
+  AgentStrategyMemoSaveRequest,
   BrainRun,
   WatchlistItem,
 } from "../types";
@@ -37,8 +39,10 @@ interface AgentChatPanelProps {
   onNewNameChange: (value: string) => void;
   onAddWatch: () => void;
   onRemoveWatch: (id: string) => void;
-  memoActions: AgentStrategyActionLookup;
-  onMemoAction: (request: AgentStrategyActionRequest) => Promise<void>;
+  executionActions: AgentStrategyExecutionLookup;
+  memoStates: AgentStrategyMemoLookup;
+  onExecutionAction: (request: AgentStrategyExecutionRequest) => Promise<void>;
+  onSaveMemo: (request: AgentStrategyMemoSaveRequest) => Promise<void>;
 }
 
 function formatSessionLabel(session: AgentChatSession) {
@@ -76,8 +80,10 @@ export default function AgentChatPanel({
   onNewNameChange,
   onAddWatch,
   onRemoveWatch,
-  memoActions,
-  onMemoAction,
+  executionActions,
+  memoStates,
+  onExecutionAction,
+  onSaveMemo,
 }: AgentChatPanelProps) {
   const tailRef = useRef<HTMLDivElement | null>(null);
 
@@ -266,8 +272,10 @@ export default function AgentChatPanel({
               <AgentChatMessage
                 key={message.id}
                 message={message}
-                strategyActions={memoActions}
-                onStrategyAction={onMemoAction}
+                executionActions={executionActions}
+                memoStates={memoStates}
+                onExecutionAction={onExecutionAction}
+                onSaveMemo={onSaveMemo}
               />
             ))
           )}
