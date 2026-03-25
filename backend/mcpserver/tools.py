@@ -61,8 +61,8 @@ def query_market_overview(da: DataAccess) -> str:
         if all_stocks and all_stocks.get("results"):
             return _format_market_overview_online(all_stocks["results"], health, factor_data)
 
-        # fallback: 用 snapshot 接口（无 cluster_id）
-        snapshot_data = da.api_get("/api/v1/data/snapshot")
+        # fallback: 用 snapshot 接口（无 cluster_id），需传入足够大的 limit
+        snapshot_data = da.api_get("/api/v1/data/snapshot", params={"limit": 10000})
         if snapshot_data and snapshot_data.get("stocks"):
             return _format_market_overview_online(snapshot_data["stocks"], health, factor_data)
 
@@ -1068,7 +1068,11 @@ def get_factor_scores(da: "DataAccess", code: str) -> str:
     if not da.is_online():
         return json.dumps({"error": "后端未在线，无法获取因子评分"}, ensure_ascii=False)
 
+    # 优先从 /api/v1/stocks/search 获取（含 cluster 信息），fallback 到 snapshot
     stock_data = da.get_stock_detail(code)
+    if not stock_data:
+        # 再试 snapshot 接口
+        stock_data = da.api_get(f"/api/v1/data/snapshot/{code}")
     if not stock_data:
         return json.dumps({"error": f"无 {code} 数据"}, ensure_ascii=False)
 
@@ -1147,6 +1151,13 @@ def _run_async(coro):
 
 def get_news(da: "DataAccess", code: str, limit: int = 20) -> str:
     """获取个股新闻 + 情感分析"""
+    # 在线时走 REST API，避免 DuckDB 连接冲突
+    if da.is_online():
+        data = da.api_get(f"/api/v1/info/news/{code}", params={"limit": limit}, timeout=30.0)
+        if data:
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+    # 离线降级：本地调用
     try:
         from engine.info import get_info_engine
         ie = get_info_engine()
@@ -1173,6 +1184,13 @@ def get_news(da: "DataAccess", code: str, limit: int = 20) -> str:
 
 def get_announcements(da: "DataAccess", code: str, limit: int = 10) -> str:
     """获取公司公告 + 情感分析"""
+    # 在线时走 REST API，避免 DuckDB 连接冲突
+    if da.is_online():
+        data = da.api_get(f"/api/v1/info/announcements/{code}", params={"limit": limit}, timeout=60.0)
+        if data:
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+    # 离线降级：本地调用
     try:
         from engine.info import get_info_engine
         ie = get_info_engine()
@@ -1191,6 +1209,13 @@ def get_announcements(da: "DataAccess", code: str, limit: int = 10) -> str:
 
 def assess_event_impact(da: "DataAccess", code: str, event_desc: str) -> str:
     """评估事件对个股的影响"""
+    # 在线时走 REST API，避免 DuckDB 连接冲突
+    if da.is_online():
+        data = da.api_post(f"/api/v1/info/assess", params={"code": code, "event_desc": event_desc}, timeout=30.0)
+        if data:
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
+    # 离线降级：本地调用
     try:
         from engine.info import get_info_engine
         ie = get_info_engine()

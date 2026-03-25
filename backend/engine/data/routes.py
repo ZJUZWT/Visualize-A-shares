@@ -24,7 +24,7 @@ async def data_health():
 
 @router.get("/snapshot")
 async def get_snapshot(
-    limit: int = Query(50, description="返回条数限制"),
+    limit: int = Query(6000, description="返回条数限制"),
     offset: int = Query(0, description="偏移量"),
 ):
     """获取最新行情快照"""
