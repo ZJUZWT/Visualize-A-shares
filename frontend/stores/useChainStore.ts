@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { API_BASE } from "@/lib/api-base";
+import { API_BASE, SSE_BASE } from "@/lib/api-base";
 import { inspectSseResponse } from "@/lib/sseResponse";
 import type { ChainNode, ChainLink, NodeShock, ExploreStatus } from "@/types/chain";
 
@@ -446,6 +446,8 @@ interface ChainStore {
   error: string | null;
   selectedNode: ChainNode | null;
   expandingNodes: string[];
+  /** SSE 流式进度（展开/构建时的实时反馈） */
+  streamingProgress: string;
 
   // ── 图谱布局设置 ──
   expandDepth: number; // 双击展开深度（1~3）
@@ -502,6 +504,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
   error: null,
   selectedNode: null,
   expandingNodes: [],
+  streamingProgress: "",
   expandDepth: 1,
   expandDirection: "both",
   expandMaxNodes: 0,
@@ -538,11 +541,12 @@ export const useChainStore = create<ChainStore>((set, get) => ({
       selectedNode: null,
       shocks: new Map(),
       simulateSummary: "",
+      streamingProgress: "正在构建产业链...",
       _abortController: controller,
     });
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/industry/chain/build`, {
+      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/build`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -593,7 +597,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
 
     try {
       // 1. 调 /chain/parse 拆解文本
-      const parseRes = await fetch(`${API_BASE}/api/v1/industry/chain/parse`, {
+      const parseRes = await fetch(`${SSE_BASE}/api/v1/industry/chain/parse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: trimmed }),
@@ -620,7 +624,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
 
         set({ status: "adding" });
         const existing = get().nodes.map((n) => n.name);
-        const placeRes = await fetch(`${API_BASE}/api/v1/industry/chain/place-node`, {
+        const placeRes = await fetch(`${SSE_BASE}/api/v1/industry/chain/place-node`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -661,7 +665,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
 
     try {
       const existing = nodes.map((n) => n.name);
-      const res = await fetch(`${API_BASE}/api/v1/industry/chain/add-node`, {
+      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/add-node`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -734,8 +738,9 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     set({ status: "building", expandingNodes: targetNames });
 
     try {
-      const depth = get().expandDepth;
-      const res = await fetch(`${API_BASE}/api/v1/industry/chain/expand-all`, {
+      // expandAll 展开多个节点，固定 depth=1 防止指数爆炸
+      // 深度设置只影响双击单个节点的展开
+      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/expand-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -746,7 +751,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
             target: l.target,
             relation: l.relation || "upstream",
           })),
-          max_depth: depth,
+          max_depth: 1,
         }),
       });
 
@@ -762,9 +767,11 @@ export const useChainStore = create<ChainStore>((set, get) => ({
       }
 
       await _parseSSE(res, set, get, true);
+      // 完成后短暂保留进度文字，2s 后清除
       set({ status: "ready", expandingNodes: [] });
+      setTimeout(() => set({ streamingProgress: "" }), 3000);
     } catch (e: unknown) {
-      set({ status: "ready", expandingNodes: [], error: (e as Error).message });
+      set({ status: "ready", expandingNodes: [], error: (e as Error).message, streamingProgress: "" });
     }
   },
 
@@ -776,7 +783,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     set({ status: "building" });
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/industry/chain/reindex-links`, {
+      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/reindex-links`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -883,7 +890,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     }));
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/industry/chain/simulate`, {
+      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/simulate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -917,7 +924,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     const { subject, expandingNodes, expandDepth, expandDirection, expandMaxNodes, nodes } = get();
     if (!subject || expandingNodes.includes(nodeName)) return;
 
-    set({ expandingNodes: [...expandingNodes, nodeName] });
+    set({ expandingNodes: [...expandingNodes, nodeName], streamingProgress: `展开「${nodeName}」中...` });
 
     try {
       const existingNames = nodes.map((n) => n.name);
@@ -932,7 +939,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
         buildBody.max_nodes = expandMaxNodes;
       }
 
-      const res = await fetch(`${API_BASE}/api/v1/industry/chain/build`, {
+      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/build`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildBody),
@@ -960,8 +967,9 @@ export const useChainStore = create<ChainStore>((set, get) => ({
       // ── 阶段 2：批量 relate — 一次 LLM 调用发现所有新节点与旧图的关系 ──
       const newNodes = get().nodes.filter((n) => !existingNames.includes(n.name));
       if (newNodes.length > 0 && existingNames.length > 0) {
+        set({ streamingProgress: `关联 ${newNodes.length} 个新节点到图谱...` });
         try {
-          const relateRes = await fetch(`${API_BASE}/api/v1/industry/chain/relate-batch`, {
+          const relateRes = await fetch(`${SSE_BASE}/api/v1/industry/chain/relate-batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -987,10 +995,12 @@ export const useChainStore = create<ChainStore>((set, get) => ({
 
       set((s) => ({
         expandingNodes: s.expandingNodes.filter((n) => n !== nodeName),
+        streamingProgress: "",
       }));
     } catch {
       set((s) => ({
         expandingNodes: s.expandingNodes.filter((n) => n !== nodeName),
+        streamingProgress: "",
       }));
     }
   },
@@ -1088,6 +1098,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
       error: null,
       selectedNode: null,
       expandingNodes: [],
+      streamingProgress: "",
       shocks: new Map(),
       simulateSummary: "",
       simulateProgress: { phase: "idle", tokens: 0, progress: 0, nodesApplied: 0, linksApplied: 0 },
@@ -1134,7 +1145,11 @@ async function _parseSSE(
 
         switch (eventType) {
           case "depth_start":
-            set({ currentDepth: parsed.depth || 0 });
+            set({ currentDepth: parsed.depth || 0, streamingProgress: `深度 ${parsed.depth || 0} 展开中...` });
+            break;
+
+          case "build_start":
+            set({ streamingProgress: `构建「${parsed.subject || ""}」的产业链...` });
             break;
 
           case "nodes_discovered": {
@@ -1146,7 +1161,12 @@ async function _parseSSE(
             set((s) => {
               const existingNames = new Set(s.nodes.map((n) => n.name));
               const unique = newNodes.filter((n) => !existingNames.has(n.name));
-              return { nodes: [...s.nodes, ...unique] };
+              if (unique.length === 0) return s;
+              const updatedNodes = [...s.nodes, ...unique];
+              return {
+                nodes: updatedNodes,
+                streamingProgress: `发现 ${updatedNodes.length} 个节点...`,
+              };
             });
             break;
           }
@@ -1156,7 +1176,12 @@ async function _parseSSE(
             set((s) => {
               const existingKeys = new Set(s.links.map((l) => `${l.source}->${l.target}`));
               const unique = newLinks.filter((l) => !existingKeys.has(`${l.source}->${l.target}`));
-              return { links: [...s.links, ...unique] };
+              if (unique.length === 0) return s;
+              const updatedLinks = [...s.links, ...unique];
+              return {
+                links: updatedLinks,
+                streamingProgress: `${s.nodes.length} 节点, ${updatedLinks.length} 条关系...`,
+              };
             });
             break;
           }
@@ -1179,8 +1204,30 @@ async function _parseSSE(
           case "relate_batch_complete":
           case "reindex_complete":
             if (!isExpand) {
-              set({ status: "ready" });
+              set({ status: "ready", streamingProgress: "" });
+            } else {
+              // expand 场景：显示完成摘要
+              const ec = parsed.expanded_count || 0;
+              const ch = parsed.cache_hit || 0;
+              set({
+                streamingProgress: ec > 0
+                  ? `✅ 展开完成 (${ec} 目标, ${ch} 缓存命中)`
+                  : "✅ 完成",
+              });
             }
+            break;
+
+          case "expand_all_start":
+            set({
+              streamingProgress: `开始展开 ${parsed.count || 0} 个节点...`,
+            });
+            break;
+
+          case "expand_progress":
+            set({
+              streamingProgress: `批次 ${parsed.batch_done || 0}/${parsed.batch_total || 0} 完成, `
+                + `+${parsed.new_nodes || 0} 节点, +${parsed.new_links || 0} 关系`,
+            });
             break;
 
           case "reindex_start":
@@ -1190,6 +1237,9 @@ async function _parseSSE(
           case "bridge_start":
             // 自动桥梁发现开始（展开后检测到断连子图）
             console.log(`[bridge] 检测到 ${parsed.component_count} 个断连板块，正在寻找桥梁...`);
+            set({
+              streamingProgress: `🔗 检测到 ${parsed.component_count} 个断连板块, 寻找桥梁中...`,
+            });
             break;
 
           case "error":

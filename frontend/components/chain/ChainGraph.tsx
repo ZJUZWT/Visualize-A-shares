@@ -163,7 +163,7 @@ function GraphSettingsPanel() {
 }
 
 export default function ChainGraph() {
-  const { nodes, links, status, selectedNode, selectNode, expandNode, shocks, simulateSummary, expandingNodes, graphSettings } =
+  const { nodes, links, status, selectedNode, selectNode, expandNode, shocks, simulateSummary, expandingNodes, graphSettings, streamingProgress } =
     useChainStore();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null);
@@ -539,7 +539,7 @@ export default function ChainGraph() {
                 </div>
               </div>
               <div className="text-sm">
-                正在添加节点到产业链...
+                {streamingProgress || "正在添加节点到产业链..."}
               </div>
               <div className="text-xs opacity-60">
                 AI 正在分析产业链关系，请稍候
@@ -564,20 +564,24 @@ export default function ChainGraph() {
       )}
 
       {/* 构建/添加/展开 时的悬浮加载指示（图谱有内容时） */}
-      {hasNodes && (status === "building" || status === "adding" || expandingNodes.length > 0) && (
+      {hasNodes && (status === "building" || status === "adding" || expandingNodes.length > 0 || streamingProgress) && (
         <div
           className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2.5 px-4 py-2 rounded-xl
                      border border-[var(--accent)]/30 backdrop-blur-md z-10 shadow-lg"
           style={{ background: "rgba(15, 23, 42, 0.9)" }}
         >
-          <div className="relative w-5 h-5 shrink-0">
-            <div className="absolute inset-0 rounded-full border-2 border-[var(--border)]" />
-            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-[var(--accent)] animate-spin" />
-          </div>
+          {(status === "building" || status === "adding" || expandingNodes.length > 0) && (
+            <div className="relative w-5 h-5 shrink-0">
+              <div className="absolute inset-0 rounded-full border-2 border-[var(--border)]" />
+              <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-[var(--accent)] animate-spin" />
+            </div>
+          )}
           <span className="text-xs text-[var(--text-primary)]">
-            {expandingNodes.length > 0
-              ? `展开「${expandingNodes[0]}」中...`
-              : `添加节点中... (${nodes.length} 节点)`}
+            {streamingProgress
+              ? streamingProgress
+              : expandingNodes.length > 0
+                ? `展开「${expandingNodes[0]}」中...`
+                : `添加节点中... (${nodes.length} 节点)`}
           </span>
         </div>
       )}
