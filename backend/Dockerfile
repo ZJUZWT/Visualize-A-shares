@@ -1,16 +1,31 @@
-FROM python:3.11-slim
+FROM python:3.11-slim AS builder
 
 WORKDIR /app/backend
 
-# 安装系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml .
+COPY . .
+RUN pip install --upgrade pip \
+    && pip install --prefix=/install . --no-cache-dir
+
+
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app/backend
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制并安装 Python 依赖
-COPY pyproject.toml .
+COPY --from=builder /install /usr/local
 COPY . .
-RUN pip install . -i https://pypi.tuna.tsinghua.edu.cn/simple --no-cache-dir
 
 EXPOSE 8000
-CMD ["python", "main.py"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

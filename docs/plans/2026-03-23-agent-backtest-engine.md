@@ -2,6 +2,12 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
+> Status (2026-03-23):
+> Tasks 1-5 have been implemented.
+> Task 6 regression and doc sync are complete, including two post-plan hardening fixes:
+> 1. `engine.agent.service` 改为动态读取 `engine.data.get_data_engine()`，避免 summary/timeline 读模型绕回旧 data binding。
+> 2. `backtest_days` 新增 `brain_run_id`，MCP day tool 改为按 `source_run_id` 反查 trades，而不是按 `created_at` 时间窗猜测。
+
 **Goal:** 为 Main Agent 增加一个日级事件驱动的历史回测引擎，能在隔离 portfolio 中按天推进 agent 的分析、执行、复盘与记忆演化，并通过 API 与 MCP 暴露结果。
 
 **Architecture:** 新增 `AgentBacktestEngine` 编排层与独立 `backtest_runs / backtest_days` 数据模型，复用现有 `AgentService`、`AgentBrain`、`ReviewEngine` 写路径，在一个隔离的 backtest portfolio 中逐交易日推进。所有市场数据读取都通过历史上下文适配器限制在 `as_of_date`，首版只支持 `next_open` 与 `same_close` 两种成交模式。
@@ -377,11 +383,37 @@ Run: `python3 -m pytest tests/unit/test_agent_backtest.py tests/unit/mcpserver/t
 
 Expected: PASS
 
+Observed:
+
+- `python3 -m pytest tests/unit/test_agent_backtest.py tests/unit/mcpserver/test_agent_backtest_tools.py tests/unit/mcpserver/test_http_transport.py -q`
+- PASS (`30 passed`)
+
 **Step 2: Run broader agent regression suite**
 
 Run: `python3 -m pytest tests/unit/test_agent_brain.py tests/unit/test_agent_review_memory.py tests/unit/test_agent_verification.py tests/unit/test_agent_timeline_read_models.py tests/unit/test_agent_backtest.py tests/unit/mcpserver/test_agent_backtest_tools.py tests/unit/mcpserver/test_http_transport.py -q`
 
 Expected: PASS
+
+Observed:
+
+- PASS (`106 passed`)
+
+**Step 2.5: Run isolated MCP smoke verification**
+
+Run an isolated temporary-DuckDB script that:
+
+- seeds a minimal portfolio
+- patches backtest + data engine with deterministic fake data
+- calls:
+  - `run_agent_backtest(...)`
+  - `get_agent_backtest_summary(run_id)`
+  - `get_agent_backtest_day(run_id, date)`
+
+Observed:
+
+- all three MCP wrappers returned usable output
+- `get_agent_backtest_day(...)` returned `brain_run_id` and concrete `trades`
+- no unexpected fallback to the live/main DuckDB after the service data-binding fix
 
 **Step 3: Commit**
 

@@ -12,16 +12,18 @@ export function InputBar({ onExport }: InputBarProps) {
   const [input, setInput] = useState("");
   const {
     sendMessage, stopStreaming, status, error, activeExpert,
-    profiles, chatHistories, deepThink, toggleDeepThink,
+    profiles, chatHistories, deepThink, toggleDeepThink, pendingClarifications,
   } = useExpertStore();
   const isThinking = status === "thinking";
+  const pendingClarification = pendingClarifications[activeExpert];
+  const isBusy = isThinking || !!pendingClarification;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const profile = profiles.find((p) => p.type === activeExpert);
   const color = profile?.color ?? "#60A5FA";
   const hasMessages = (chatHistories[activeExpert] ?? []).length > 0;
 
   const handleSend = async () => {
-    if (!input.trim() || isThinking) return;
+    if (!input.trim() || isBusy) return;
     const msg = input;
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
@@ -40,7 +42,7 @@ export function InputBar({ onExport }: InputBarProps) {
       e.preventDefault();
       if (isThinking) {
         handleStop();
-      } else {
+      } else if (!pendingClarification) {
         handleSend();
       }
     }
@@ -108,6 +110,8 @@ export function InputBar({ onExport }: InputBarProps) {
           placeholder={
             isThinking
               ? "AI 正在思考… 按 Enter 或点击按钮停止"
+              : pendingClarification
+              ? "请先选择上方的分析方向，然后继续生成"
               : `向${profile?.name ?? "专家"}提问… (Enter 发送，Shift+Enter 换行)`
           }
           rows={1}
@@ -115,6 +119,7 @@ export function InputBar({ onExport }: InputBarProps) {
                      placeholder:text-[var(--text-tertiary)] resize-none outline-none
                      leading-relaxed"
           style={{ minHeight: 24, maxHeight: 160 }}
+          disabled={!!pendingClarification}
           onFocus={(e) => {
             const parent = e.currentTarget.parentElement;
             if (parent) parent.style.borderColor = color;
@@ -137,7 +142,7 @@ export function InputBar({ onExport }: InputBarProps) {
         ) : (
           <button
             onClick={handleSend}
-            disabled={!input.trim()}
+            disabled={!input.trim() || !!pendingClarification}
             className="shrink-0 w-8 h-8 rounded-xl flex items-center justify-center
                        transition-all duration-150 text-white
                        disabled:opacity-30 disabled:cursor-not-allowed"
@@ -150,6 +155,12 @@ export function InputBar({ onExport }: InputBarProps) {
         )}
       </div>
       <p className="text-center text-[10px] text-[var(--text-tertiary)] mt-2">
+        {pendingClarification && (
+          <span className="inline-flex items-center gap-1 mr-1" style={{ color }}>
+            请选择一个分析方向
+            <span className="text-[var(--text-tertiary)]">·</span>
+          </span>
+        )}
         {deepThink && (
           <span className="inline-flex items-center gap-1 mr-1" style={{ color }}>
             <BrainCircuit size={10} />

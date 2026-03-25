@@ -8,7 +8,7 @@
  * - 静态模式: 加载预计算快照（GitHub Pages）
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Sidebar from "@/components/ui/Sidebar";
 import TopBar from "@/components/ui/TopBar";
@@ -17,6 +17,7 @@ import AIChatPanel from "@/components/ui/AIChatPanel";
 import AnalysisPanel from "@/components/ui/AnalysisPanel";
 import { useTerrainStore } from "@/stores/useTerrainStore";
 import NavSidebar from "@/components/ui/NavSidebar";
+import { canUseWebGL } from "@/lib/webglSupport";
 
 const TerrainScene = dynamic(
   () => import("@/components/canvas/TerrainScene"),
@@ -28,6 +29,7 @@ const TerrainScene = dynamic(
 
 export default function Home() {
   const { isStaticMode, terrainData, loadSnapshot } = useTerrainStore();
+  const [webglStatus, setWebglStatus] = useState<"checking" | "supported" | "unsupported">("checking");
 
   // 静态模式下自动加载快照
   useEffect(() => {
@@ -35,11 +37,20 @@ export default function Home() {
       loadSnapshot();
     }
   }, [isStaticMode, terrainData, loadSnapshot]);
+
+  useEffect(() => {
+    setWebglStatus(canUseWebGL(typeof document === "undefined" ? null : document) ? "supported" : "unsupported");
+  }, []);
+
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-transparent">
       <NavSidebar />
       {/* Layer 0: 3D 场景 */}
-      <TerrainScene />
+      {webglStatus === "supported" ? (
+        <TerrainScene />
+      ) : (
+        <TerrainFallback unsupported={webglStatus === "unsupported"} />
+      )}
 
       {/* Layer 1: UI 覆盖层 */}
       <Sidebar />
@@ -55,6 +66,18 @@ export default function Home() {
         </span>
       </div>
     </main>
+  );
+}
+
+function TerrainFallback({ unsupported }: { unsupported: boolean }) {
+  return (
+    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,#eef4fb_0%,#dde8f4_45%,#cfdbe8_100%)]">
+      {unsupported && (
+        <div className="overlay absolute bottom-6 left-20 rounded-2xl border border-white/60 bg-white/75 px-4 py-3 text-xs text-slate-600 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur">
+          当前环境不支持 3D WebGL，已切换为简化视图。
+        </div>
+      )}
+    </div>
   );
 }
 

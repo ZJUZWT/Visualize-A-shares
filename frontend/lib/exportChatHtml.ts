@@ -452,6 +452,38 @@ function renderThinking(thinking: ThinkingItem[], color: string): string {
       </div>`;
     }
 
+    if (item.type === "clarification_request") {
+      const options = item.data.options.map(option =>
+        `<div class="node-tag" style="background:${color}15;color:${color}">${esc(option.label)}. ${esc(option.title)}</div>`
+      ).join("");
+      const selection = item.selectedOption
+        ? `<p class="sub-text" style="margin-top:4px">已选择：${esc(item.selectedOption.label)}. ${esc(item.selectedOption.title)}</p>`
+        : "";
+      return `<div class="thinking-item">
+        <span class="icon" style="color:${color}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </span>
+        <div class="content">
+          <span class="label">方向确认</span>
+          <p class="sub-text">${esc(item.data.question_summary)}</p>
+          <div class="node-tags">${options}</div>
+          ${selection}
+        </div>
+      </div>`;
+    }
+
+    if (item.type === "reasoning_summary") {
+      return `<div class="thinking-item">
+        <span class="icon" style="color:${color}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 11V7a4 4 0 0 0-8 0v4"/><rect width="18" height="12" x="3" y="11" rx="2"/><path d="M7 15h10"/></svg>
+        </span>
+        <div class="content">
+          <span class="label">拆题摘要</span>
+          <p class="sub-text">${esc(item.data.summary)}</p>
+        </div>
+      </div>`;
+    }
+
     /* ─ tool_call ─ */
     if (item.type === "tool_call") {
       const isExpert = item.data.engine === "expert";
@@ -540,6 +572,20 @@ function renderThinking(thinking: ThinkingItem[], color: string): string {
           <span class="label">信念更新</span>
           <p class="sub-text">${esc(item.data.new.content)}</p>
           <p class="sub-text" style="margin-top:2px;font-size:9px">置信度: ${Math.round((item.data.old.confidence ?? 0) * 100)}% → ${Math.round((item.data.new.confidence ?? 0) * 100)}%</p>
+        </div>
+      </div>`;
+    }
+
+    if (item.type === "self_critique") {
+      return `<div class="thinking-item">
+        <span class="icon" style="color:#f59e0b">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </span>
+        <div class="content">
+          <span class="label">自我质疑</span>
+          <p class="sub-text">${esc(item.data.summary)}</p>
+          ${item.data.counterpoints?.length ? `<p class="sub-text" style="margin-top:2px">反方观点：${esc(item.data.counterpoints.join("；"))}</p>` : ""}
+          ${item.data.risks?.length ? `<p class="sub-text" style="margin-top:2px">风险：${esc(item.data.risks.join("；"))}</p>` : ""}
         </div>
       </div>`;
     }

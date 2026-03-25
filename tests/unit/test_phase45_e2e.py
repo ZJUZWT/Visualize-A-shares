@@ -25,8 +25,9 @@ def test_rag_module_import():
 
 
 def test_data_fetcher_action_dispatch_count():
-    from engine.arena.data_fetcher import ACTION_DISPATCH
-    assert len(ACTION_DISPATCH) == 7
+    from engine.arena.data_fetcher import SUPPORTED_ACTIONS
+
+    assert len(SUPPORTED_ACTIONS) >= 7
 
 
 def test_info_engine_init_with_disabled_capability():

@@ -76,12 +76,21 @@ class TestAKShareNewsSource:
 
     def test_get_announcements_returns_dataframe(self):
         mock_ak = MagicMock()
-        mock_ak.stock_notice_report_em.return_value = pd.DataFrame({
-            "公告标题": ["关于回购股份的公告"],
-            "公告类型": ["股份变动"],
-            "公告日期": ["2026-03-14"],
-            "公告链接": ["http://a.com"],
-        })
+        mock_ak.stock_notice_report.side_effect = [
+            pd.DataFrame({
+                "代码": ["600519"],
+                "公告标题": ["关于回购股份的公告"],
+                "公告类型": ["股份变动"],
+                "公告日期": ["2026-03-14"],
+                "网址": ["http://a.com"],
+            }),
+            pd.DataFrame(),
+            pd.DataFrame(),
+            pd.DataFrame(),
+            pd.DataFrame(),
+            pd.DataFrame(),
+            pd.DataFrame(),
+        ]
 
         with patch.dict("sys.modules", {"akshare": mock_ak}):
             from engine.data.sources.akshare_source import AKShareSource

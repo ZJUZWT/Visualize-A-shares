@@ -33,15 +33,25 @@ def test_mcp_tools_registered():
     """验证 verification tool 已注册到 MCP server"""
     module = _load_server_module()
     tools = module.server._tool_manager._tools
+    assert "run_demo_agent_verification_suite" in tools
+    assert "run_agent_backtest" in tools
+    assert "get_agent_backtest_summary" in tools
+    assert "get_agent_backtest_day" in tools
     assert "verify_agent_cycle" in tools
     assert "inspect_agent_snapshot" in tools
     assert "prepare_demo_agent_portfolio" in tools
     assert "verify_demo_agent_cycle" in tools
     assert "get_demo_agent_cycle_summary" in tools
-    assert len(tools) >= 27
+    assert len(tools) >= 30
 
 
 def test_mcp_server_does_not_eager_import_agent_verification():
     """验证 server 模块导入时不会提前 import agent_verification 包装层"""
     _load_server_module()
     assert "mcpserver.agent_verification" not in sys.modules
+
+
+def test_mcp_server_does_not_eager_import_agent_backtest():
+    """验证 server 模块导入时不会提前 import agent_backtest 包装层"""
+    _load_server_module()
+    assert "mcpserver.agent_backtest" not in sys.modules

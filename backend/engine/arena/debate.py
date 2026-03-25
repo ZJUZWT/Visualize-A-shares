@@ -136,11 +136,7 @@ async def extract_structure(
 - 直接输出 JSON，不要任何其他文字"""
 
     try:
-        # 流式收集：保持链路活跃，不设总超时
-        chunks: list[str] = []
-        async for token in llm.chat_stream([ChatMessage(role="user", content=extract_prompt)]):
-            chunks.append(token)
-        raw = "".join(chunks)
+        raw = await llm.chat([ChatMessage(role="user", content=extract_prompt)])
         parsed = _lenient_json_loads(raw)
         score = parsed.get("retail_sentiment_score")
         return {
@@ -148,7 +144,7 @@ async def extract_structure(
             "confidence": float(parsed.get("confidence", 0.5)),
             "inner_confidence": float(parsed.get("inner_confidence", parsed.get("confidence", 0.5))),
             "challenges": parsed.get("challenges", []),
-            "data_requests": [],
+            "data_requests": _build_data_requests(role, blackboard.round, parsed.get("data_requests")),
             "retail_sentiment_score": _parse_sentiment_score(score),
             "speak": parsed.get("speak", True),
         }
@@ -192,6 +188,62 @@ def _fallback_entry(role: str, round: int, reason: str) -> DebateEntry:
     )
 
 
+def _build_data_requests(
+    requested_by: str,
+    round: int,
+    payloads: list[dict] | None,
+) -> list[DataRequest]:
+    """将结构化 payload 规范化为 DataRequest 列表。"""
+    requests: list[DataRequest] = []
+    for item in payloads or []:
+        if not isinstance(item, dict):
+            continue
+        engine = str(item.get("engine", "")).strip()
+        action = str(item.get("action", "")).strip()
+        if not engine or not action:
+            continue
+        params = item.get("params", {})
+        if not isinstance(params, dict):
+            params = {}
+        requests.append(
+            DataRequest(
+                requested_by=requested_by,
+                engine=engine,
+                action=action,
+                params=params,
+                round=round,
+            )
+        )
+    return requests
+
+
+def _parse_data_request_lines(requested_by: str, round: int, block_text: str) -> list[DataRequest]:
+    """从【数据请求】块里提取 DataRequest。"""
+    payloads: list[dict] = []
+    for raw_line in (block_text or "").splitlines():
+        line = raw_line.strip().lstrip("-•·").strip()
+        if not line:
+            continue
+        match = re.match(r"^([a-zA-Z_]+)\.([a-zA-Z_]+)(?:\((.*)\))?$", line)
+        if not match:
+            continue
+        engine, action, params_text = match.groups()
+        params: dict = {}
+        if params_text:
+            try:
+                parsed = json.loads(params_text)
+                if isinstance(parsed, dict):
+                    params = parsed
+            except json.JSONDecodeError:
+                logger.warning(f"数据请求参数解析失败，已忽略参数: {line}")
+        payloads.append({
+            "engine": engine,
+            "action": action,
+            "params": params,
+        })
+    return _build_data_requests(requested_by, round, payloads)
+
+
 def _parse_debate_entry(role: str, round: int, raw: str) -> DebateEntry:
     """解析自然语言 LLM 输出为 DebateEntry
 
@@ -233,16 +285,21 @@ def _parse_debate_entry(role: str, round: int, raw: str) -> DebateEntry:
                 line = line.strip().lstrip("-•·").strip()
                 if line:
                     challenges.append(line)
-            text = text[:challenge_match.start()].strip()
+        data_requests: list[DataRequest] = []
+        request_match = re.search(r"【数据请求】(.*?)(?=【|$)", text, re.DOTALL)
+        if request_match:
+            data_requests = _parse_data_request_lines(role, round, request_match.group(1).strip())
 
-        # 剩余内容为 argument（去掉立场声明行可选，保留更完整）
-        argument = text.strip()
+        # 移除结构化块，剩余内容为 argument
+        argument = re.sub(r"【质疑】.*?(?=【|$)", "", text, flags=re.DOTALL)
+        argument = re.sub(r"【数据请求】.*?(?=【|$)", "", argument, flags=re.DOTALL).strip()
 
         return DebateEntry(
             role=role, round=round,
             stance=stance, speak=True,
             argument=argument,
             challenges=challenges,
+            data_requests=data_requests,
             confidence=0.5,
         )
     except Exception as e:
@@ -1120,10 +1177,13 @@ async def judge_summarize_stream(
     try:
         json_str = _extract_json(summary_text)
         if json_str:
-            verdict = await asyncio.wait_for(
-                _parse_judge_json(json_str, blackboard),
-                timeout=5.0,
-            )
+            try:
+                verdict = await asyncio.wait_for(
+                    _parse_judge_json(json_str, blackboard),
+                    timeout=5.0,
+                )
+            except Exception:
+                verdict = await _extract_judge_verdict(summary_text, blackboard, llm)
         else:
             verdict = await _extract_judge_verdict(summary_text, blackboard, llm)
     except Exception as e:
@@ -1205,11 +1265,7 @@ async def _extract_judge_verdict(
   "debate_quality": "strong_disagreement" | "consensus" | "one_sided"
 }}"""
 
-    # 流式收集：保持链路活跃，不设总超时
-    chunks: list[str] = []
-    async for token in llm.chat_stream([ChatMessage(role="user", content=extract_prompt)]):
-        chunks.append(token)
-    raw = "".join(chunks)
+    raw = await llm.chat([ChatMessage(role="user", content=extract_prompt)])
     json_str = _extract_json(raw)
     data = json.loads(json_str)
     data["target"] = blackboard.target

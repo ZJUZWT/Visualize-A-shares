@@ -272,7 +272,7 @@ class TestAgentTimelineService:
         self.db.close()
 
     def test_get_equity_timeline_returns_mark_to_market_and_realized_only(self):
-        with patch("engine.agent.service.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)):
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)):
             timeline = run(self.svc.get_equity_timeline("live"))
 
         assert set(timeline.keys()) == {
@@ -295,7 +295,7 @@ class TestAgentTimelineService:
         assert mtm_by_date["2026-03-20"]["equity"] > realized_by_date["2026-03-20"]["equity"]
 
     def test_get_equity_timeline_falls_back_to_previous_close_when_day_missing(self):
-        with patch("engine.agent.service.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)):
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)):
             timeline = run(self.svc.get_equity_timeline("live"))
 
         mtm_by_date = {item["date"]: item for item in timeline["mark_to_market"]}
@@ -305,7 +305,7 @@ class TestAgentTimelineService:
     def test_get_equity_timeline_returns_flat_curve_for_portfolio_without_trades(self):
         run(self.svc.create_portfolio("training", "training", 500000.0, "2026-03-18"))
 
-        with patch("engine.agent.service.get_data_engine", return_value=FakeDataEngine({})):
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine({})):
             timeline = run(self.svc.get_equity_timeline("training"))
 
         assert timeline["mark_to_market"] == [
@@ -329,7 +329,7 @@ class TestAgentTimelineService:
         ]
 
     def test_get_replay_snapshot_aggregates_account_positions_and_ai_context(self):
-        with patch("engine.agent.service.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)):
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)):
             replay = run(self.svc.get_replay_snapshot("live", "2026-03-20"))
 
         assert replay["portfolio_id"] == "live"
@@ -350,9 +350,21 @@ class TestAgentTimelineService:
         assert replay["what_happened"]["next_day_move_pct"] == pytest.approx(2.68)
 
     def test_get_replay_snapshot_rejects_date_before_portfolio_start(self):
-        with patch("engine.agent.service.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)):
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)):
             with pytest.raises(ValueError, match="早于组合起始"):
                 run(self.svc.get_replay_snapshot("live", "2026-03-01"))
+
+    def test_get_replay_learning_returns_counterfactual_summary(self):
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)):
+            learning = run(self.svc.get_replay_learning("live", "2026-03-20"))
+
+        assert learning["portfolio_id"] == "live"
+        assert learning["date"] == "2026-03-20"
+        assert learning["what_ai_knew"]["trade_theses"] == ["减仓锁定阶段收益"]
+        assert learning["what_happened"]["review_statuses"] == ["win"]
+        assert learning["counterfactual"]["would_change"] is False
+        assert learning["counterfactual"]["action_bias"] in {"hold_course", "tighten_confirmation", "reduce_earlier", "reduce_later"}
+        assert "减仓" in learning["lesson_summary"]
 
 
 class TestAgentTimelineRoutes:
@@ -377,7 +389,7 @@ class TestAgentTimelineRoutes:
         self.db.close()
 
     def test_get_equity_timeline_route(self):
-        with patch("engine.agent.service.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)), patch(
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)), patch(
             "engine.agent.routes.TradeValidator",
             return_value=_make_zero_fee_validator(),
         ):
@@ -390,7 +402,7 @@ class TestAgentTimelineRoutes:
         assert body["realized_only"][-1]["equity"] == 1001000.0
 
     def test_get_replay_snapshot_route_404_for_missing_portfolio(self):
-        with patch("engine.agent.service.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)), patch(
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)), patch(
             "engine.agent.routes.TradeValidator",
             return_value=_make_zero_fee_validator(),
         ):
@@ -400,10 +412,32 @@ class TestAgentTimelineRoutes:
         assert "不存在" in resp.json()["detail"]
 
     def test_get_replay_snapshot_route_400_for_invalid_date(self):
-        with patch("engine.agent.service.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)), patch(
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)), patch(
             "engine.agent.routes.TradeValidator",
             return_value=_make_zero_fee_validator(),
         ):
             resp = self.client.get("/api/v1/agent/timeline/replay?portfolio_id=live&date=2026-03-99")
 
         assert resp.status_code == 400
+
+    def test_get_replay_learning_route_returns_structured_json(self):
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)), patch(
+            "engine.agent.routes.TradeValidator",
+            return_value=_make_zero_fee_validator(),
+        ):
+            resp = self.client.get("/api/v1/agent/timeline/replay-learning?portfolio_id=live&date=2026-03-20")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["portfolio_id"] == "live"
+        assert body["date"] == "2026-03-20"
+        assert "counterfactual" in body
+
+    def test_get_replay_learning_route_404_for_missing_portfolio(self):
+        with patch("engine.data.get_data_engine", return_value=FakeDataEngine(PRICE_HISTORY)), patch(
+            "engine.agent.routes.TradeValidator",
+            return_value=_make_zero_fee_validator(),
+        ):
+            resp = self.client.get("/api/v1/agent/timeline/replay-learning?portfolio_id=missing&date=2026-03-20")
+
+        assert resp.status_code == 404

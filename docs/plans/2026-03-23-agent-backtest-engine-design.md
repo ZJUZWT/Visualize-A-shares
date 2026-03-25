@@ -115,6 +115,11 @@
 
 ## 5. 核心设计
 
+> Implementation note (2026-03-23):
+> 当前实现已经落地 Tasks 1-5，并在 Task 6 中补了一轮真实验证修正。
+> `backtest_runs` 仍保持最小写模型，聚合指标通过 summary read model 实时计算；
+> `backtest_days` 已扩展为逐日证据表，包含 `brain_run_id`、`review_created`、`memory_delta`。
+
 ### 5.1 总体架构
 
 新增一个独立模块：
@@ -159,7 +164,7 @@
 
 #### `agent.backtest_runs`
 
-记录一次历史模拟的总体状态：
+记录一次历史模拟的最小写模型：
 
 - `id`
 - `source_portfolio_id`
@@ -168,18 +173,10 @@
 - `end_date`
 - `execution_price_mode`
 - `status`
-- `total_return`
-- `max_drawdown`
-- `trade_count`
-- `win_rate`
-- `review_count`
-- `memory_added`
-- `memory_updated`
-- `memory_retired`
-- `buy_and_hold_return`
 - `created_at`
-- `completed_at`
-- `error_message`
+
+首版实现里，总收益、回撤、trade/review/memory 聚合指标不直接写入该表，
+而是在 `GET /backtest/run/{run_id}` summary read model 中按 ledger / review / backtest_days 实时聚合。
 
 #### `agent.backtest_days`
 
@@ -190,18 +187,18 @@
 - `portfolio_id`
 - `trade_date`
 - `brain_run_id`
-- `daily_review_id`
-- `weekly_summary_id`
-- `weekly_reflection_id`
-- `equity_close`
-- `cash_balance`
-- `position_value`
-- `trade_count`
 - `review_created`
 - `memory_delta`
 - `created_at`
 
-这两张表一张看总览，一张看逐日证据。
+首版没有把 `daily_review_id / weekly_summary_id / weekly_reflection_id / equity_close`
+等字段直接落库，而是把“足够驱动 API / MCP 验证”的证据优先写入：
+
+- `brain_run_id`
+- `review_created`
+- `memory_delta`
+
+这两张表一张看 run 级最小状态，一张看逐日证据。
 
 ### 5.4 日推进语义
 
@@ -230,6 +227,12 @@
 - 回测过程中调用到的数据 hunger / quant / replay，都使用相同的历史截断
 
 实现上不追求大而全的依赖注入框架，优先用一个简洁的历史 market context adapter 来集中提供“按日期截断”的 fetcher。
+
+补充约束：
+
+- `AgentBrain` 内部直接走 `engine.data.get_data_engine()` 的分析路径会被 adapter 截断
+- quant 技术指标分支在 backtest context 下改为进程内计算，避免 HTTP route 重新回到 `date.today()`
+- timeline / summary 读模型也必须走动态 data-engine 绑定，避免绕回 service 模块的旧引用
 
 ### 5.6 成交规则
 
@@ -306,6 +309,9 @@ MCP 仍保持薄包装：
 
 - backend engine 返回结构化 dict
 - MCP 负责输出 operator / agent 都易读的摘要
+
+day tool 的逐日证据不再依赖 `created_at` 时间窗猜测，而是通过 `backtest_days.brain_run_id`
+反查 `trades.source_run_id`，这样在历史回放日期与真实写入时间不一致时仍能稳定拿到证据。
 
 ---
 

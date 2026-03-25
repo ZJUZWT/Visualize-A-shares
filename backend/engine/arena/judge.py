@@ -194,7 +194,6 @@ class JudgeRAG:
             recalled_nodes = self._expert._graph.recall(recall_query)
 
             # 构建上下文
-            from engine.arena.personas import format_graph_context  # type: ignore
             graph_ctx = ""
             try:
                 from engine.expert.personas import format_graph_context as _fgc
@@ -224,7 +223,7 @@ class JudgeRAG:
                 "请按格式输出本轮评估 JSON。"
             )
 
-            llm = self._expert._llm
+            llm = self._expert._get_fast_llm() if hasattr(self._expert, "_get_fast_llm") else self._expert._llm
             if not llm:
                 return fallback
 

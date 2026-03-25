@@ -60,6 +60,28 @@ docker compose up
 
 → 后端 http://localhost:8000 　前端 http://localhost:3000
 
+### 生产部署骨架
+
+```bash
+cp .env.production.example .env.production
+# 按实际域名、CORS、LLM Key 修改 .env.production
+
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+```
+
+默认拓扑：
+
+- `frontend` 提供 Next.js 生产服务
+- `backend` 提供 FastAPI
+- `nginx` 统一反代 `/` 和 `/api`
+- 可选 `cloudflared` profile 接入 Cloudflare Tunnel
+
+如需启用 Tunnel：
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml --profile tunnel up -d
+```
+
 ### 手动部署
 
 <details>
@@ -163,7 +185,7 @@ StockScape/
 | 3D | React Three Fiber + drei + GLSL |
 | 状态 | Zustand |
 | 样式 | Tailwind CSS v4 |
-| 部署 | Docker Compose / 一键脚本 |
+| 部署 | Docker Compose / Nginx / Cloudflare Tunnel（可选） |
 
 ## 🔌 MCP Server
 

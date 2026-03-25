@@ -11,7 +11,9 @@ from typing import Optional
 import pandas as pd
 from loguru import logger
 
+from .asset_resolver import AssetResolver
 from .collector import DataCollector
+from .market_adapters.registry import MarketAdapterRegistry
 from .store import DuckDBStore
 from .precomputed import load_profiles
 
@@ -23,6 +25,8 @@ class DataEngine:
         self._collector = DataCollector()
         self._store = DuckDBStore()
         self._profiles = load_profiles()
+        self._resolver = AssetResolver(self.get_profiles)
+        self._market_registry = MarketAdapterRegistry(self)
 
     @property
     def store(self) -> DuckDBStore:
@@ -235,6 +239,35 @@ class DataEngine:
     def get_profile(self, code: str) -> dict | None:
         """获取单只股票概况"""
         return self._profiles.get(code)
+
+    def get_company_profile(self, code: str) -> dict | None:
+        """兼容 ExpertTools 的旧调用名称。"""
+        return self.get_profile(code)
+
+    # ── 多市场统一入口 ──
+
+    def resolve_asset(self, query: str, market_hint: str = ""):
+        return self._resolver.resolve(query, market_hint=market_hint)
+
+    def search_assets(self, query: str, market: str = "all", limit: int = 20) -> list[dict]:
+        if market == "all":
+            results: list[dict] = []
+            for adapter in self._market_registry.list_adapters():
+                try:
+                    results.extend(adapter.search(query, limit=limit))
+                except Exception as e:
+                    logger.warning(f"搜索市场 {adapter.market} 失败: {e}")
+            return results[:limit]
+        return self._market_registry.get(market).search(query, limit=limit)
+
+    def get_asset_profile(self, symbol: str, market: str) -> dict:
+        return self._market_registry.get(market).get_profile(symbol)
+
+    def get_asset_quote(self, symbol: str, market: str) -> dict:
+        return self._market_registry.get(market).get_quote(symbol)
+
+    def get_asset_daily_history(self, symbol: str, market: str, start: str, end: str) -> dict:
+        return self._market_registry.get(market).get_daily_history(symbol, start, end)
 
     # ── 元信息 ──
 

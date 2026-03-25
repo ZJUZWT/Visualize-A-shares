@@ -1,6 +1,6 @@
 # 📋 StockScape TODO — 专家系统演进计划
 
-> 最后更新: 2026-03-19
+> 最后更新: 2026-03-23
 >
 > 优先级：🔴 高 🟡 中 🟢 低
 
@@ -34,19 +34,19 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-- [ ] **左栏：Agent Chat** — 与 AI 讨论策略
+- [x] **左栏：Agent Chat** — 与 AI 讨论策略
   - 复用 ChatArea 组件但接入 Main Agent（非普通专家）
   - 对话中 AI 提出的操作策略自动解析为"策略卡片"
   - 策略卡片包含：标的、方向、进场价、止损位、止盈位、仓位比例
   - 用户可以一键"采纳"→ 写入虚拟持仓，或"否决"→ AI 记住被否决的原因
-- [ ] **中栏：Strategy Brain** — AI 大脑透明化
+- [x] **中栏：Strategy Brain** — AI 大脑透明化
   - **当前策略状态**：大盘观点（牛/熊/震荡）、仓位水平（轻/中/重）、行业偏好
   - **信念列表**：AI 当前持有的所有信念 + 置信度进度条（可点击看演化历史）
   - **决策日志 Timeline**：每一次买卖决策的完整思考链
     - 触发原因 → 数据依据 → 各专家意见 → 最终判断 → 执行结果
   - **自我反思记录**：AI 定期回顾后生成的反思文本
   - **策略演化图**：时间轴展示 AI 策略的变迁（从"进攻型"到"防御型"等）
-- [ ] **右栏：Virtual Portfolio** — 虚拟持仓管理
+- [x] **右栏：Virtual Portfolio** — 虚拟持仓管理
   - **持仓列表卡片**：每只股票一张卡片，按 holding_type 分组展示
     - 顶部标签：`📅长线` `📊中线` `⚡短线` `🔄做T`
     - 通用：代码/名称、成本、现价、盈亏%、仓位占比
@@ -337,11 +337,11 @@ class DecisionLog(BaseModel):
 
 **与现有系统的接驳方式**：
 
-- [ ] **查询接口** — Main Agent 的 DataHunger 新增 `query_industry_context(stock_code)`
+- [x] **查询接口** — Main Agent 的 DataHunger 新增 `query_industry_context(stock_code)`
   - 调用 `IndustryEngine.analyze(sector)` 获取行业分析
   - 调用 `chain_agent.build(subject)` 获取上下游关系（如果已有缓存则用缓存）
   - 返回结构化的产业链上下文，注入 Agent 的 think prompt
-- [ ] **产业周期判断 Prompt** — 在 Agent Wake Up 的深度分析阶段：
+- [x] **产业周期判断 Prompt** — 在 Agent Wake Up 的深度分析阶段：
   ```
   "你持有 [通威股份]，它处于 [光伏] 产业链的 [硅料] 环节。
    上游：工业硅、多晶硅
@@ -353,7 +353,7 @@ class DecisionLog(BaseModel):
    2. 你需要等待什么信号才能改变当前策略？
    3. 如果信号出现，你的具体操作计划是什么？"
   ```
-- [ ] **WatchSignal 表** — DuckDB `agent.watch_signals`
+- [x] **WatchSignal 表** — DuckDB `agent.watch_signals`
   ```sql
   CREATE TABLE agent.watch_signals (
       id VARCHAR PRIMARY KEY,
@@ -370,13 +370,13 @@ class DecisionLog(BaseModel):
       trigger_evidence TEXT                  -- 什么新闻/数据触发了这个信号
   );
   ```
-- [ ] **防学歪机制** — 产业链数据只用不存
+- [x] **防学歪机制** — 产业链数据只用不存
   - Agent 的 KnowledgeGraph 中**不存**产业链关系（upstream/downstream 等）
   - 每次需要时通过 IndustryEngine 实时查询
   - Agent 只在 StrategySnapshot 中记录"我对这个产业的判断"（观点），不记录"产业链长什么样"（事实）
   - 如果产业格局变了（比如某公司切入新赛道），下次查询自然会得到新结果
 
-- [ ] **RAG 增强 — 产业链认知回流到所有对话**
+- [x] **RAG 增强 — 产业链认知回流到所有对话**
 
   > 这是关键：不只是 Main Agent 受益，普通的 `/expert` 对话也会变聪明。
 
@@ -607,10 +607,10 @@ CREATE TABLE agent.info_digests (
 
 **对现有设计的影响**：
 
-- [ ] **DecisionLog 扩展** — 新增 `info_digests: list[str]` 字段，关联本次决策消化了哪些信息
-- [ ] **DataHunger Prompt 改造** — `execute_and_digest()` 的 prompt 中强制植入信息免疫框架（上述 6 问）
-- [ ] **复盘增加"信息复盘"** — 每日复盘时回顾：今天有没有被某条消息误导？被 Tier 3 信息影响了决策吗？
-- [ ] **Agent System Prompt** — 在 Main Agent 的人格 prompt 中写入核心信条：
+- [x] **DecisionLog 扩展** — 新增 `info_digests: list[str]` 字段，关联本次决策消化了哪些信息
+- [x] **DataHunger Prompt 改造** — `execute_and_digest()` 的 prompt 中强制植入信息免疫框架（上述 6 问）
+- [x] **复盘增加"信息复盘"** — 每日复盘时回顾：今天有没有被某条消息误导？被 Tier 3 信息影响了决策吗？
+- [x] **Agent System Prompt** — 在 Main Agent 的人格 prompt 中写入核心信条：
 
 ```
 你是一个经验丰富的投资经理。你信奉以下原则：
@@ -631,12 +631,12 @@ CREATE TABLE agent.info_digests (
 
 #### 1.2.6 历史数据训练 — 让 AI 从历史中学习
 
-- [ ] **Backtesting Mode** — 回测训练模式
+- [x] **Backtesting Mode** — 回测训练模式
   - 给 AI 一段历史行情（比如 2024 年全年），让它按照自己的策略模拟操作
   - 每个交易日：喂当天行情 → AI 决策 → 记录 → 下一天
   - 最后生成完整的回测报告（收益率、最大回撤、夏普比率）
   - AI 可以看到自己策略的缺陷并自我修正
-- [ ] **Replay Learning** — 重放学习
+- [x] **Replay Learning** — 重放学习
   - 选择一段已有的虚拟持仓历史
   - 让 AI 重新审视当时的决策："如果重来一次，你会怎么做不同？"
   - 对比新旧策略的模拟结果
@@ -953,19 +953,19 @@ Phase 1D（1 周）— 反思 + 训练 + 优化
 **现状**：`personas.py` 定义了 `THINK_SYSTEM_PROMPT`（投资顾问）和 `SHORT_TERM_THINK_PROMPT`（短线专家），
 但 reply 阶段的人格差异主要靠 system prompt 文本区分，身份认同不够强烈。
 
-- [ ] **投资顾问人格深化**
+- [x] **投资顾问人格深化**
   - 强调：长线思维、基本面为锚、安全边际、仓位管理
   - 话术：稳重、有分寸、不轻易推荐、推荐时给足安全边际
   - 禁忌：不追涨、不谈"明天涨停"、不做日内判断
-- [ ] **短线专家人格深化**
+- [x] **短线专家人格深化**
   - 强调：盘口语言、量价关系、龙头战法、资金博弈
   - 话术：果断、强调节奏和时机、敢于说"现在就进"或"别犹豫出"
   - 禁忌：不谈估值PE、不谈三年规划、不做基本面分析
-- [ ] **人格冲突设计** — 两个人格看同一只票可能意见相反
+- [x] **人格冲突设计** — 两个人格看同一只票可能意见相反
   - 投资顾问说"茅台 PE 40x 太贵了别买"
   - 短线专家说"茅台突破平台放量，短线可以进"
   - 这种冲突是设计目的，让用户获得多维视角
-- [ ] **Few-shot 人格校准** — 在 prompt 中加入 3-5 条标杆对话示例
+- [x] **Few-shot 人格校准** — 在 prompt 中加入 3-5 条标杆对话示例
   - 减少 LLM 对 system prompt 的"遗忘"问题
   - 每个人格准备 5 段典型对话作为 few-shot
 
@@ -979,33 +979,33 @@ Phase 1D（1 周）— 反思 + 训练 + 优化
 **现状**：`deep_think` 模式已支持多轮渐进工具调用（think → tools → think_with_results → more tools），
 但缺少"先跟用户确认"的环节。
 
-- [ ] **Clarification Phase** — 理解确认阶段
+- [x] **Clarification Phase** — 理解确认阶段
   - 用户输入后，Agent 先做一轮"理解性思考"
-  - 解读用户意图 → 列出不确定点 → 提 2-3 个确认问题
+  - 解读用户意图 → 输出理解摘要 + A/B/C/D 分析方向选项
   - 用户确认后才进入正式分析流程
-  - 可通过前端按钮开启/关闭
-- [ ] **Thinking Out Loud** — 思考过程可视化
+  - 支持 `跳过，直接分析`
+- [x] **Thinking Out Loud** — 思考过程可视化
   - Agent 的 think 阶段输出对用户可见（类似 o1 思考过程）
-  - 展示："我在想...这个问题涉及 XX 和 YY..."
-- [ ] **Self-Critique** — 自我质疑
+  - 展示 clarification 摘要、拆题 reasoning、工具调用和思考轮次
+- [x] **Self-Critique** — 自我质疑
   - 分析完成后，Agent 对结论做一轮自我质疑
   - 提升严谨性
 
 **实现路径**：
-1. 新增 SSE 事件 `clarification_request`
-2. 新增 API `POST /expert/clarify`
-3. 前端 ChatPanel 增加"确认卡片"组件
+1. 新增 API `POST /expert/clarify/{expert_type}`
+2. `chat` SSE 增加 `reasoning_summary` 与 `self_critique`
+3. 前端专家消息增加 clarification 确认卡片和选项状态机
 
 ---
 
 ## 四、🟢 服务器发布适配
 
-- [ ] Docker multi-stage build
-- [ ] `.env.production` 模板
-- [ ] Nginx 反向代理 + SSL
-- [ ] 数据卷持久化（DuckDB + ChromaDB + expert_kg.json）
-- [ ] 健康检查 + 自动重启
-- [ ] Cloudflare Tunnel（免公网 IP）
+- [x] Docker multi-stage build
+- [x] `.env.production` 模板
+- [x] Nginx 反向代理 + SSL
+- [x] 数据卷持久化（DuckDB + ChromaDB + expert_kg.json）
+- [x] 健康检查 + 自动重启
+- [x] Cloudflare Tunnel（免公网 IP）
 
 ---
 
@@ -1013,10 +1013,10 @@ Phase 1D（1 周）— 反思 + 训练 + 优化
 
 **现状**：完整 chat 流程约 30-160s。
 
-- [ ] **并行度提升** — quant 不依赖 data 时直接并行
-- [ ] **流式先行** — 数据专家结果到达立刻推送
-- [ ] **LLM 分层** — Think 用快模型，Reply 用大模型
-- [ ] **预取策略** — 用户输入含股票代码时提前拉数据
+- [x] **并行度提升** — quant 不依赖 data 时直接并行
+- [x] **流式先行** — 数据专家结果到达立刻推送
+- [x] **LLM 分层** — Think 用快模型，Reply 用大模型
+- [x] **预取策略** — 用户输入含股票代码时提前拉数据
 
 ---
 
@@ -1031,8 +1031,8 @@ Phase 1D（1 周）— 反思 + 训练 + 优化
 | 场外基金 | AKShare `fund_*` | 🟢 低 |
 | 期货 | AKShare `futures_*` | 🟡 中 |
 
-- [ ] **MarketAdapter 抽象层** — 统一接口
-- [ ] **跨市场联动分析** — 复用产业链引擎的跨链桥梁能力
+- [x] **MarketAdapter 抽象层** — 统一接口
+- [x] **跨市场联动分析** — 复用产业链引擎的跨链桥梁能力
 
 ---
 

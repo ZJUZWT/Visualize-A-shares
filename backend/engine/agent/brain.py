@@ -13,6 +13,7 @@ import json
 import time
 import traceback
 from datetime import date
+
 from loguru import logger
 
 from engine.agent.db import AgentDB
@@ -26,6 +27,7 @@ from engine.agent.decision_quality import (
 )
 from engine.agent.execution import ExecutionCoordinator
 from engine.agent.memory import MemoryManager
+from engine.runtime import ExecutionContext, QueryPrefetcher
 from engine.agent.service import AgentService
 from engine.agent.validator import TradeValidator
 
@@ -40,6 +42,25 @@ class AgentBrain:
         self.execution = ExecutionCoordinator(portfolio_id, self.service)
         self.memory = MemoryManager(self.db)
         self.data_hunger = DataHungerService(db=self.db, agent_service=self.service)
+        self._model_router = None
+
+    def _get_model_router(self):
+        if getattr(self, "_model_router", None) is None:
+            from llm import ModelRouter, llm_settings
+
+            self._model_router = ModelRouter.from_config(llm_settings)
+        return self._model_router
+
+    def _get_fast_llm(self):
+        return self._get_model_router().get("fast")
+
+    def _get_quality_llm(self):
+        return self._get_model_router().get("quality")
+
+    async def _prefetch_candidate_context(self, code: str, data_engine) -> ExecutionContext:
+        context = ExecutionContext(message=code, module="agent")
+        prefetcher = QueryPrefetcher(data_engine)
+        return await prefetcher.prefetch(code, context)
 
     async def execute(self, run_id: str):
         """执行一次完整的分析→决策→执行流程"""
@@ -328,17 +349,25 @@ class AgentBrain:
         from engine.expert.tools import ExpertTools
         from engine.data import get_data_engine
         from engine.cluster import get_cluster_engine
-        from llm import LLMProviderFactory, llm_settings
 
         de = get_data_engine()
         ce = get_cluster_engine()
-        llm = LLMProviderFactory.create(llm_settings)
+        llm = self._get_fast_llm()
         tools = ExpertTools(de, ce, llm)
 
         analysis = {}
+        prefetch_context = await self._prefetch_candidate_context(code, de)
 
         try:
-            analysis["daily"] = await tools.execute("data", "get_daily_history", {"code": code, "days": 30})
+            prefetched_history = prefetch_context.prefetch.history.get(code)
+            if prefetched_history:
+                analysis["daily"] = json.dumps(
+                    {"code": code, "history": prefetched_history, "total_days": len(prefetched_history)},
+                    ensure_ascii=False,
+                    default=str,
+                )
+            else:
+                analysis["daily"] = await tools.execute("data", "get_daily_history", {"code": code, "days": 30})
         except Exception as e:
             analysis["daily"] = f"获取失败: {e}"
 
@@ -355,10 +384,9 @@ class AgentBrain:
         self, analysis_results: list[dict], portfolio: dict, config: dict, run_id: str
     ) -> list[dict]:
         """LLM 综合决策"""
-        from llm import LLMProviderFactory, llm_settings
         from llm.providers import ChatMessage
 
-        llm = LLMProviderFactory.create(llm_settings)
+        llm = self._get_quality_llm()
         memory_rules = await self._get_active_rules()
         current_digests = getattr(self, "_current_digests", [])
         current_triggered_signals = getattr(self, "_current_triggered_signals", [])
@@ -392,6 +420,11 @@ class AgentBrain:
             min_confidence=float(config.get("min_decision_confidence", 0.65)),
         )
         decisions = gate_result.accepted
+        decision_trace = self._build_decision_trace(
+            digests=current_digests,
+            signal_hits=current_triggered_signals,
+            gate_result=gate_result,
+        )
 
         await self.service.update_brain_run(run_id, {
             "thinking_process": {
@@ -422,10 +455,47 @@ class AgentBrain:
                 "parsed_decisions": gate_result.accepted,
                 "digests": current_digests,
                 "triggered_signals": current_triggered_signals,
+                "decision_trace": decision_trace,
             },
         })
 
         return decisions
+
+    @staticmethod
+    def _build_decision_trace(
+        *,
+        digests: list[dict],
+        signal_hits: list[dict],
+        gate_result,
+    ) -> dict:
+        return {
+            "info_digests": [
+                {
+                    "digest_id": digest.get("id"),
+                    "stock_code": digest.get("stock_code"),
+                    "impact_assessment": digest.get("impact_assessment"),
+                    "evidence_tier": digest.get("evidence_tier"),
+                    "suggested_action": digest.get("suggested_action"),
+                    "decision_role": "context",
+                }
+                for digest in digests
+                if isinstance(digest, dict)
+            ],
+            "triggered_signals": [
+                {
+                    "signal_id": hit.get("signal_id"),
+                    "stock_code": hit.get("stock_code"),
+                    "matched_keywords": hit.get("matched_keywords") or [],
+                }
+                for hit in signal_hits
+                if isinstance(hit, dict)
+            ],
+            "gate_summary": {
+                "requires_wait": gate_result.requires_wait,
+                "accepted_count": len(gate_result.accepted),
+                "rejected_count": len(gate_result.rejected),
+            },
+        }
 
     async def _get_active_rules(self) -> list[dict]:
         memory_manager = getattr(self, "memory", None)

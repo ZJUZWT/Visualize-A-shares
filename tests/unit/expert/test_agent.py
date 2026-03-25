@@ -80,11 +80,14 @@ async def test_agent_chat_graph_recall_has_nodes(expert_agent):
 async def test_agent_chat_with_llm_calls_think(tmp_path):
     """测试有 LLM 时调用 think 步骤"""
     from engine.expert.agent import ExpertAgent
-    from engine.expert.schemas import ThinkOutput
 
-    mock_llm = AsyncMock()
+    mock_llm = Mock()
     mock_llm.chat = AsyncMock(return_value='{"needs_data": false, "tool_calls": [], "reasoning": "直接回答"}')
-    mock_llm.chat_stream = AsyncMock(return_value=_async_gen(["回复内容"]))
+
+    async def fake_chat_stream(messages):
+        yield "回复内容"
+
+    mock_llm.chat_stream = fake_chat_stream
 
     mock_tools = Mock()
     mock_tools.llm_engine = mock_llm
@@ -101,6 +104,64 @@ async def test_agent_chat_with_llm_calls_think(tmp_path):
     assert "reply_complete" in event_types
 
 
+@pytest.mark.asyncio
+async def test_agent_chat_emits_reasoning_summary_when_think_has_reasoning(expert_agent):
+    from engine.expert.schemas import ThinkOutput
+
+    expert_agent.recall_and_think = AsyncMock(return_value=(
+        [],
+        [],
+        ThinkOutput(needs_data=False, reasoning="先确认行业周期，再评估安全边际"),
+    ))
+
+    events = []
+    async for event in expert_agent.chat("测试问题"):
+        events.append(event)
+
+    reasoning_events = [e for e in events if e["event"] == "reasoning_summary"]
+    assert len(reasoning_events) == 1
+    assert reasoning_events[0]["data"]["summary"] == "先确认行业周期，再评估安全边际"
+
+
+@pytest.mark.asyncio
+async def test_agent_chat_emits_self_critique_before_reply_complete(tmp_path):
+    from engine.expert.agent import ExpertAgent
+    from engine.expert.schemas import ThinkOutput
+
+    mock_tools = Mock()
+    mock_tools.llm_engine = object()
+    mock_tools.execute = AsyncMock(return_value="tool result")
+    agent = ExpertAgent(mock_tools, kg_path=str(tmp_path / "kg.json"))
+
+    agent.recall_and_think = AsyncMock(return_value=(
+        [],
+        [],
+        ThinkOutput(needs_data=False, reasoning="先看赔率"),
+    ))
+    agent.generate_reply_stream = _reply_stream_gen
+    agent.belief_update = AsyncMock(return_value=[])
+    agent._self_critique = AsyncMock(return_value={
+        "summary": "证据基本够用，但仍需提防板块退潮。",
+        "risks": ["情绪退潮"],
+        "missing_data": [],
+        "counterpoints": ["量能确认还不够"],
+        "confidence_note": "偏谨慎",
+    })
+
+    events = []
+    async for event in agent.chat("测试问题"):
+        events.append(event)
+
+    event_types = [e["event"] for e in events]
+    assert "self_critique" in event_types
+    assert event_types.index("self_critique") < event_types.index("reply_complete")
+
+
 async def _async_gen(items):
     for item in items:
         yield item
+
+
+async def _reply_stream_gen(*args, **kwargs):
+    yield "最终", "最终"
+    yield "回复", "最终回复"

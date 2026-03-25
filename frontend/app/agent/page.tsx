@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { API_BASE } from "@/lib/api-base";
 import type { TradePlanData } from "@/lib/parseTradePlan";
 import NavSidebar from "@/components/ui/NavSidebar";
 import AgentChatPanel from "./components/AgentChatPanel";
+import AgentPetStage from "./components/AgentPetStage";
 import AgentStatePanel from "./components/AgentStatePanel";
+import AgentTrainingPanel from "./components/AgentTrainingPanel";
 import DecisionRunPanel from "./components/DecisionRunPanel";
 import ExecutionLedgerPanel from "./components/ExecutionLedgerPanel";
 import WatchSignalsPanel from "./components/WatchSignalsPanel";
@@ -15,6 +18,7 @@ import ReflectionFeedPanel from "./components/ReflectionFeedPanel";
 import StrategyHistoryPanel from "./components/StrategyHistoryPanel";
 import StrategyMemoPanel from "./components/StrategyMemoPanel";
 import StrategyBrainPanel from "./components/StrategyBrainPanel";
+import CreatePortfolioDialog from "./components/CreatePortfolioDialog";
 import {
   buildWatchSignalPayload,
   filterInfoDigestsForRun,
@@ -28,25 +32,44 @@ import {
   normalizeReplaySnapshot,
   pickDefaultReplayDate,
 } from "./lib/rightRailTimelineViewModel";
+import { normalizeReplayLearning } from "./lib/replayLearningViewModel";
+import {
+  normalizeBacktestDays,
+  normalizeBacktestSummary,
+} from "./lib/backtestArtifacts";
+import { buildPetWorkspaceLayout } from "./lib/petWorkspaceLayout";
+import {
+  buildCreatePortfolioPayload,
+  normalizePortfolioSummaries,
+  pickActivePortfolioId,
+  type CreatePortfolioDraft,
+  type PortfolioSummary,
+} from "./lib/portfolioWorkspace";
+import { normalizeWatchlist } from "./lib/watchlist";
 import {
   buildMemoRequestConfig,
   buildStrategyExecutionRequestConfig,
   mapExecutionRecord,
 } from "./lib/strategyActionViewModel";
+import { buildPetConsoleViewModel } from "./lib/petConsoleViewModel";
 import { buildStrategyBrainViewModel } from "./lib/strategyBrainViewModel";
 import {
+  AgentBacktestDay,
+  AgentBacktestSummary,
   AgentEquityTimeline,
   AgentLeftPanelTab,
+  AgentReplayLearning,
   AgentReplaySnapshot,
   AgentChatEntry,
   AgentChatSession,
-  AgentConsoleTab,
+  AgentPageTab,
   AgentState,
   AgentStrategyExecutionRecord,
   AgentStrategyExecutionRequest,
   AgentStrategyExecutionState,
   AgentStrategyMemoSaveRequest,
   AgentStrategyMemoState,
+  AgentVerificationSuiteResult,
   BrainRun,
   LedgerOverview,
   MemoryRule,
@@ -65,8 +88,6 @@ import {
   buildAgentStrategyKey,
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
 let chatEntryCounter = 0;
 
 const EMPTY_WATCH_SIGNAL_FORM: WatchSignalFormState = {
@@ -76,6 +97,12 @@ const EMPTY_WATCH_SIGNAL_FORM: WatchSignalFormState = {
   keywords: "",
   if_triggered: "",
   cycle_context: "",
+};
+
+const DEFAULT_CREATE_PORTFOLIO_DRAFT: CreatePortfolioDraft = {
+  id: "",
+  mode: "paper",
+  initialCapital: "1000000",
 };
 
 function nextChatEntryId() {
@@ -642,6 +669,30 @@ function normalizeStrategyExecutionActions(raw: unknown): AgentStrategyExecution
     .filter((value): value is AgentStrategyExecutionRecord => value !== null);
 }
 
+function normalizeVerificationSuiteResult(raw: unknown): AgentVerificationSuiteResult | null {
+  if (!isRecord(raw)) {
+    return null;
+  }
+  return {
+    mode: raw.mode === "smoke" ? "smoke" : "default",
+    overall_status:
+      raw.overall_status === "fail"
+        ? "fail"
+        : raw.overall_status === "warn"
+          ? "warn"
+          : "pass",
+    scenario_id: typeof raw.scenario_id === "string" ? raw.scenario_id : null,
+    portfolio_id: typeof raw.portfolio_id === "string" ? raw.portfolio_id : null,
+    seed_summary: isRecord(raw.seed_summary) ? raw.seed_summary : {},
+    demo_verification: isRecord(raw.demo_verification) ? raw.demo_verification : {},
+    backtest: isRecord(raw.backtest) ? raw.backtest : {},
+    evidence: isRecord(raw.evidence) ? raw.evidence : {},
+    next_actions: Array.isArray(raw.next_actions)
+      ? raw.next_actions.filter((item): item is string => typeof item === "string")
+      : [],
+  };
+}
+
 function mapMemoToState(memo: StrategyMemoEntry): AgentStrategyMemoState | null {
   if (memo.status !== "saved") {
     return null;
@@ -692,6 +743,7 @@ export default function AgentPage() {
   const [ledgerOverview, setLedgerOverview] = useState<LedgerOverview | null>(null);
   const [equityTimeline, setEquityTimeline] = useState<AgentEquityTimeline | null>(null);
   const [replaySnapshot, setReplaySnapshot] = useState<AgentReplaySnapshot | null>(null);
+  const [replayLearning, setReplayLearning] = useState<AgentReplayLearning | null>(null);
   const [replayDate, setReplayDate] = useState("");
   const [reviewRecords, setReviewRecords] = useState<ReviewRecord[]>([]);
   const [reviewStats, setReviewStats] = useState<ReviewStats | null>(null);
@@ -723,6 +775,7 @@ export default function AgentPage() {
   const [memoInboxLoading, setMemoInboxLoading] = useState(false);
   const [memoInboxError, setMemoInboxError] = useState<string | null>(null);
   const [memoMutatingId, setMemoMutatingId] = useState<string | null>(null);
+  const [pageTab, setPageTab] = useState<AgentPageTab>("pet");
   const [leftPanelTab, setLeftPanelTab] = useState<AgentLeftPanelTab>("console");
   const [loading, setLoading] = useState(true);
   const [wakeLoading, setWakeLoading] = useState(false);
@@ -730,11 +783,22 @@ export default function AgentPage() {
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [reflectionLoading, setReflectionLoading] = useState(false);
   const [running, setRunning] = useState(false);
+  const [suiteRunningMode, setSuiteRunningMode] = useState<"default" | "smoke" | null>(null);
+  const [suiteResult, setSuiteResult] = useState<AgentVerificationSuiteResult | null>(null);
+  const [suiteError, setSuiteError] = useState<string | null>(null);
+  const [portfolios, setPortfolios] = useState<PortfolioSummary[]>([]);
   const [portfolioId, setPortfolioId] = useState<string | null>(null);
+  const [portfolioDialogOpen, setPortfolioDialogOpen] = useState(false);
+  const [portfolioDraft, setPortfolioDraft] = useState<CreatePortfolioDraft>(
+    DEFAULT_CREATE_PORTFOLIO_DRAFT
+  );
+  const [portfolioCreateSubmitting, setPortfolioCreateSubmitting] = useState(false);
+  const [portfolioCreateError, setPortfolioCreateError] = useState<string | null>(null);
   const [stateError, setStateError] = useState<string | null>(null);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
   const [timelineError, setTimelineError] = useState<string | null>(null);
   const [replayError, setReplayError] = useState<string | null>(null);
+  const [replayLearningError, setReplayLearningError] = useState<string | null>(null);
   const [watchSignalsError, setWatchSignalsError] = useState<string | null>(null);
   const [infoDigestsError, setInfoDigestsError] = useState<string | null>(null);
   const [wakeMutationError, setWakeMutationError] = useState<string | null>(null);
@@ -747,7 +811,7 @@ export default function AgentPage() {
   >(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [replayLoading, setReplayLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<AgentConsoleTab>("runs");
+  const [replayLearningLoading, setReplayLearningLoading] = useState(false);
   const [wakeDigestMode, setWakeDigestMode] = useState<WakeDigestMode>("selected_run");
   const [reviewType, setReviewType] = useState<"all" | "daily" | "weekly">("all");
   const [memoryStatus, setMemoryStatus] = useState<"all" | "active" | "retired">("all");
@@ -758,17 +822,36 @@ export default function AgentPage() {
   const [watchSignalUpdatingId, setWatchSignalUpdatingId] = useState<string | null>(null);
   const [newCode, setNewCode] = useState("");
   const [newName, setNewName] = useState("");
+  const [backtestStartDate, setBacktestStartDate] = useState("2026-03-18");
+  const [backtestEndDate, setBacktestEndDate] = useState("2026-03-20");
+  const [backtestRunning, setBacktestRunning] = useState(false);
+  const [backtestError, setBacktestError] = useState<string | null>(null);
+  const [backtestSummary, setBacktestSummary] = useState<AgentBacktestSummary | null>(null);
+  const [backtestDays, setBacktestDays] = useState<AgentBacktestDay[]>([]);
+  const chatEntriesRef = useRef<AgentChatEntry[]>([]);
+
+  const fetchPortfolios = useCallback(async (preferredPortfolioId?: string | null) => {
+    const raw = await fetchJson<unknown>(`${API_BASE}/api/v1/agent/portfolio`);
+    const nextPortfolios = normalizePortfolioSummaries(raw);
+    setPortfolios(nextPortfolios);
+    setPortfolioId((current) => pickActivePortfolioId(nextPortfolios, current, preferredPortfolioId ?? null));
+    if (nextPortfolios.length === 0) {
+      setLoading(false);
+    }
+    return nextPortfolios;
+  }, []);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/v1/agent/portfolio`)
-      .then((resp) => resp.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0 && typeof data[0]?.id === "string") {
-          setPortfolioId(data[0].id);
-        }
-      })
-      .catch(() => {});
-  }, []);
+    fetchPortfolios().catch(() => {
+      setPortfolios([]);
+      setPortfolioId(null);
+      setLoading(false);
+    });
+  }, [fetchPortfolios]);
+
+  useEffect(() => {
+    chatEntriesRef.current = chatEntries;
+  }, [chatEntries]);
 
   const fetchRuns = useCallback(async () => {
     if (!portfolioId) {
@@ -894,6 +977,28 @@ export default function AgentPage() {
     }
   }, [portfolioId, replayDate]);
 
+  const fetchReplayLearning = useCallback(async () => {
+    if (!portfolioId || !replayDate) {
+      return null;
+    }
+    setReplayLearningLoading(true);
+    try {
+      const raw = await fetchJson<unknown>(
+        `${API_BASE}/api/v1/agent/timeline/replay-learning?portfolio_id=${portfolioId}&date=${replayDate}`
+      );
+      const normalized = normalizeReplayLearning(portfolioId, raw);
+      setReplayLearning(normalized);
+      setReplayLearningError(null);
+      return normalized;
+    } catch {
+      setReplayLearning(null);
+      setReplayLearningError("replay learning 接口暂不可用，`/api/v1/agent/timeline/replay-learning` 读取失败。");
+      return null;
+    } finally {
+      setReplayLearningLoading(false);
+    }
+  }, [portfolioId, replayDate]);
+
   const refreshConsole = useCallback(async () => {
     if (!portfolioId) {
       return;
@@ -917,6 +1022,52 @@ export default function AgentPage() {
     }
     setLoading(false);
   }, [fetchAgentState, fetchEquityTimeline, fetchLedgerOverview, fetchRuns, portfolioId]);
+
+  const openCreatePortfolioDialog = useCallback(() => {
+    setPortfolioCreateError(null);
+    setPortfolioDraft(DEFAULT_CREATE_PORTFOLIO_DRAFT);
+    setPortfolioDialogOpen(true);
+  }, []);
+
+  const closeCreatePortfolioDialog = useCallback(() => {
+    if (portfolioCreateSubmitting) {
+      return;
+    }
+    setPortfolioDialogOpen(false);
+    setPortfolioCreateError(null);
+    setPortfolioDraft(DEFAULT_CREATE_PORTFOLIO_DRAFT);
+  }, [portfolioCreateSubmitting]);
+
+  const handleCreatePortfolio = useCallback(async () => {
+    const payloadResult = buildCreatePortfolioPayload(portfolioDraft);
+    if (!payloadResult.ok) {
+      setPortfolioCreateError(payloadResult.error);
+      return;
+    }
+
+    setPortfolioCreateSubmitting(true);
+    setPortfolioCreateError(null);
+    try {
+      const resp = await fetch(`${API_BASE}/api/v1/agent/portfolio`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payloadResult.value),
+      });
+      if (!resp.ok) {
+        throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+      }
+      const raw = await resp.json();
+      const createdPortfolioId =
+        isRecord(raw) && typeof raw.id === "string" ? raw.id : payloadResult.value.id;
+      await fetchPortfolios(createdPortfolioId);
+      setPortfolioDialogOpen(false);
+      setPortfolioDraft(DEFAULT_CREATE_PORTFOLIO_DRAFT);
+    } catch (error) {
+      setPortfolioCreateError(error instanceof Error ? error.message : "创建虚拟账户失败");
+    } finally {
+      setPortfolioCreateSubmitting(false);
+    }
+  }, [fetchPortfolios, portfolioDraft]);
 
   const fetchReviewData = useCallback(async () => {
     if (!portfolioId) {
@@ -1068,6 +1219,7 @@ export default function AgentPage() {
   const fetchSessionMessages = useCallback(
     async (sessionId: string) => {
       if (!portfolioId) {
+        chatEntriesRef.current = [];
         setChatEntries([]);
         return [];
       }
@@ -1077,10 +1229,12 @@ export default function AgentPage() {
           `${API_BASE}/api/v1/agent/chat/sessions/${sessionId}/messages?portfolio_id=${portfolioId}`
         );
         const messages = normalizeAgentChatMessages(sessionId, raw);
+        chatEntriesRef.current = messages;
         setChatEntries(messages);
         setChatError(null);
         return messages;
       } catch {
+        chatEntriesRef.current = [];
         setChatEntries([]);
         setChatError(
           "Agent chat 消息读取失败，`/api/v1/agent/chat/sessions/{session_id}/messages` 尚未就绪。"
@@ -1119,7 +1273,10 @@ export default function AgentPage() {
     }
   }, []);
 
-  const fetchMemoStates = useCallback(async (sessionId: string | null) => {
+  const fetchMemoStates = useCallback(async (
+    sessionId: string | null,
+    sessionEntries?: AgentChatEntry[],
+  ) => {
     if (!portfolioId) {
       setMemoStates({});
       setMemoStatesError(null);
@@ -1141,8 +1298,9 @@ export default function AgentPage() {
         return {};
       }
 
+      const entries = sessionEntries ?? chatEntriesRef.current;
       const currentSessionMessageIds = new Set(
-        chatEntries
+        entries
           .filter((entry) => entry.session_id === sessionId)
           .map((entry) => entry.id)
       );
@@ -1173,7 +1331,7 @@ export default function AgentPage() {
     } finally {
       setMemoInboxLoading(false);
     }
-  }, [chatEntries, portfolioId]);
+  }, [portfolioId]);
 
   const createSession = useCallback(
     async (seedTitle?: string) => {
@@ -1199,6 +1357,7 @@ export default function AgentPage() {
         }
         setChatSessions((current) => [session, ...current.filter((item) => item.id !== session.id)]);
         setActiveSessionId(session.id);
+        chatEntriesRef.current = [];
         setChatEntries([]);
         setExecutionActions({});
         setMemoStates({});
@@ -1219,32 +1378,21 @@ export default function AgentPage() {
   useEffect(() => {
     if (portfolioId && replayDate) {
       fetchReplaySnapshot();
+      fetchReplayLearning();
     }
-  }, [fetchReplaySnapshot, portfolioId, replayDate]);
+  }, [fetchReplayLearning, fetchReplaySnapshot, portfolioId, replayDate]);
 
   useEffect(() => {
-    if (activeTab === "wake" && portfolioId) {
+    if (portfolioId) {
       fetchWakeData();
     }
-  }, [activeTab, fetchWakeData, portfolioId]);
+  }, [fetchWakeData, portfolioId]);
 
   useEffect(() => {
-    if (activeTab === "reviews" && portfolioId) {
+    if (portfolioId) {
       fetchReviewData();
     }
-  }, [activeTab, fetchReviewData, portfolioId]);
-
-  useEffect(() => {
-    if (activeTab === "memory") {
-      fetchMemoryData();
-    }
-  }, [activeTab, fetchMemoryData]);
-
-  useEffect(() => {
-    if (activeTab === "reflection" && portfolioId) {
-      fetchReflectionData();
-    }
-  }, [activeTab, fetchReflectionData, portfolioId]);
+  }, [fetchReviewData, portfolioId]);
 
   useEffect(() => {
     if (portfolioId) {
@@ -1254,29 +1402,58 @@ export default function AgentPage() {
   }, [fetchMemoryData, fetchReflectionData, portfolioId]);
 
   useEffect(() => {
+    if (equityTimeline?.start_date && equityTimeline?.end_date) {
+      setBacktestStartDate((current) => current || equityTimeline.start_date || "2026-03-18");
+      setBacktestEndDate((current) => current || equityTimeline.end_date || "2026-03-20");
+    }
+  }, [equityTimeline]);
+
+  useEffect(() => {
     if (portfolioId) {
       fetchChatSessions();
     }
   }, [fetchChatSessions, portfolioId]);
 
   useEffect(() => {
-    if (!activeSessionId) {
-      setChatEntries([]);
-      setExecutionActions({});
-      setMemoStates({});
-      fetchExecutionActions(null);
-      fetchMemoStates(null);
-      return;
-    }
-    fetchSessionMessages(activeSessionId);
-    fetchExecutionActions(activeSessionId);
-    fetchMemoStates(activeSessionId);
+    let cancelled = false;
+
+    const syncSessionPanels = async () => {
+      if (!activeSessionId) {
+        chatEntriesRef.current = [];
+        setChatEntries((current) => (current.length === 0 ? current : []));
+        await fetchExecutionActions(null);
+        await fetchMemoStates(null, []);
+        return;
+      }
+
+      const messages = await fetchSessionMessages(activeSessionId);
+      if (cancelled) {
+        return;
+      }
+
+      await Promise.all([
+        fetchExecutionActions(activeSessionId),
+        fetchMemoStates(activeSessionId, messages),
+      ]);
+    };
+
+    void syncSessionPanels();
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeSessionId, fetchExecutionActions, fetchMemoStates, fetchSessionMessages]);
 
   const fetchWatchlist = useCallback(async () => {
-    const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist`);
-    if (resp.ok) {
-      setWatchlist(await resp.json());
+    try {
+      const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist`);
+      if (!resp.ok) {
+        setWatchlist([]);
+        return;
+      }
+      setWatchlist(normalizeWatchlist(await resp.json()));
+    } catch {
+      setWatchlist([]);
     }
   }, []);
 
@@ -1400,6 +1577,110 @@ export default function AgentPage() {
     }
   };
 
+  const fetchBacktestArtifacts = useCallback(async (runId: string) => {
+    const [summaryRaw, daysRaw] = await Promise.all([
+      fetchJson<unknown>(`${API_BASE}/api/v1/agent/backtest/run/${runId}`),
+      fetchJson<unknown>(`${API_BASE}/api/v1/agent/backtest/run/${runId}/days`),
+    ]);
+    setBacktestSummary(normalizeBacktestSummary(summaryRaw));
+    setBacktestDays(normalizeBacktestDays(daysRaw));
+  }, []);
+
+  const handleRunTrainingSuite = useCallback(
+    async (mode: "default" | "smoke") => {
+      setSuiteRunningMode(mode);
+      setSuiteError(null);
+      try {
+        const resp = await fetch(`${API_BASE}/api/v1/agent/verification-suite/run`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            scenario_id: "demo-evolution",
+            smoke_mode: mode === "smoke",
+          }),
+        });
+        if (!resp.ok) {
+          throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+        }
+        const raw = await resp.json();
+        const normalized = normalizeVerificationSuiteResult(raw);
+        if (!normalized) {
+          throw new Error("训练结果解析失败");
+        }
+        setSuiteResult(normalized);
+        const suiteBacktest = isRecord(normalized.backtest)
+          ? normalizeBacktestSummary({
+              ...normalized.backtest,
+              ...(isRecord(normalized.backtest.summary) ? normalized.backtest.summary : {}),
+              run_id:
+                typeof normalized.backtest.run_id === "string"
+                  ? normalized.backtest.run_id
+                  : typeof normalized.evidence.backtest_run_id === "string"
+                    ? normalized.evidence.backtest_run_id
+                    : undefined,
+            })
+          : null;
+        if (suiteBacktest) {
+          setBacktestSummary(suiteBacktest);
+          await fetchBacktestArtifacts(suiteBacktest.run_id);
+        }
+        await Promise.all([
+          refreshConsole(),
+          fetchReviewData(),
+          fetchMemoryData(),
+          fetchReflectionData(),
+          fetchWakeData(),
+        ]);
+      } catch (error) {
+        setSuiteError(error instanceof Error ? error.message : "训练闭环运行失败");
+      } finally {
+        setSuiteRunningMode(null);
+      }
+    },
+    [
+      fetchBacktestArtifacts,
+      fetchMemoryData,
+      fetchReflectionData,
+      fetchReviewData,
+      fetchWakeData,
+      refreshConsole,
+    ]
+  );
+
+  const handleRunBacktest = useCallback(async () => {
+    if (!portfolioId || backtestRunning) {
+      return;
+    }
+    setBacktestRunning(true);
+    setBacktestError(null);
+    try {
+      const resp = await fetch(`${API_BASE}/api/v1/agent/backtest/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          portfolio_id: portfolioId,
+          start_date: backtestStartDate,
+          end_date: backtestEndDate,
+          execution_price_mode: "next_open",
+        }),
+      });
+      if (!resp.ok) {
+        throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
+      }
+      const raw = await resp.json();
+      const runId = isRecord(raw) && typeof raw.run_id === "string" ? raw.run_id : null;
+      if (!runId) {
+        throw new Error("回测响应缺少 run_id");
+      }
+      await fetchBacktestArtifacts(runId);
+      setPageTab("backtest");
+    } catch (error) {
+      setBacktestError(error instanceof Error ? error.message : "回测启动失败");
+    } finally {
+      setBacktestRunning(false);
+    }
+  }, [backtestEndDate, backtestRunning, backtestStartDate, fetchBacktestArtifacts, portfolioId]);
+
   const handleCreateSession = useCallback(async () => {
     await createSession();
   }, [createSession]);
@@ -1520,11 +1801,11 @@ export default function AgentPage() {
                   : entry
               )
             );
+            const messages = await fetchSessionMessages(sessionId);
             await Promise.all([
               fetchChatSessions(sessionId),
-              fetchSessionMessages(sessionId),
               fetchExecutionActions(sessionId),
-              fetchMemoStates(sessionId),
+              fetchMemoStates(sessionId, messages),
             ]);
             setChatStreaming(false);
             return;
@@ -1534,11 +1815,11 @@ export default function AgentPage() {
         }
       }
 
+      const messages = await fetchSessionMessages(sessionId);
       await Promise.all([
         fetchChatSessions(sessionId),
-        fetchSessionMessages(sessionId),
         fetchExecutionActions(sessionId),
-        fetchMemoStates(sessionId),
+        fetchMemoStates(sessionId, messages),
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "发送消息失败";
@@ -1832,153 +2113,506 @@ export default function AgentPage() {
     strategyHistory,
     activeRun,
   });
+  const strategySummary = [
+    `市场 ${strategyBrain.snapshot.marketViewLabel}`,
+    `仓位 ${strategyBrain.snapshot.positionLevelLabel}`,
+    `风险 ${strategyBrain.snapshot.riskAlertCount} 项`,
+  ].join(" · ");
+  const petConsole = buildPetConsoleViewModel({
+    activeRun,
+    ledgerOverview,
+    agentState,
+    strategySummary,
+    suiteResult,
+  });
   const chatNotices = [sessionError, chatError, executionActionsError, memoStatesError].filter(
     (value): value is string => Boolean(value)
   );
+  const petWorkspaceLayout = buildPetWorkspaceLayout();
 
   return (
-    <div className="flex h-screen bg-[#0a0a0f] text-white">
+    <div className="flex h-screen bg-[#f3eadb] text-slate-950">
       <NavSidebar />
-      <div className="ml-12 flex flex-1 flex-col">
-        <div className="flex items-center justify-between border-b border-white/10 p-4">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold">🤖 Agent Brain</h1>
-            {activeRun && (
-              <span className={`rounded px-2 py-0.5 text-xs ${statusColor[activeRun.status] || ""}`}>
-                {activeRun.status === "running" ? "运行中..." : activeRun.status}
-              </span>
-            )}
-          </div>
-          <button
-            onClick={handleRun}
-            disabled={running || !portfolioId}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              running
-                ? "cursor-wait bg-blue-500/20 text-blue-400"
-                : "bg-white/10 text-white hover:bg-white/20"
-            }`}
-          >
-            {running ? "运行中..." : "▶ 手动运行"}
-          </button>
-        </div>
+      <div className="ml-12 flex flex-1 flex-col overflow-hidden">
+        <div className="border-b border-black/10 bg-[#fffaf1]/90 px-5 py-4 backdrop-blur">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Main Agent Console</div>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                电子宠物培养台
+              </h1>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                在这里对话、训练、派它去模拟盘打仗，也把它丢进历史里考试。
+              </p>
+            </div>
 
-        <div className="flex flex-1 flex-col overflow-hidden xl:flex-row">
-          <div className="min-h-0 border-b border-white/10 xl:w-[430px] xl:min-w-[430px] xl:border-b-0 xl:border-r">
-            <div className="flex h-full min-h-0 flex-col bg-[#090a10]">
-              <div className="border-b border-white/10 px-4 py-3">
-                <div className="inline-flex w-full rounded-xl border border-white/10 bg-white/5 p-1 text-sm">
-                  <button
-                    type="button"
-                    onClick={() => setLeftPanelTab("console")}
-                    className={`flex-1 rounded-lg px-3 py-2 transition-colors ${
-                      leftPanelTab === "console"
-                        ? "bg-white/15 text-white"
-                        : "text-gray-400 hover:bg-white/10 hover:text-white"
-                    }`}
+            <div className="flex flex-wrap items-center gap-3">
+              {portfolioId && (
+                <div className="flex items-center gap-2 rounded-2xl border border-black/10 bg-white/80 px-3 py-2">
+                  <span className="text-[11px] uppercase tracking-[0.22em] text-slate-400">账户</span>
+                  <select
+                    value={portfolioId}
+                    onChange={(event) => setPortfolioId(event.target.value)}
+                    className="bg-transparent text-sm font-medium text-slate-900 outline-none"
+                    aria-label="切换虚拟账户"
                   >
-                    Main Agent Console
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLeftPanelTab("memo_inbox")}
-                    className={`flex-1 rounded-lg px-3 py-2 transition-colors ${
-                      leftPanelTab === "memo_inbox"
-                        ? "bg-white/15 text-white"
-                        : "text-gray-400 hover:bg-white/10 hover:text-white"
-                    }`}
-                  >
-                    Strategy Memo Inbox
-                  </button>
+                    {portfolios.map((portfolio) => (
+                      <option key={portfolio.id} value={portfolio.id}>
+                        {portfolio.id} · {portfolio.mode}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              </div>
-
-              <div className="flex-1 min-h-0">
-                {leftPanelTab === "console" ? (
-                  <AgentChatPanel
-                    portfolioReady={Boolean(portfolioId)}
-                    sessions={chatSessions}
-                    activeSessionId={activeSessionId}
-                    sessionsLoading={chatSessionsLoading}
-                    messagesLoading={chatMessagesLoading}
-                    messages={chatEntries}
-                    notices={chatNotices}
-                    isStreaming={chatStreaming}
-                    draft={chatDraft}
-                    onDraftChange={setChatDraft}
-                    onSend={handleSendChat}
-                    onCreateSession={handleCreateSession}
-                    onSelectSession={setActiveSessionId}
-                    runs={runs}
-                    selectedRunId={activeRun?.id || null}
-                    onSelectRun={setSelectedRun}
-                    statusColor={statusColor}
-                    watchlist={watchlist}
-                    newCode={newCode}
-                    newName={newName}
-                    onNewCodeChange={setNewCode}
-                    onNewNameChange={setNewName}
-                    onAddWatch={handleAddWatch}
-                    onRemoveWatch={handleRemoveWatch}
-                    executionActions={executionActions}
-                    memoStates={memoStates}
-                    onExecutionAction={handleExecutionAction}
-                    onSaveMemo={handleSaveMemo}
-                  />
-                ) : (
-                  <StrategyMemoPanel
-                    loading={memoInboxLoading}
-                    error={memoInboxError}
-                    items={memoInboxItems}
-                    mutatingId={memoMutatingId}
-                    onArchive={handleArchiveMemo}
-                    onDelete={handleDeleteMemo}
-                  />
-                )}
-              </div>
+              )}
+              {activeRun && (
+                <span className={`rounded-full px-3 py-1 text-xs ${statusColor[activeRun.status] || ""}`}>
+                  {activeRun.status === "running" ? "运行中..." : activeRun.status}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={openCreatePortfolioDialog}
+                className="rounded-2xl border border-black/10 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 transition hover:bg-slate-50"
+              >
+                {portfolioId ? "新建账户" : "创建虚拟账户"}
+              </button>
+              <button
+                onClick={handleRun}
+                disabled={running || !portfolioId}
+                className={`rounded-2xl px-4 py-2.5 text-sm font-medium transition-colors ${
+                  running
+                    ? "cursor-wait bg-blue-500/15 text-blue-700"
+                    : "bg-slate-950 text-white hover:bg-slate-800"
+                }`}
+              >
+                {running ? "运行中..." : "手动运行主脑"}
+              </button>
+              <button
+                onClick={() => handleRunTrainingSuite("smoke")}
+                disabled={suiteRunningMode !== null}
+                className="rounded-2xl border border-black/10 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+              >
+                {suiteRunningMode === "smoke" ? "Smoke 中..." : "Quick Smoke"}
+              </button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-hidden">
-            {!portfolioId ? (
-              <div className="w-full py-20 text-center text-gray-500">请先创建虚拟账户</div>
-            ) : (
-              <div className="grid h-full grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
-                <div className="overflow-y-auto border-r border-white/10 p-6">
-                  <StrategyBrainPanel
-                    viewModel={strategyBrain}
-                    loading={loading}
-                    stateError={stateError}
-                    memoryLoading={memoryLoading}
-                    memoryError={memoryError}
-                    reflectionLoading={reflectionLoading}
-                    reflectionError={reflectionError}
-                    strategyHistoryError={strategyHistoryError}
-                  />
-                </div>
-
-                <div className="overflow-y-auto p-6">
-                  <ExecutionLedgerPanel
-                    overview={ledgerOverview}
-                    loading={loading}
-                    error={ledgerError}
-                    source={ledgerSource}
-                    timeline={equityTimeline}
-                    timelineLoading={timelineLoading}
-                    timelineError={timelineError}
-                    replay={replaySnapshot}
-                    replayLoading={replayLoading}
-                    replayError={replayError}
-                    replayDate={replayDate}
-                    replayMinDate={equityTimeline?.start_date ?? null}
-                    replayMaxDate={equityTimeline?.end_date ?? null}
-                    onReplayDateChange={handleReplayDateChange}
-                  />
-                </div>
-              </div>
-            )}
+          <div className="mt-4 inline-flex rounded-2xl border border-black/10 bg-white/70 p-1 text-sm">
+            {([
+              { id: "pet", label: "宠物" },
+              { id: "training", label: "训练" },
+              { id: "battle", label: "模拟盘" },
+              { id: "backtest", label: "回测" },
+            ] as const).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setPageTab(tab.id)}
+                className={`rounded-xl px-4 py-2 transition-colors ${
+                  pageTab === tab.id
+                    ? "bg-slate-950 text-white"
+                    : "text-slate-600 hover:bg-black/5 hover:text-slate-950"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
+
+        <div className="flex-1 overflow-hidden">
+          {!portfolioId ? (
+            <div className="flex h-full items-center justify-center p-5">
+              <div className="w-full max-w-2xl rounded-[32px] border border-black/10 bg-white/70 p-8 text-center shadow-[0_24px_80px_rgba(15,23,42,0.08)]">
+                <div className="text-[11px] uppercase tracking-[0.28em] text-slate-500">
+                  Portfolio Empty State
+                </div>
+                <h2 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                  请先创建虚拟账户
+                </h2>
+                <p className="mt-3 text-sm leading-7 text-slate-600">
+                  账户建好后，这个宠物就能一边跑虚拟盘，一边继续接受回测训练，不需要再拆成两个模式。
+                </p>
+                <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={openCreatePortfolioDialog}
+                    className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-800"
+                  >
+                    创建虚拟账户
+                  </button>
+                  <span className="rounded-2xl border border-black/10 px-4 py-3 text-sm text-slate-500">
+                    默认推荐：`paper` + 1000000 初始资金
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="h-full overflow-y-auto p-5">
+              {pageTab === "pet" && (
+                <div className={petWorkspaceLayout.rootClassName}>
+                  <div className={petWorkspaceLayout.leftColumnClassName}>
+                    <div className="space-y-5">
+                      <AgentPetStage
+                        viewModel={petConsole}
+                        activeRun={activeRun}
+                        suiteRunningMode={suiteRunningMode}
+                      />
+                      <div className="grid gap-5 xl:grid-cols-2">
+                        <AgentStatePanel
+                          state={agentState}
+                          run={activeRun}
+                          loading={loading}
+                          error={stateError}
+                        />
+                        <DecisionRunPanel
+                          run={activeRun}
+                          loading={loading}
+                          statusColor={statusColor}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="min-h-0 overflow-hidden rounded-[28px] border border-black/10 bg-[#10141d] p-4 shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
+                      <div className="h-full overflow-y-auto pr-1">
+                        <StrategyBrainPanel
+                          viewModel={strategyBrain}
+                          loading={loading}
+                          stateError={stateError}
+                          memoryLoading={memoryLoading}
+                          memoryError={memoryError}
+                          reflectionLoading={reflectionLoading}
+                          reflectionError={reflectionError}
+                          strategyHistoryError={strategyHistoryError}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={petWorkspaceLayout.rightColumnClassName}>
+                    <div className="min-h-full overflow-hidden rounded-[28px] border border-black/10 bg-[#090a10] shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
+                      <div className="flex h-full min-h-0 flex-col">
+                        <div className="border-b border-white/10 px-4 py-3">
+                          <div className="inline-flex w-full rounded-xl border border-white/10 bg-white/5 p-1 text-sm">
+                            <button
+                              type="button"
+                              onClick={() => setLeftPanelTab("console")}
+                              className={`flex-1 rounded-lg px-3 py-2 transition-colors ${
+                                leftPanelTab === "console"
+                                  ? "bg-white/15 text-white"
+                                  : "text-gray-400 hover:bg-white/10 hover:text-white"
+                              }`}
+                            >
+                              Main Agent Console
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLeftPanelTab("memo_inbox")}
+                              className={`flex-1 rounded-lg px-3 py-2 transition-colors ${
+                                leftPanelTab === "memo_inbox"
+                                  ? "bg-white/15 text-white"
+                                  : "text-gray-400 hover:bg-white/10 hover:text-white"
+                              }`}
+                            >
+                              Strategy Memo Inbox
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="min-h-0 flex-1">
+                          {leftPanelTab === "console" ? (
+                            <AgentChatPanel
+                              portfolioReady={Boolean(portfolioId)}
+                              sessions={chatSessions}
+                              activeSessionId={activeSessionId}
+                              sessionsLoading={chatSessionsLoading}
+                              messagesLoading={chatMessagesLoading}
+                              messages={chatEntries}
+                              notices={chatNotices}
+                              isStreaming={chatStreaming}
+                              draft={chatDraft}
+                              onDraftChange={setChatDraft}
+                              onSend={handleSendChat}
+                              onCreateSession={handleCreateSession}
+                              onSelectSession={setActiveSessionId}
+                              runs={runs}
+                              selectedRunId={activeRun?.id || null}
+                              onSelectRun={setSelectedRun}
+                              statusColor={statusColor}
+                              watchlist={watchlist}
+                              newCode={newCode}
+                              newName={newName}
+                              onNewCodeChange={setNewCode}
+                              onNewNameChange={setNewName}
+                              onAddWatch={handleAddWatch}
+                              onRemoveWatch={handleRemoveWatch}
+                              executionActions={executionActions}
+                              memoStates={memoStates}
+                              onExecutionAction={handleExecutionAction}
+                              onSaveMemo={handleSaveMemo}
+                            />
+                          ) : (
+                            <StrategyMemoPanel
+                              loading={memoInboxLoading}
+                              error={memoInboxError}
+                              items={memoInboxItems}
+                              mutatingId={memoMutatingId}
+                              onArchive={handleArchiveMemo}
+                              onDelete={handleDeleteMemo}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {pageTab === "training" && (
+                <div className="space-y-5">
+                  <AgentTrainingPanel
+                    runningMode={suiteRunningMode}
+                    result={suiteResult}
+                    error={suiteError}
+                    onRunDefault={() => handleRunTrainingSuite("default")}
+                    onRunSmoke={() => handleRunTrainingSuite("smoke")}
+                  />
+
+                  <div className="grid gap-5 xl:grid-cols-2">
+                    <ReviewRecordsPanel
+                      loading={reviewLoading}
+                      error={reviewError}
+                      records={filteredReviewRecords}
+                      stats={reviewStats}
+                      weeklySummaries={weeklySummaries}
+                      reviewType={reviewType}
+                      onReviewTypeChange={setReviewType}
+                    />
+                    <MemoryRulesPanel
+                      loading={memoryLoading}
+                      error={memoryError}
+                      rules={filteredMemoryRules}
+                      statusFilter={memoryStatus}
+                      onStatusFilterChange={setMemoryStatus}
+                    />
+                    <ReflectionFeedPanel
+                      loading={reflectionLoading}
+                      error={reflectionError}
+                      items={reflectionFeed}
+                    />
+                    <StrategyHistoryPanel
+                      loading={reflectionLoading}
+                      error={strategyHistoryError}
+                      items={strategyHistory}
+                    />
+                    <WatchSignalsPanel
+                      loading={wakeLoading}
+                      error={watchSignalsError}
+                      mutationError={wakeMutationError}
+                      signals={watchSignals}
+                      summary={wakeSummary}
+                      form={watchSignalForm}
+                      submitting={watchSignalSubmitting}
+                      updatingSignalId={watchSignalUpdatingId}
+                      onFormChange={handleWatchSignalFormChange}
+                      onSubmit={handleCreateWatchSignal}
+                      onStatusChange={handleWatchSignalStatusChange}
+                    />
+                    <InfoDigestsPanel
+                      loading={wakeLoading}
+                      error={infoDigestsError}
+                      items={visibleInfoDigests}
+                      mode={wakeDigestMode}
+                      selectedRunId={activeRun?.id || null}
+                      onModeChange={setWakeDigestMode}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {pageTab === "battle" && (
+                <div className="grid gap-5 xl:grid-cols-[minmax(300px,0.78fr)_minmax(0,1.22fr)]">
+                  <div className="space-y-5">
+                    <AgentStatePanel
+                      state={agentState}
+                      run={activeRun}
+                      loading={loading}
+                      error={stateError}
+                    />
+                    <DecisionRunPanel
+                      run={activeRun}
+                      loading={loading}
+                      statusColor={statusColor}
+                    />
+                  </div>
+                  <div className="rounded-[28px] border border-black/10 bg-[#10141d] p-4 shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
+                    <div className="h-full overflow-y-auto pr-1">
+                      <ExecutionLedgerPanel
+                        overview={ledgerOverview}
+                        loading={loading}
+                        error={ledgerError}
+                        source={ledgerSource}
+                        timeline={equityTimeline}
+                        timelineLoading={timelineLoading}
+                        timelineError={timelineError}
+                        replay={replaySnapshot}
+                        replayLoading={replayLoading}
+                        replayError={replayError}
+                        replayLearning={replayLearning}
+                        replayLearningLoading={replayLearningLoading}
+                        replayLearningError={replayLearningError}
+                        replayDate={replayDate}
+                        replayMinDate={equityTimeline?.start_date ?? null}
+                        replayMaxDate={equityTimeline?.end_date ?? null}
+                        onReplayDateChange={handleReplayDateChange}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {pageTab === "backtest" && (
+                <div className="space-y-5">
+                  <section className="rounded-[28px] border border-black/10 bg-white/80 p-5 shadow-[0_20px_70px_rgba(15,23,42,0.12)]">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.25em] text-slate-500">Backtest Lab</div>
+                        <h2 className="mt-2 text-2xl font-semibold text-slate-950">历史回测实验台</h2>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">
+                          把当前 portfolio 丢进历史区间里重放，观察收益、回撤和每日证据。
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-end gap-3">
+                        <label className="space-y-1 text-xs text-slate-500">
+                          <span>开始日期</span>
+                          <input
+                            type="date"
+                            value={backtestStartDate}
+                            onChange={(event) => setBacktestStartDate(event.target.value)}
+                            className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-slate-950"
+                          />
+                        </label>
+                        <label className="space-y-1 text-xs text-slate-500">
+                          <span>结束日期</span>
+                          <input
+                            type="date"
+                            value={backtestEndDate}
+                            onChange={(event) => setBacktestEndDate(event.target.value)}
+                            className="rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-slate-950"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleRunBacktest}
+                          disabled={backtestRunning || !portfolioId}
+                          className="rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          {backtestRunning ? "回测中..." : "运行回测"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {backtestError && (
+                      <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-700">
+                        {backtestError}
+                      </div>
+                    )}
+                  </section>
+
+                  {backtestSummary ? (
+                    <section className="rounded-[28px] border border-black/10 bg-[#111827] p-5 text-white shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="text-xs text-slate-400">Run</div>
+                          <div className="mt-2 font-mono text-sm">{backtestSummary.run_id}</div>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="text-xs text-slate-400">状态</div>
+                          <div className="mt-2 text-sm">{backtestSummary.status}</div>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="text-xs text-slate-400">总收益</div>
+                          <div className="mt-2 text-sm">{backtestSummary.total_return ?? "--"}</div>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="text-xs text-slate-400">最大回撤</div>
+                          <div className="mt-2 text-sm">{backtestSummary.max_drawdown ?? "--"}</div>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="text-xs text-slate-400">交易 / 复盘</div>
+                          <div className="mt-2 text-sm">
+                            {backtestSummary.trade_count ?? "--"} / {backtestSummary.review_count ?? "--"}
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="text-xs text-slate-400">Memory 变化</div>
+                          <div className="mt-2 text-sm">
+                            {backtestSummary.memory_added ?? 0}/{backtestSummary.memory_updated ?? 0}/{backtestSummary.memory_retired ?? 0}
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  ) : (
+                    <section className="rounded-[28px] border border-dashed border-black/10 bg-white/70 p-5 text-sm text-slate-500">
+                      还没有回测结果。先运行一次 backtest，结果会在这里展示。
+                    </section>
+                  )}
+
+                  <section className="rounded-[28px] border border-black/10 bg-white/80 p-5 shadow-[0_20px_70px_rgba(15,23,42,0.12)]">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-950">日级过程</h3>
+                      <p className="mt-1 text-sm text-slate-500">
+                        展示回测期间每天是否产生 review 和 memory 变化。
+                      </p>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      {backtestDays.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-sm text-slate-500">
+                          暂无 backtest day 记录
+                        </div>
+                      ) : (
+                        backtestDays.map((day) => (
+                          <div
+                            key={`${day.run_id}-${day.trade_date}`}
+                            className="rounded-2xl border border-black/10 bg-white p-4"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div className="font-mono text-sm text-slate-950">{day.trade_date}</div>
+                              <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+                                <span className="rounded-full border border-black/10 bg-slate-50 px-2.5 py-1">
+                                  review {day.review_created ? "yes" : "no"}
+                                </span>
+                                <span className="rounded-full border border-black/10 bg-slate-50 px-2.5 py-1">
+                                  brain {day.brain_run_id ? day.brain_run_id.slice(0, 8) : "--"}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="mt-2 text-xs text-slate-500">
+                              memory delta: {day.memory_delta ? JSON.stringify(day.memory_delta) : "{}"}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </section>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
+      {portfolioDialogOpen && (
+        <CreatePortfolioDialog
+          draft={portfolioDraft}
+          error={portfolioCreateError}
+          submitting={portfolioCreateSubmitting}
+          onChange={setPortfolioDraft}
+          onClose={closeCreatePortfolioDialog}
+          onSubmit={handleCreatePortfolio}
+        />
+      )}
     </div>
   );
 }

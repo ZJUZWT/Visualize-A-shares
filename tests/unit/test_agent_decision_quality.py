@@ -19,6 +19,8 @@ def test_build_system_prompt_includes_information_immunity_principles():
     assert "默认态度是怀疑" in prompt
     assert "不要因为单条消息改变策略" in prompt
     assert "Tier 1" in prompt
+    assert "不要相信“常识”" in prompt
+    assert "当你的判断和“市场共识”一致时" in prompt
 
 
 def test_build_decision_context_includes_digest_signal_and_memory_sections():
@@ -64,6 +66,50 @@ def test_build_decision_context_includes_digest_signal_and_memory_sections():
     assert "历史经验" in context
     assert "白酒需求回暖，资金关注度提升" in context
     assert "盈利单不要轻易补仓" in context
+
+
+def test_build_decision_context_includes_industry_cycle_prompt_when_digest_has_context():
+    context = build_decision_context(
+        analysis_results=[
+            {
+                "stock_code": "600519",
+                "stock_name": "贵州茅台",
+                "source": "position",
+                "daily": {"close": 1750},
+                "indicators": {"rsi": 58},
+            }
+        ],
+        portfolio={
+            "cash_balance": 1000000.0,
+            "total_asset": 1000000.0,
+            "positions": [],
+        },
+        config={"single_position_pct": 0.15, "max_position_count": 10},
+        memory_rules=[],
+        digests=[
+            {
+                "stock_code": "600519",
+                "summary": "标的 600519 | industry=饮料制造 | cycle=高位震荡",
+                "impact_assessment": "minor_adjust",
+                "key_evidence": ["industry_cycle=高位震荡"],
+                "industry_context": {
+                    "industry": "饮料制造",
+                    "cycle_position": "高位震荡",
+                    "key_drivers": ["消费复苏"],
+                    "next_catalysts": ["旺季提价"],
+                    "risk_points": ["需求放缓"],
+                    "capital_summary": "北向增持，主力净流入",
+                },
+            }
+        ],
+        signal_hits=[],
+    )
+
+    assert "产业周期判断" in context
+    assert "饮料制造" in context
+    assert "高位震荡" in context
+    assert "需要等待什么信号" in context
+    assert "具体操作计划" in context
 
 
 def test_build_output_contract_requires_assessment_critique_and_decisions():

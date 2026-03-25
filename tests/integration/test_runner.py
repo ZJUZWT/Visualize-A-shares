@@ -1,7 +1,7 @@
 """Agent Runner — LLM 调用与 JSON 解析测试"""
 import pytest
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 
 MOCK_VERDICT_JSON = json.dumps({
@@ -19,10 +19,11 @@ MOCK_VERDICT_JSON = json.dumps({
 
 @pytest.mark.asyncio
 async def test_run_agent_returns_verdict():
+    from llm.capability import LLMCapability
     from engine.arena.runner import run_agent
 
-    mock_provider = AsyncMock()
-    mock_provider.chat.return_value = MOCK_VERDICT_JSON
+    mock_cap = MagicMock(spec=LLMCapability)
+    mock_cap.complete = AsyncMock(return_value=MOCK_VERDICT_JSON)
 
     verdict = await run_agent(
         agent_role="fundamental",
@@ -30,7 +31,7 @@ async def test_run_agent_returns_verdict():
         data_context={"pe_ttm": 30, "pb": 8},
         memory_context=[],
         calibration_weight=0.8,
-        llm_provider=mock_provider,
+        llm_capability=mock_cap,
     )
     assert verdict.signal == "bullish"
     assert verdict.agent_role == "fundamental"
@@ -40,10 +41,11 @@ async def test_run_agent_returns_verdict():
 
 @pytest.mark.asyncio
 async def test_run_agent_handles_malformed_json():
+    from llm.capability import LLMCapability
     from engine.arena.runner import run_agent, AgentRunError
 
-    mock_provider = AsyncMock()
-    mock_provider.chat.return_value = "这不是 JSON，我来分析一下..."
+    mock_cap = MagicMock(spec=LLMCapability)
+    mock_cap.complete = AsyncMock(return_value="这不是 JSON，我来分析一下...")
 
     with pytest.raises(AgentRunError):
         await run_agent(
@@ -52,17 +54,18 @@ async def test_run_agent_handles_malformed_json():
             data_context={},
             memory_context=[],
             calibration_weight=0.7,
-            llm_provider=mock_provider,
+            llm_capability=mock_cap,
         )
 
 
 @pytest.mark.asyncio
 async def test_run_agent_handles_json_in_markdown():
     """LLM 有时会返回 ```json ... ``` 包裹的内容"""
+    from llm.capability import LLMCapability
     from engine.arena.runner import run_agent
 
-    mock_provider = AsyncMock()
-    mock_provider.chat.return_value = f"```json\n{MOCK_VERDICT_JSON}\n```"
+    mock_cap = MagicMock(spec=LLMCapability)
+    mock_cap.complete = AsyncMock(return_value=f"```json\n{MOCK_VERDICT_JSON}\n```")
 
     verdict = await run_agent(
         agent_role="fundamental",
@@ -70,6 +73,6 @@ async def test_run_agent_handles_json_in_markdown():
         data_context={},
         memory_context=[],
         calibration_weight=0.8,
-        llm_provider=mock_provider,
+        llm_capability=mock_cap,
     )
     assert verdict.signal == "bullish"

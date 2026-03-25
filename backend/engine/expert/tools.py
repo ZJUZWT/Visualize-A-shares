@@ -8,6 +8,7 @@ import httpx
 from loguru import logger
 
 from engine.expert.schemas import ToolCall
+from engine.industry import get_industry_engine
 
 
 class ExpertTools:
@@ -35,6 +36,11 @@ class ExpertTools:
                 result = await self._call_quant_engine(action, params)
             elif engine == "cluster":
                 result = self._call_cluster_engine(action, params)
+            elif engine == "industry":
+                if action == "bridge_market_assets":
+                    result = self._call_bridge_market_assets(params)
+                else:
+                    result = {"error": f"Unknown industry action: {action}"}
             elif engine == "expert":
                 # 调用引擎专家（聚合者模式）
                 return await self._ask_expert(action, params)
@@ -130,6 +136,10 @@ class ExpertTools:
             return self._call_data_engine(action, params)
         elif engine == "cluster":
             return self._call_cluster_engine(action, params)
+        elif engine == "industry":
+            if action == "bridge_market_assets":
+                return self._call_bridge_market_assets(params)
+            return {"error": f"Unknown industry action: {action}"}
         else:
             return {"error": f"Unknown engine: {engine}"}
 
@@ -165,6 +175,32 @@ class ExpertTools:
                 records = df.tail(return_rows).to_dict("records")
                 return {"code": code, "history": records, "total_days": len(df)}
 
+            elif action == "search_asset":
+                query = params.get("query", "")
+                market = params.get("market", "all")
+                limit = params.get("limit", 20)
+                return {"results": self.data_engine.search_assets(query, market=market, limit=limit)}
+
+            elif action == "get_asset_profile":
+                symbol = params.get("symbol", "")
+                market = params.get("market", "cn")
+                return self.data_engine.get_asset_profile(symbol, market)
+
+            elif action == "get_asset_quote":
+                symbol = params.get("symbol", "")
+                market = params.get("market", "cn")
+                return self.data_engine.get_asset_quote(symbol, market)
+
+            elif action == "get_asset_daily_history":
+                import datetime
+                symbol = params.get("symbol", "")
+                market = params.get("market", "cn")
+                days = params.get("days", 60)
+                calendar_days = max(int(days), 10) * 1.8 + 10
+                end = datetime.date.today().strftime("%Y-%m-%d")
+                start = (datetime.date.today() - datetime.timedelta(days=int(calendar_days))).strftime("%Y-%m-%d")
+                return self.data_engine.get_asset_daily_history(symbol, market, start, end)
+
             elif action == "get_company_profile":
                 code = params.get("code", "")
                 profile = self.data_engine.get_company_profile(code)
@@ -199,6 +235,16 @@ class ExpertTools:
 
         except Exception as e:
             logger.error(f"数据引擎调用失败: {e}")
+            return {"error": str(e)}
+
+    def _call_bridge_market_assets(self, params: dict) -> dict[str, Any]:
+        target = params.get("target", "") or params.get("query", "")
+        market = params.get("market", "")
+        limit = params.get("limit", 10)
+        try:
+            return get_industry_engine().bridge_market_assets(target=target, market=market, limit=limit)
+        except Exception as e:
+            logger.error(f"跨市场桥接失败: {e}")
             return {"error": str(e)}
 
     # ── 量化引擎 ────────────────────────────────────────

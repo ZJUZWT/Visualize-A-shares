@@ -112,6 +112,38 @@ class ThinkOutput(BaseModel):
     reasoning: str = ""
 
 
+class ClarificationOption(BaseModel):
+    id: str
+    label: str
+    title: str
+    description: str
+    focus: str
+
+
+class ClarificationOutput(BaseModel):
+    should_clarify: bool = True
+    question_summary: str
+    options: list[ClarificationOption] = Field(default_factory=list)
+    reasoning: str = ""
+    skip_option: ClarificationOption
+
+
+class ClarificationSelection(BaseModel):
+    option_id: str
+    label: str
+    title: str
+    focus: str
+    skip: bool = False
+
+
+class SelfCritiqueOutput(BaseModel):
+    summary: str
+    risks: list[str] = Field(default_factory=list)
+    missing_data: list[str] = Field(default_factory=list)
+    counterpoints: list[str] = Field(default_factory=list)
+    confidence_note: str = ""
+
+
 class BeliefChange(BaseModel):
     old_belief_id: str
     new_content: str
@@ -129,6 +161,8 @@ class ExpertChatRequest(BaseModel):
     session_id: str | None = None
     deep_think: bool = False          # 多轮渐进工具调用（AI 看数据后可以继续补查）
     max_rounds: int = Field(default=3, ge=1, le=5)  # 最大工具调用轮数
+    clarification_selection: ClarificationSelection | None = None
+    use_clarification: bool = True
 
 
 class SessionCreateRequest(BaseModel):

@@ -3,17 +3,120 @@
 import type { ExpertMessage } from "@/types/expert";
 import { useExpertStore } from "@/stores/useExpertStore";
 import { ThinkingPanel } from "./ThinkingPanel";
-import { AlertCircle, RotateCw } from "lucide-react";
+import { AlertCircle, RotateCw, CheckCircle2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { splitByTradePlan, hasTradePlan } from "@/lib/parseTradePlan";
 import TradePlanCard from "@/components/plans/TradePlanCard";
+import { API_BASE } from "@/lib/api-base";
 
 interface MessageBubbleProps {
   message: ExpertMessage;
   expertColor: string;
   expertIcon: string;
   expertName: string;
+}
+
+function ClarificationCard({
+  message,
+  expertColor,
+}: {
+  message: ExpertMessage;
+  expertColor: string;
+}) {
+  const { submitClarification, pendingClarifications, activeExpert } = useExpertStore();
+  const item = message.thinking.find((thinking) => thinking.type === "clarification_request");
+  if (!item || item.type !== "clarification_request") return null;
+
+  const isPending = item.status === "pending";
+  const canSubmit = isPending && !!pendingClarifications[activeExpert];
+
+  return (
+    <div className="mb-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+      <div className="flex items-start gap-2">
+        <div
+          className="mt-0.5 h-6 w-6 shrink-0 rounded-lg flex items-center justify-center text-[11px] text-white"
+          style={{ backgroundColor: expertColor }}
+        >
+          ?
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold text-[var(--text-primary)]">
+            先确认分析方向
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">
+            {item.data.question_summary}
+          </p>
+          <div className="mt-3 grid gap-2">
+            {item.data.options.map((option) => {
+              const selected = item.selectedOption?.option_id === option.id;
+              return (
+                <button
+                  key={option.id}
+                  onClick={() =>
+                    canSubmit &&
+                    submitClarification({
+                      option_id: option.id,
+                      label: option.label,
+                      title: option.title,
+                      focus: option.focus,
+                      skip: false,
+                    })
+                  }
+                  disabled={!canSubmit}
+                  className={`w-full rounded-xl border px-3 py-2.5 text-left transition-all duration-150 ${
+                    selected
+                      ? "border-transparent text-white"
+                      : "border-[var(--border)] hover:border-current"
+                  } ${!canSubmit ? "opacity-70 cursor-default" : ""}`}
+                  style={selected ? { backgroundColor: expertColor } : undefined}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
+                        selected ? "bg-white/20" : ""
+                      }`}
+                      style={selected ? undefined : { backgroundColor: expertColor + "15", color: expertColor }}
+                    >
+                      {option.label}
+                    </span>
+                    <span className="text-sm font-medium">{option.title}</span>
+                    {selected && <CheckCircle2 size={14} className="ml-auto" />}
+                  </div>
+                  <p className={`mt-1 text-xs leading-relaxed ${selected ? "text-white/80" : "text-[var(--text-tertiary)]"}`}>
+                    {option.description}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={() =>
+              canSubmit &&
+              submitClarification({
+                option_id: item.data.skip_option.id,
+                label: item.data.skip_option.label,
+                title: item.data.skip_option.title,
+                focus: item.data.skip_option.focus,
+                skip: true,
+              })
+            }
+            disabled={!canSubmit}
+            className={`mt-3 inline-flex items-center rounded-full border px-3 py-1.5 text-xs transition-colors ${
+              !canSubmit ? "opacity-70 cursor-default" : "hover:border-current"
+            }`}
+            style={{
+              borderColor: item.status === "skipped" ? expertColor : undefined,
+              color: item.status === "skipped" ? expertColor : undefined,
+            }}
+          >
+            {item.status === "skipped" ? "已选择：跳过，直接分析" : item.data.skip_option.title}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function MarkdownContent({ content }: { content: string }) {
@@ -82,6 +185,7 @@ export function MessageBubble({
   expertName,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
+  const thinkingItems = message.thinking.filter((item) => item.type !== "clarification_request");
 
   if (isUser) {
     const isFailed = message.sendStatus === "failed";
@@ -127,8 +231,10 @@ export function MessageBubble({
 
       <div className="flex-1 min-w-0 max-w-[80%]">
         {/* 思考面板：历史消息默认折叠，流式消息默认展开 */}
-        {message.thinking.length > 0 && (
-          <ThinkingPanel thinking={message.thinking} color={expertColor} defaultOpen={message.isStreaming} />
+        <ClarificationCard message={message} expertColor={expertColor} />
+
+        {thinkingItems.length > 0 && (
+          <ThinkingPanel thinking={thinkingItems} color={expertColor} defaultOpen={message.isStreaming} />
         )}
 
         {/* 正文 */}
@@ -143,7 +249,6 @@ export function MessageBubble({
                     <TradePlanCard
                       plan={segment.plan}
                       onSave={async (plan) => {
-                        const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
                         await fetch(`${API_BASE}/api/v1/agent/plans`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },

@@ -63,8 +63,9 @@ def build_system_prompt() -> str:
 1. 关于信息，你的默认态度是怀疑。先问“谁在放这个消息？谁受益？”
 2. Tier 1 证据优先：行情、成交、财报原文、交易所数据，高于研报观点和二手解读。
 3. 不要因为单条消息改变策略。没有价格、仓位和风险纪律配合时，应保持克制。
-4. 如果证据不足，请明确写出 self_critique 和 follow_up_questions，并输出空 decisions。
-5. 只有当交易理由、止盈、止损、失效条件都足够明确时，才给出可执行动作。"""
+4. 不要相信“常识”，相信可交叉验证的数据；当你的判断和“市场共识”一致时，要额外警惕是否已经被定价。
+5. 如果证据不足，请明确写出 self_critique 和 follow_up_questions，并输出空 decisions。
+6. 只有当交易理由、止盈、止损、失效条件都足够明确时，才给出可执行动作。"""
 
 
 def build_output_contract() -> str:
@@ -147,6 +148,38 @@ def build_decision_context(
     if len(digest_lines) == 1:
         digest_lines.append("暂无 digest 或命中信号。")
 
+    industry_lines = ["## 产业周期判断"]
+    for digest in digests:
+        industry_context = digest.get("industry_context")
+        if not isinstance(industry_context, dict) or not industry_context:
+            continue
+        stock_code = digest.get("stock_code", "unknown")
+        industry_lines.append(
+            f"- {stock_code}: 行业={industry_context.get('industry') or '--'}，"
+            f"周期={industry_context.get('cycle_position') or '--'}"
+        )
+        drivers = industry_context.get("key_drivers") or []
+        if drivers:
+            industry_lines.append(f"  驱动: {', '.join(str(item) for item in drivers)}")
+        catalysts = industry_context.get("next_catalysts") or []
+        if catalysts:
+            industry_lines.append(f"  等待信号: {', '.join(str(item) for item in catalysts)}")
+        risks = industry_context.get("risk_points") or []
+        if risks:
+            industry_lines.append(f"  风险: {', '.join(str(item) for item in risks)}")
+        capital_summary = industry_context.get("capital_summary")
+        if capital_summary:
+            industry_lines.append(f"  资金面: {capital_summary}")
+    if len(industry_lines) > 1:
+        industry_lines.extend([
+            "请逐一判断：",
+            "1. 当前处于什么周期位置？",
+            "2. 需要等待什么信号才能改变当前策略？",
+            "3. 如果信号出现，你的具体操作计划是什么？",
+        ])
+    else:
+        industry_lines = []
+
     memory_lines = ["## 历史经验"]
     if memory_rules:
         memory_lines.append("以下是你从过去交易中积累的经验规则，请在决策时参考：")
@@ -169,6 +202,8 @@ def build_decision_context(
 {chr(10).join(analysis_lines) if analysis_lines else '暂无候选分析'}
 
 {chr(10).join(digest_lines)}
+
+{chr(10).join(industry_lines) if industry_lines else ''}
 
 ## 决策规则
 1. 单只股票仓位不超过总资产的 {single_pct * 100:.0f}%

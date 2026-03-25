@@ -429,3 +429,54 @@ class LLMProviderFactory:
 
         config = LLMConfig(**config_dict)
         return cls.create(config)
+
+
+class ModelRouter:
+    """为不同阶段提供 fast / quality 两档模型。"""
+
+    def __init__(self, *, quality_provider: BaseLLMProvider | None, fast_provider: BaseLLMProvider | None = None):
+        self._quality = quality_provider
+        self._fast = fast_provider or quality_provider
+
+    def get(self, tier: str = "quality") -> BaseLLMProvider | None:
+        if tier == "fast":
+            return self._fast
+        return self._quality
+
+    @classmethod
+    def from_provider(cls, provider) -> "ModelRouter":
+        if provider is None:
+            return cls(quality_provider=None, fast_provider=None)
+        config = getattr(provider, "config", None)
+        if isinstance(config, LLMConfig):
+            return cls.from_config(config)
+        return cls(quality_provider=provider, fast_provider=provider)
+
+    @classmethod
+    def from_config(cls, config: LLMConfig) -> "ModelRouter":
+        quality_provider = LLMProviderFactory.create(config)
+
+        has_fast_override = any(
+            value is not None and value != ""
+            for value in (
+                config.fast_provider,
+                config.fast_api_key,
+                config.fast_base_url,
+                config.fast_model,
+                config.fast_temperature,
+                config.fast_max_tokens,
+            )
+        )
+        if not has_fast_override:
+            return cls(quality_provider=quality_provider, fast_provider=quality_provider)
+
+        fast_provider = LLMProviderFactory.create_from_override(
+            config,
+            provider=config.fast_provider or config.provider,
+            api_key=config.fast_api_key or config.api_key,
+            base_url=config.fast_base_url or config.base_url,
+            model=config.fast_model or config.model,
+            temperature=config.fast_temperature if config.fast_temperature is not None else config.temperature,
+            max_tokens=config.fast_max_tokens if config.fast_max_tokens is not None else config.max_tokens,
+        )
+        return cls(quality_provider=quality_provider, fast_provider=fast_provider)

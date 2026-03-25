@@ -8,6 +8,7 @@
  */
 
 import { create } from "zustand";
+import { API_BASE } from "@/lib/api-base";
 import type { TerrainData, StockPoint, ZMetric } from "@/types/terrain";
 
 /** 获取资源的 base path（兼容 GitHub Pages 子路径部署） */
@@ -21,7 +22,7 @@ const IS_STATIC = process.env.NEXT_PUBLIC_STATIC_MODE === "true";
  * Next.js rewrites 代理会缓冲 SSE 响应，导致 progress 事件无法实时推送
  * 所以 SSE 请求需要绕过代理，直接连后端
  */
-const SSE_API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+const SSE_API_BASE = API_BASE;
 
 interface TerrainState {
   // ─── 数据 ────────────────────────────

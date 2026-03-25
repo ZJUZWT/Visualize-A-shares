@@ -240,6 +240,74 @@ class AgentChatService:
         history = await self.list_messages(portfolio_id, session["id"])
         return session, history
 
+    async def _build_runtime_context_message(self, portfolio_id: str) -> dict | None:
+        position_rows = await self.db.execute_read(
+            """
+            SELECT stock_code, stock_name, current_qty, holding_type
+            FROM agent.positions
+            WHERE portfolio_id = ? AND status = 'open'
+            ORDER BY created_at DESC, id DESC
+            LIMIT 5
+            """,
+            [portfolio_id],
+        )
+        digest_rows = await self.db.execute_read(
+            """
+            SELECT stock_code, structured_summary, impact_assessment, created_at
+            FROM agent.info_digests
+            WHERE portfolio_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 8
+            """,
+            [portfolio_id],
+        )
+
+        lines = ["Main Agent 上下文", "以下信息为当前对话可用的即时上下文，不要把它们当作长期记忆。"]
+        if position_rows:
+            lines.append("当前持仓：")
+            for row in position_rows:
+                lines.append(
+                    f"- {row.get('stock_code')}: {row.get('stock_name') or row.get('stock_code')} / "
+                    f"{row.get('current_qty') or 0}股 / {row.get('holding_type') or '--'}"
+                )
+
+        digest_lines: list[str] = []
+        for row in digest_rows:
+            structured = _decode_json_field(row.get("structured_summary")) or {}
+            if not isinstance(structured, dict):
+                continue
+            summary = structured.get("summary")
+            key_evidence = structured.get("key_evidence") or []
+            if not summary and not key_evidence:
+                continue
+            has_industry_signal = (
+                (isinstance(summary, str) and ("industry=" in summary or "cycle=" in summary))
+                or any(str(item).startswith("industry_cycle=") for item in key_evidence)
+            )
+            if not has_industry_signal:
+                continue
+            digest_lines.append(f"- {row.get('stock_code')}: {summary or '--'}")
+            if key_evidence:
+                digest_lines.append(f"  evidence={', '.join(str(item) for item in key_evidence)}")
+            digest_lines.append(f"  impact={row.get('impact_assessment') or 'none'}")
+
+        if digest_lines:
+            lines.append("最近产业/信息认知：")
+            lines.extend(digest_lines)
+
+        if len(lines) == 2:
+            return None
+
+        return {
+            "id": "runtime-context",
+            "session_id": None,
+            "portfolio_id": portfolio_id,
+            "role": "system",
+            "content": "\n".join(lines),
+            "thinking": None,
+            "created_at": None,
+        }
+
     async def persist_message(
         self,
         *,
@@ -300,6 +368,8 @@ class AgentChatService:
         title: str = "新对话",
     ) -> AsyncIterator[dict]:
         session, history = await self.prepare_chat(portfolio_id, session_id, title=title)
+        runtime_context = await self._build_runtime_context_message(portfolio_id)
+        runtime_history = history if runtime_context is None else [runtime_context, *history]
         await self.persist_message(
             portfolio_id=portfolio_id,
             session_id=session["id"],
@@ -315,7 +385,7 @@ class AgentChatService:
             portfolio_id=portfolio_id,
             session_id=session["id"],
             message=message,
-            history=history,
+            history=runtime_history,
         ):
             event_type = event.get("event", "error")
             event_data = _normalize_json_safe(event.get("data") or {})

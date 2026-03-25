@@ -1,7 +1,7 @@
 """Orchestrator 端到端编排测试"""
 import pytest
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 
 MOCK_VERDICT = json.dumps({
@@ -14,8 +14,11 @@ MOCK_VERDICT = json.dumps({
 @pytest.fixture
 def mock_deps():
     """Mock 所有外部依赖"""
-    llm = AsyncMock()
-    llm.chat.return_value = MOCK_VERDICT
+    from llm.capability import LLMCapability
+
+    llm = MagicMock(spec=LLMCapability)
+    llm.enabled = True
+    llm.complete = AsyncMock(return_value=MOCK_VERDICT)
 
     memory = MagicMock()
     memory.recall.return_value = []
@@ -37,7 +40,7 @@ async def test_orchestrator_full_flow(mock_deps):
     from engine.arena.schemas import AnalysisRequest
 
     llm, memory, data_fetcher = mock_deps
-    orch = Orchestrator(llm_provider=llm, memory=memory, data_fetcher=data_fetcher)
+    orch = Orchestrator(llm_capability=llm, memory=memory, data_fetcher=data_fetcher)
 
     req = AnalysisRequest(
         trigger_type="user", target="600519",
@@ -65,15 +68,12 @@ async def test_orchestrator_handles_agent_failure(mock_deps):
     llm, memory, data_fetcher = mock_deps
 
     call_count = 0
-    async def flaky_chat(messages):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 2:
-            raise Exception("LLM timeout")
-        return MOCK_VERDICT
-
-    llm.chat.side_effect = flaky_chat
-    orch = Orchestrator(llm_provider=llm, memory=memory, data_fetcher=data_fetcher)
+    llm.complete.side_effect = [
+        MOCK_VERDICT,
+        Exception("LLM timeout"),
+        MOCK_VERDICT,
+    ]
+    orch = Orchestrator(llm_capability=llm, memory=memory, data_fetcher=data_fetcher)
 
     req = AnalysisRequest(
         trigger_type="user", target="600519",
@@ -95,9 +95,9 @@ async def test_orchestrator_all_agents_fail(mock_deps):
     from engine.arena.schemas import AnalysisRequest
 
     llm, memory, data_fetcher = mock_deps
-    llm.chat.side_effect = Exception("LLM 全部超时")
+    llm.complete.side_effect = Exception("LLM 全部超时")
 
-    orch = Orchestrator(llm_provider=llm, memory=memory, data_fetcher=data_fetcher)
+    orch = Orchestrator(llm_capability=llm, memory=memory, data_fetcher=data_fetcher)
 
     req = AnalysisRequest(
         trigger_type="user", target="600519",
@@ -120,7 +120,7 @@ async def test_orchestrator_quick_depth_skips_prescreen(mock_deps):
     from engine.arena.schemas import AnalysisRequest
 
     llm, memory, data_fetcher = mock_deps
-    orch = Orchestrator(llm_provider=llm, memory=memory, data_fetcher=data_fetcher)
+    orch = Orchestrator(llm_capability=llm, memory=memory, data_fetcher=data_fetcher)
 
     req = AnalysisRequest(
         trigger_type="user", target="600519",

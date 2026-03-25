@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import NavSidebar from "@/components/ui/NavSidebar";
 import TradePlanCard from "@/components/plans/TradePlanCard";
 import type { TradePlanData } from "@/lib/parseTradePlan";
-
+import { API_BASE } from "@/lib/api-base";
 interface SavedPlan extends TradePlanData {
   id: string;
   status: string;
@@ -21,8 +21,6 @@ const STATUS_TABS = [
   { key: "expired", label: "已过期" },
   { key: "ignored", label: "已忽略" },
 ];
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default function PlansPage() {
   const [plans, setPlans] = useState<SavedPlan[]>([]);

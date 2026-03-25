@@ -559,6 +559,24 @@ class TestBrainDecisionRuns:
         brain = AgentBrain.__new__(AgentBrain)
         brain.portfolio_id = "p1"
         brain.service = FakeService()
+        brain._current_digests = [
+            {
+                "id": "digest-1",
+                "stock_code": "600519",
+                "summary": "白酒需求回暖，资金关注度提升",
+                "impact_assessment": "minor_adjust",
+                "evidence_tier": "mixed",
+                "suggested_action": "monitor",
+                "key_evidence": ["news_count=3", "announcement_count=1"],
+            }
+        ]
+        brain._current_triggered_signals = [
+            {
+                "signal_id": "signal-1",
+                "stock_code": "600519",
+                "matched_keywords": ["白酒", "回暖"],
+            }
+        ]
 
         with patch("llm.LLMProviderFactory.create", return_value=FakeLLM()):
             decisions = run(brain._make_decisions(
@@ -582,6 +600,24 @@ class TestBrainDecisionRuns:
         assert thinking["follow_up_questions"] == ["是否已经看到量价确认？"]
         assert thinking["gate_result"]["accepted_count"] == 1
         assert thinking["gate_result"]["rejected_count"] == 0
+        assert thinking["decision_trace"]["info_digests"] == [
+            {
+                "digest_id": "digest-1",
+                "stock_code": "600519",
+                "impact_assessment": "minor_adjust",
+                "evidence_tier": "mixed",
+                "suggested_action": "monitor",
+                "decision_role": "context",
+            }
+        ]
+        assert thinking["decision_trace"]["triggered_signals"] == [
+            {
+                "signal_id": "signal-1",
+                "stock_code": "600519",
+                "matched_keywords": ["白酒", "回暖"],
+            }
+        ]
+        assert thinking["decision_trace"]["gate_summary"]["accepted_count"] == 1
 
     def test_make_decisions_rejects_actions_when_self_critique_requires_wait(self):
         from engine.agent.brain import AgentBrain
@@ -996,3 +1032,93 @@ class TestAgentScheduler:
             "minute": 0,
             "day_of_week": "fri",
         }
+
+
+class TestBrainRuntime:
+    def test_analyze_single_uses_fast_tier_llm(self):
+        from engine.agent.brain import AgentBrain
+
+        captured = {}
+        fast_llm = object()
+        quality_llm = object()
+
+        class FakeRouter:
+            def get(self, tier="quality"):
+                return fast_llm if tier == "fast" else quality_llm
+
+        class FakeExpertTools:
+            def __init__(self, data_engine, cluster_engine, llm_engine, api_base="http://localhost:8000"):
+                captured["llm_engine"] = llm_engine
+
+            async def execute(self, engine, action, params):
+                return f"{engine}.{action}:{params['code']}"
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain.portfolio_id = "p1"
+
+        with patch("llm.ModelRouter.from_config", return_value=FakeRouter()), \
+             patch("engine.data.get_data_engine", return_value=object()), \
+             patch("engine.cluster.get_cluster_engine", return_value=object()), \
+             patch("engine.expert.tools.ExpertTools", FakeExpertTools):
+            analysis = run(brain._analyze_single("600519"))
+
+        assert captured["llm_engine"] is fast_llm
+        assert analysis["daily"] == "data.get_daily_history:600519"
+        assert analysis["indicators"] == "quant.get_technical_indicators:600519"
+
+    def test_make_decisions_uses_quality_tier_llm(self):
+        from engine.agent.brain import AgentBrain
+
+        fast_llm = object()
+
+        class FakeQualityLLM:
+            def __init__(self):
+                self.messages = None
+
+            async def chat_stream(self, messages):
+                self.messages = messages
+                yield """{
+                  "assessment": {"market_posture": "neutral", "evidence_quality": "mixed"},
+                  "self_critique": [],
+                  "follow_up_questions": [],
+                  "decisions": []
+                }"""
+
+        quality_llm = FakeQualityLLM()
+
+        class FakeRouter:
+            def get(self, tier="quality"):
+                return fast_llm if tier == "fast" else quality_llm
+
+        class FakeService:
+            def __init__(self):
+                self.updates = []
+
+            async def update_brain_run(self, run_id, updates):
+                self.updates.append((run_id, updates))
+
+        class FakeMemoryManager:
+            async def get_active_rules(self, limit=20):
+                return []
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain.portfolio_id = "p1"
+        brain.service = FakeService()
+        brain.memory = FakeMemoryManager()
+        brain._current_digests = []
+        brain._current_triggered_signals = []
+
+        with patch("llm.ModelRouter.from_config", return_value=FakeRouter()):
+            decisions = run(brain._make_decisions(
+                [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}],
+                {
+                    "cash_balance": 1000000.0,
+                    "total_asset": 1000000.0,
+                    "positions": [],
+                },
+                {"single_position_pct": 0.15, "max_position_count": 10},
+                run_id="run-quality",
+            ))
+
+        assert decisions == []
+        assert quality_llm.messages[0].role == "system"

@@ -1,9 +1,7 @@
 import { create } from "zustand";
+import { API_BASE, getWebSocketBase } from "@/lib/api-base";
 import { toast } from "sonner";
 import type { ScheduledTask, CreateTaskRequest } from "@/types/scheduler";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
-const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 interface SchedulerStore {
   tasks: ScheduledTask[];
@@ -112,7 +110,7 @@ export const useSchedulerStore = create<SchedulerStore>((set, get) => ({
     if (_ws?.readyState === WebSocket.OPEN) return;
 
     try {
-      _ws = new WebSocket(`${WS_BASE}/api/v1/expert/ws/notifications`);
+      _ws = new WebSocket(`${getWebSocketBase()}/api/v1/expert/ws/notifications`);
 
       _ws.onopen = () => {
         set({ wsConnected: true });

@@ -33,6 +33,9 @@ ACTION_DISPATCH: dict[str, tuple[str, str, str, bool]] = {
     "get_capital_structure":    ("engine.industry", "get_industry_engine", "get_capital_structure", True),
 }
 
+# 供测试与调用侧查询当前 DataFetcher 能力，避免耦合内部路由实现细节。
+SUPPORTED_ACTIONS: set[str] = set(ACTION_DISPATCH) | SELF_DISPATCH
+
 
 class DataFetcher:
     """从各引擎收集 Agent 所需数据

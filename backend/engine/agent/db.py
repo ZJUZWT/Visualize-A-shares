@@ -9,6 +9,7 @@ import asyncio
 import json
 import math
 import shutil
+from datetime import datetime
 
 import duckdb
 from loguru import logger
@@ -48,6 +49,24 @@ def _decode_json_column_value(value):
         return value
 
 
+def _is_wal_replay_error(error: Exception, db_path) -> bool:
+    message = str(error)
+    wal_path = f'{db_path}.wal'
+    return "Failure while replaying WAL file" in message and wal_path in message
+
+
+def _quarantine_wal_file(db_path) -> bool:
+    wal_path = db_path.with_name(f"{db_path.name}.wal")
+    if not wal_path.exists():
+        return False
+
+    timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    quarantined_path = wal_path.with_name(f"{wal_path.name}.corrupt-{timestamp}")
+    wal_path.rename(quarantined_path)
+    logger.warning(f"检测到损坏 WAL，已隔离: {quarantined_path}")
+    return True
+
+
 class AgentDB:
     """Main Agent 数据库 — 单例长连接 + 写锁"""
 
@@ -68,7 +87,12 @@ class AgentDB:
         if not AGENT_DB_PATH.exists() and AGENT_DB_LEGACY_PATH.exists():
             shutil.copy2(AGENT_DB_LEGACY_PATH, AGENT_DB_PATH)
         inst = cls.__new__(cls)
-        inst._conn = duckdb.connect(str(AGENT_DB_PATH))
+        try:
+            inst._conn = duckdb.connect(str(AGENT_DB_PATH))
+        except Exception as error:
+            if not _is_wal_replay_error(error, AGENT_DB_PATH) or not _quarantine_wal_file(AGENT_DB_PATH):
+                raise
+            inst._conn = duckdb.connect(str(AGENT_DB_PATH))
         inst._write_lock = asyncio.Lock()
         inst._init_tables()
         cls._instance = inst
@@ -473,6 +497,18 @@ class AgentDB:
                 trade_date DATE NOT NULL,
                 created_at TIMESTAMP DEFAULT now()
             )
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.backtest_days
+            ADD COLUMN IF NOT EXISTS review_created BOOLEAN DEFAULT false
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.backtest_days
+            ADD COLUMN IF NOT EXISTS brain_run_id VARCHAR
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.backtest_days
+            ADD COLUMN IF NOT EXISTS memory_delta JSON
         """)
 
     async def execute_read(self, sql: str, params=None) -> list[dict]:

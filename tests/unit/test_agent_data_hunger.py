@@ -1,4 +1,5 @@
 """Agent wake/data hunger schema and service tests."""
+import json
 import sys
 import asyncio
 import tempfile
@@ -338,3 +339,140 @@ class TestDataHungerService:
         digest = run(hunger.execute_and_digest("p1", "run-1", "600519", triggers=[]))
         assert digest["impact_assessment"] in {"none", "noted", "minor_adjust", "reassess"}
         assert digest["missing_sources"] == ["announcements"]
+
+    def test_execute_and_digest_returns_information_immunity_fields(self):
+        from engine.agent.data_hunger import DataHungerService
+        from engine.industry.schemas import CapitalStructure, IndustryCognition
+
+        hunger = DataHungerService(
+            db=self.db,
+            agent_service=self.svc,
+            info_engine=_FakeInfoEngine(
+                news=[{"title": "白酒需求回升", "content": "渠道反馈改善"}],
+                announcements=[{"title": "年报披露", "summary": "业绩符合预期"}],
+            ),
+            industry_engine=_FakeIndustryEngine(
+                IndustryCognition(
+                    industry="饮料制造",
+                    target="600519",
+                    cycle_position="高位震荡",
+                    catalysts=["旺季提价"],
+                    risks=["需求放缓"],
+                    core_drivers=["消费复苏"],
+                    as_of_date="2026-03-22",
+                ),
+                CapitalStructure(
+                    code="600519",
+                    as_of_date="2026-03-22",
+                    structure_summary="北向增持，主力净流入",
+                ),
+            ),
+            daily_history_fetcher=lambda code: {"code": code, "history": [{"close": 1800.0}]},
+            technical_indicator_fetcher=lambda code: {"macd": "golden_cross", "rsi": 61.5},
+        )
+
+        digest = run(
+            hunger.execute_and_digest(
+                "p1",
+                "run-1",
+                "600519",
+                triggers=[{"signal_id": "sig-1", "matched_keywords": ["白酒", "回升"]}],
+            )
+        )
+
+        assert digest["evidence_tier"] in {"tier1", "tier2", "tier3", "mixed"}
+        assert digest["suggested_action"] in {"ignore", "monitor", "reassess"}
+        assert isinstance(digest["missing_tier1_evidence"], list)
+        assert isinstance(digest["immunity_checks"], list)
+        assert digest["structured_summary"]["evidence_tier"] == digest["evidence_tier"]
+        assert digest["structured_summary"]["suggested_action"] == digest["suggested_action"]
+
+    def test_execute_and_digest_returns_industry_context_without_persisting_raw_payload(self):
+        from engine.agent.data_hunger import DataHungerService
+        from engine.industry.schemas import CapitalStructure, IndustryCognition
+
+        hunger = DataHungerService(
+            db=self.db,
+            agent_service=self.svc,
+            info_engine=_FakeInfoEngine(
+                news=[{"title": "白酒需求回升", "content": "渠道反馈改善"}],
+                announcements=[{"title": "年报披露", "summary": "业绩符合预期"}],
+            ),
+            industry_engine=_FakeIndustryEngine(
+                IndustryCognition(
+                    industry="饮料制造",
+                    target="600519",
+                    cycle_position="高位震荡",
+                    catalysts=["旺季提价"],
+                    risks=["需求放缓"],
+                    core_drivers=["消费复苏"],
+                    as_of_date="2026-03-22",
+                ),
+                CapitalStructure(
+                    code="600519",
+                    as_of_date="2026-03-22",
+                    structure_summary="北向增持，主力净流入",
+                ),
+            ),
+            daily_history_fetcher=lambda code: {"code": code, "history": [{"close": 1800.0}]},
+            technical_indicator_fetcher=lambda code: {"macd": "golden_cross", "rsi": 61.5},
+        )
+
+        digest = run(hunger.execute_and_digest("p1", "run-1", "600519", triggers=[]))
+        stored = run(
+            self.db.execute_read(
+                "SELECT raw_summary FROM agent.info_digests WHERE id = ?",
+                [digest["id"]],
+            )
+        )[0]["raw_summary"]
+        if isinstance(stored, str):
+            stored = json.loads(stored)
+
+        assert digest["industry_context"]["industry"] == "饮料制造"
+        assert digest["industry_context"]["cycle_position"] == "高位震荡"
+        assert "industry_context" not in stored
+
+    def test_execute_and_digest_does_not_escalate_without_tier1_confirmation(self):
+        from engine.agent.data_hunger import DataHungerService
+        from engine.industry.schemas import CapitalStructure, IndustryCognition
+
+        hunger = DataHungerService(
+            db=self.db,
+            agent_service=self.svc,
+            info_engine=_FakeInfoEngine(
+                news=[{"title": "市场传闻发酵", "content": "社交媒体热议"}],
+                announcement_error=RuntimeError("announcements unavailable"),
+            ),
+            industry_engine=_FakeIndustryEngine(
+                IndustryCognition(
+                    industry="饮料制造",
+                    target="600519",
+                    cycle_position="高位震荡",
+                    catalysts=[],
+                    risks=["情绪过热"],
+                    core_drivers=["渠道反馈"],
+                    as_of_date="2026-03-22",
+                ),
+                CapitalStructure(
+                    code="600519",
+                    as_of_date="2026-03-22",
+                    structure_summary="暂无新增主力确认",
+                ),
+            ),
+            daily_history_fetcher=lambda code: {"code": code, "history": []},
+            technical_indicator_fetcher=lambda code: {},
+        )
+
+        digest = run(
+            hunger.execute_and_digest(
+                "p1",
+                "run-1",
+                "600519",
+                triggers=[{"signal_id": "sig-1", "matched_keywords": ["传闻"]}],
+            )
+        )
+
+        assert digest["suggested_action"] in {"ignore", "monitor"}
+        assert digest["impact_assessment"] != "reassess"
+        assert "daily_history" in digest["missing_tier1_evidence"]
+        assert "announcements" in digest["missing_tier1_evidence"]

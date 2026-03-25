@@ -83,6 +83,14 @@ async def health():
     return get_industry_engine().health_check()
 
 
+@router.get("/bridge/{target}")
+async def bridge_market_assets(target: str, market: str = "", limit: int = 10):
+    """获取跨市场桥接资产"""
+    from engine.industry import get_industry_engine
+    ie = get_industry_engine()
+    return ie.bridge_market_assets(target=target, market=market, limit=limit)
+
+
 # ── 产业链推演端点 ──────────────────────────────────────
 
 from pydantic import BaseModel

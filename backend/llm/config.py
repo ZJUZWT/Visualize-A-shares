@@ -58,6 +58,34 @@ class LLMConfig(BaseModel):
         description="模型名称"
     )
 
+    # 快模型覆盖配置（为空时回退到默认模型）
+    fast_provider: str | None = Field(
+        default=None,
+        description="快模型 provider，未配置时继承 provider"
+    )
+    fast_api_key: str | None = Field(
+        default=None,
+        description="快模型 API Key，未配置时继承 api_key"
+    )
+    fast_base_url: str | None = Field(
+        default=None,
+        description="快模型 Base URL，未配置时继承 base_url"
+    )
+    fast_model: str | None = Field(
+        default=None,
+        description="快模型名称，未配置时回退到默认模型"
+    )
+    fast_temperature: float | None = Field(
+        default=None,
+        ge=0.0, le=2.0,
+        description="快模型温度，未配置时继承 temperature"
+    )
+    fast_max_tokens: int | None = Field(
+        default=None,
+        ge=64, le=32768,
+        description="快模型最大输出 token，未配置时继承 max_tokens"
+    )
+
     # 生成参数
     temperature: float = Field(
         default=0.7,
@@ -90,8 +118,22 @@ class LLMConfig(BaseModel):
             api_key=os.getenv("LLM_API_KEY", ""),
             base_url=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
             model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
+            fast_provider=os.getenv("LLM_FAST_PROVIDER") or None,
+            fast_api_key=os.getenv("LLM_FAST_API_KEY") or None,
+            fast_base_url=os.getenv("LLM_FAST_BASE_URL") or None,
+            fast_model=os.getenv("LLM_FAST_MODEL") or None,
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "2048")),
+            fast_temperature=(
+                float(os.getenv("LLM_FAST_TEMPERATURE"))
+                if os.getenv("LLM_FAST_TEMPERATURE")
+                else None
+            ),
+            fast_max_tokens=(
+                int(os.getenv("LLM_FAST_MAX_TOKENS"))
+                if os.getenv("LLM_FAST_MAX_TOKENS")
+                else None
+            ),
             system_prompt=os.getenv("LLM_SYSTEM_PROMPT", cls.model_fields["system_prompt"].default),
         )
 

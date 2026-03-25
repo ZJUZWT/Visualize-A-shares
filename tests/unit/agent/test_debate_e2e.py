@@ -8,6 +8,7 @@ from engine.arena.schemas import Blackboard, AgentVerdict
 from engine.arena.debate import run_debate
 from engine.arena.memory import AgentMemory
 from engine.arena.data_fetcher import DataFetcher
+from engine.industry.schemas import CapitalStructure, IndustryCognition
 
 
 def _make_debater_response(round_num: int, concede: bool = False) -> str:
@@ -65,7 +66,59 @@ def mock_memory():
 
 @pytest.fixture
 def mock_data_fetcher():
-    return MagicMock(spec=DataFetcher)
+    fetcher = MagicMock(spec=DataFetcher)
+
+    async def _fetch_by_request(req):
+        code = req.params.get("code", "600519")
+        if req.action == "get_stock_info":
+            return {
+                "code": code,
+                "name": "贵州茅台" if code == "600519" else "平安银行",
+                "industry": "白酒" if code == "600519" else "银行",
+            }
+        if req.action == "get_daily_history":
+            return {
+                "code": code,
+                "days": req.params.get("days", 60),
+                "recent": [
+                    {
+                        "date": "2026-03-13",
+                        "open": 1500.0,
+                        "high": 1510.0,
+                        "low": 1490.0,
+                        "close": 1505.0,
+                        "pct_chg": 1.2,
+                        "turnover_rate": 0.8,
+                    }
+                ],
+            }
+        if req.action == "get_news":
+            return [{"title": "测试新闻", "sentiment": "neutral"}]
+        return {}
+
+    fetcher.fetch_by_request.side_effect = _fetch_by_request
+    return fetcher
+
+
+@pytest.fixture
+def mock_industry_engine():
+    engine = MagicMock()
+    engine.analyze = AsyncMock(return_value=IndustryCognition(
+        industry="白酒",
+        target="600519",
+        upstream=["高粱", "包装"],
+        downstream=["经销商", "消费终端"],
+        common_traps=["渠道库存误判"],
+        cycle_position="高位震荡",
+        as_of_date="2026-03-14",
+    ))
+    engine.get_capital_structure = AsyncMock(return_value=CapitalStructure(
+        code="600519",
+        as_of_date="2026-03-14",
+        turnover_rate=0.8,
+        structure_summary="主力资金中性",
+    ))
+    return engine
 
 
 def _make_mock_llm(rounds: int, bull_concede_round: int | None = None):
@@ -100,7 +153,7 @@ class TestDebateE2E:
     """完整辩论流程冒烟测试"""
 
     @pytest.mark.asyncio
-    async def test_full_3_round_debate(self, mock_memory, mock_data_fetcher):
+    async def test_full_3_round_debate(self, mock_memory, mock_data_fetcher, mock_industry_engine):
         """3 轮辩论 → 裁判总结，验证 SSE 事件序列"""
         mock_llm = _make_mock_llm(rounds=3)
 
@@ -119,7 +172,10 @@ class TestDebateE2E:
         )
 
         events = []
-        with patch("engine.arena.debate.persist_debate", new_callable=AsyncMock):
+        with (
+            patch("engine.arena.debate.persist_debate", new_callable=AsyncMock),
+            patch("engine.industry.get_industry_engine", return_value=mock_industry_engine),
+        ):
             async for event in run_debate(bb, mock_llm, mock_memory, mock_data_fetcher):
                 events.append(event)
 
@@ -145,7 +201,7 @@ class TestDebateE2E:
         assert bb.round == 3
 
     @pytest.mark.asyncio
-    async def test_early_termination_bull_concedes(self, mock_memory, mock_data_fetcher):
+    async def test_early_termination_bull_concedes(self, mock_memory, mock_data_fetcher, mock_industry_engine):
         """多头第 1 轮认输 → 提前终止"""
         mock_llm = _make_mock_llm(rounds=1, bull_concede_round=1)
 
@@ -156,7 +212,10 @@ class TestDebateE2E:
         )
 
         events = []
-        with patch("engine.arena.debate.persist_debate", new_callable=AsyncMock):
+        with (
+            patch("engine.arena.debate.persist_debate", new_callable=AsyncMock),
+            patch("engine.industry.get_industry_engine", return_value=mock_industry_engine),
+        ):
             async for event in run_debate(bb, mock_llm, mock_memory, mock_data_fetcher):
                 events.append(event)
 
@@ -168,7 +227,7 @@ class TestDebateE2E:
         assert len(round_starts) == 1
 
     @pytest.mark.asyncio
-    async def test_llm_stream_failure_uses_fallback(self, mock_memory, mock_data_fetcher):
+    async def test_llm_stream_failure_uses_fallback(self, mock_memory, mock_data_fetcher, mock_industry_engine):
         """chat_stream 异常时使用 fallback，辩论不中断"""
         llm = AsyncMock()
         call_count = [0]
@@ -199,7 +258,10 @@ class TestDebateE2E:
         )
 
         events = []
-        with patch("engine.arena.debate.persist_debate", new_callable=AsyncMock):
+        with (
+            patch("engine.arena.debate.persist_debate", new_callable=AsyncMock),
+            patch("engine.industry.get_industry_engine", return_value=mock_industry_engine),
+        ):
             async for event in run_debate(bb, llm, mock_memory, mock_data_fetcher):
                 events.append(event)
 

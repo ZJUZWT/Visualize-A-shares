@@ -11,6 +11,37 @@ export interface AgentState {
   updated_at: string | null;
 }
 
+export type AgentPetMood = "idle" | "thinking" | "training" | "battle" | "drawdown";
+
+export interface AgentVerificationSuiteResult {
+  mode: "default" | "smoke";
+  overall_status: "pass" | "warn" | "fail";
+  scenario_id: string | null;
+  portfolio_id: string | null;
+  seed_summary: Record<string, unknown>;
+  demo_verification: Record<string, unknown>;
+  backtest: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+  next_actions: string[];
+}
+
+export interface PetConsoleViewModel {
+  pet: {
+    mood: AgentPetMood;
+    statusLabel: string;
+    statusMessage: string;
+  };
+  training: {
+    modeLabel: string;
+    statusTone: "pass" | "warn" | "fail" | "idle";
+    summary: string;
+  };
+  battle: {
+    readinessLabel: string;
+    statusMessage: string;
+  };
+}
+
 export interface AgentCandidate {
   stock_code: string;
   stock_name: string;
@@ -222,6 +253,29 @@ export interface AgentReplaySnapshot {
   };
 }
 
+export interface AgentReplayLearning {
+  portfolio_id: string;
+  date: string | null;
+  what_ai_knew: {
+    trade_theses: string[];
+    plan_reasoning: string[];
+    trade_reasons: string[];
+    run_ids: string[];
+  };
+  what_happened: {
+    review_statuses: string[];
+    next_day_move_pct: number | null;
+    total_asset_mark_to_market_close: number | null;
+    total_asset_realized_only_close: number | null;
+  };
+  counterfactual: {
+    would_change: boolean;
+    action_bias: string | null;
+    rationale: string | null;
+  };
+  lesson_summary: string | null;
+}
+
 export interface ReviewRecord {
   id: string;
   brain_run_id?: string | null;
@@ -404,6 +458,34 @@ export interface AgentChatEntry {
 }
 
 export type AgentLeftPanelTab = "console" | "memo_inbox";
+export type AgentPageTab = "pet" | "training" | "battle" | "backtest";
+
+export interface AgentBacktestSummary {
+  run_id: string;
+  status: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  total_return?: number | null;
+  max_drawdown?: number | null;
+  trade_count?: number | null;
+  win_rate?: number | null;
+  review_count?: number | null;
+  memory_added?: number | null;
+  memory_updated?: number | null;
+  memory_retired?: number | null;
+  buy_and_hold_return?: number | null;
+}
+
+export interface AgentBacktestDay {
+  id?: string;
+  run_id?: string | null;
+  portfolio_id?: string | null;
+  trade_date: string;
+  brain_run_id?: string | null;
+  review_created?: boolean | null;
+  memory_delta?: Record<string, unknown> | null;
+  created_at?: string | null;
+}
 
 export type AgentStrategyExecutionDecision = "adopted" | "rejected";
 export type AgentStrategyExecutionIntent = "adopt" | "reject";

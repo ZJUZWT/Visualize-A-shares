@@ -11,8 +11,7 @@ import JudgeVerdictOverlay from "./JudgeVerdictOverlay";
 import StopConfirmModal from "./StopConfirmModal";
 import SummaryCard from "./SummaryCard";
 import type { PartialSummary } from "@/types/debate";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+import { API_BASE } from "@/lib/api-base";
 
 export default function DebatePage() {
   const {

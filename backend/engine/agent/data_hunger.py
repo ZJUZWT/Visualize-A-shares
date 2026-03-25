@@ -39,6 +39,117 @@ def _join_text(item: dict[str, Any]) -> str:
     return " ".join(part for part in parts if part).strip()
 
 
+def _has_history_rows(daily_history: dict[str, Any]) -> bool:
+    history = daily_history.get("history")
+    return isinstance(history, list) and len(history) > 0
+
+
+def _has_technical_signal(technical_indicators: dict[str, Any]) -> bool:
+    return bool(technical_indicators)
+
+
+def _build_immunity_assessment(
+    *,
+    triggers: list[dict[str, Any]],
+    news_list: list[dict[str, Any]],
+    announcement_list: list[dict[str, Any]],
+    industry_context: dict[str, Any],
+    daily_history: dict[str, Any],
+    technical_indicators: dict[str, Any],
+    missing_sources: list[str],
+) -> dict[str, Any]:
+    tier1_confirmed = []
+    if announcement_list:
+        tier1_confirmed.append("announcements")
+    if _has_history_rows(daily_history):
+        tier1_confirmed.append("daily_history")
+
+    tier2_confirmed = []
+    if industry_context:
+        tier2_confirmed.append("industry_context")
+    if _has_technical_signal(technical_indicators):
+        tier2_confirmed.append("technical_indicators")
+
+    tier3_confirmed = []
+    if news_list:
+        tier3_confirmed.append("news")
+    if triggers:
+        tier3_confirmed.append("watch_signals")
+
+    missing_tier1_evidence = [
+        name for name in ("announcements", "daily_history")
+        if name not in tier1_confirmed
+    ]
+    for source in missing_sources:
+        if source in {"announcements", "daily_history"} and source not in missing_tier1_evidence:
+            missing_tier1_evidence.append(source)
+
+    if len(tier1_confirmed) >= 2:
+        evidence_tier = "tier1"
+    elif tier1_confirmed and (tier2_confirmed or tier3_confirmed):
+        evidence_tier = "mixed"
+    elif tier2_confirmed:
+        evidence_tier = "tier2"
+    else:
+        evidence_tier = "tier3"
+
+    immunity_checks = [
+        {
+            "question": "这是否来自 Tier 1 证据？",
+            "result": "pass" if tier1_confirmed else "fail",
+            "detail": tier1_confirmed or ["none"],
+        },
+        {
+            "question": "是否只是单条消息或情绪扰动？",
+            "result": "warn" if news_list and not tier1_confirmed else "pass",
+            "detail": ["news_only"] if news_list and not tier1_confirmed else ["not_news_only"],
+        },
+        {
+            "question": "是否缺少能改策略的确认数据？",
+            "result": "warn" if missing_tier1_evidence else "pass",
+            "detail": missing_tier1_evidence or ["complete"],
+        },
+        {
+            "question": "价格/走势是否提供辅助确认？",
+            "result": "pass" if _has_history_rows(daily_history) or _has_technical_signal(technical_indicators) else "fail",
+            "detail": ["confirmed"] if _has_history_rows(daily_history) or _has_technical_signal(technical_indicators) else ["missing"],
+        },
+        {
+            "question": "行业上下文是否支持本次变化？",
+            "result": "pass" if industry_context else "fail",
+            "detail": [industry_context.get("cycle_position") or "missing"] if industry_context else ["missing"],
+        },
+        {
+            "question": "结论是否需要先观察而不是立刻改策略？",
+            "result": "pass" if missing_tier1_evidence or news_list else "pass",
+            "detail": ["monitor_first" if (missing_tier1_evidence or news_list) else "actionable"],
+        },
+    ]
+
+    if triggers and not missing_tier1_evidence and tier1_confirmed:
+        suggested_action = "reassess"
+    elif triggers or tier1_confirmed or tier2_confirmed or tier3_confirmed:
+        suggested_action = "monitor"
+    else:
+        suggested_action = "ignore"
+
+    strategy_change_bias = (
+        "needs_tier1_confirmation"
+        if missing_tier1_evidence
+        else "eligible_for_reassessment"
+        if suggested_action == "reassess"
+        else "observe_only"
+    )
+
+    return {
+        "evidence_tier": evidence_tier,
+        "suggested_action": suggested_action,
+        "strategy_change_bias": strategy_change_bias,
+        "missing_tier1_evidence": missing_tier1_evidence,
+        "immunity_checks": immunity_checks,
+    }
+
+
 class DataHungerService:
     """Fetches and digests multi-source evidence before final decisions."""
 
@@ -183,13 +294,22 @@ class DataHungerService:
         risk_flags = list(industry_context.get("risk_points") or [])
         if missing_sources:
             risk_flags.append(f"missing_sources={','.join(missing_sources)}")
+        immunity = _build_immunity_assessment(
+            triggers=triggers,
+            news_list=news_list,
+            announcement_list=announcement_list,
+            industry_context=industry_context,
+            daily_history=daily_history,
+            technical_indicators=technical_indicators,
+            missing_sources=missing_sources,
+        )
 
         impact_assessment = "none"
         if key_evidence:
             impact_assessment = "noted"
-        if triggers:
+        if immunity["suggested_action"] == "monitor":
             impact_assessment = "minor_adjust"
-        if triggers and industry_context.get("risk_points"):
+        if immunity["suggested_action"] == "reassess":
             impact_assessment = "reassess"
 
         summary_parts = [
@@ -219,7 +339,6 @@ class DataHungerService:
         raw_summary = {
             "news": news_list,
             "announcements": announcement_list,
-            "industry_context": industry_context,
             "daily_history": daily_history,
             "technical_indicators": technical_indicators,
             "triggers": triggers,
@@ -229,6 +348,11 @@ class DataHungerService:
             "key_evidence": key_evidence,
             "risk_flags": risk_flags,
             "watch_signal_updates": watch_signal_updates,
+            "evidence_tier": immunity["evidence_tier"],
+            "suggested_action": immunity["suggested_action"],
+            "strategy_change_bias": immunity["strategy_change_bias"],
+            "missing_tier1_evidence": immunity["missing_tier1_evidence"],
+            "immunity_checks": immunity["immunity_checks"],
         }
         digest = await self.agent_service.create_info_digest(
             portfolio_id=portfolio_id,
@@ -246,7 +370,13 @@ class DataHungerService:
             "summary": summary,
             "key_evidence": key_evidence,
             "risk_flags": risk_flags,
+            "industry_context": industry_context,
             "watch_signal_updates": watch_signal_updates,
+            "evidence_tier": immunity["evidence_tier"],
+            "suggested_action": immunity["suggested_action"],
+            "strategy_change_bias": immunity["strategy_change_bias"],
+            "missing_tier1_evidence": immunity["missing_tier1_evidence"],
+            "immunity_checks": immunity["immunity_checks"],
         }
 
     def _get_info_engine(self):

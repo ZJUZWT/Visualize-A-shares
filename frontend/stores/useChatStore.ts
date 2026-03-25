@@ -9,10 +9,10 @@
  */
 
 import { create } from "zustand";
+import { API_BASE } from "@/lib/api-base";
 import { useTerrainStore } from "./useTerrainStore";
 
-const SSE_API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+const SSE_API_BASE = API_BASE;
 
 // ─── Types ────────────────────────────────────────
 

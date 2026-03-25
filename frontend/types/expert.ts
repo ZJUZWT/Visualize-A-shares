@@ -1,4 +1,4 @@
-export type ExpertType = "data" | "quant" | "info" | "industry" | "rag";
+export type ExpertType = "data" | "quant" | "info" | "industry" | "rag" | "short_term";
 
 export interface ExpertProfile {
   type: ExpertType;
@@ -11,6 +11,7 @@ export interface ExpertProfile {
 
 export type ExpertEventType =
   | "thinking_start"
+  | "reasoning_summary"
   | "thinking_round"
   | "graph_recall"
   | "tool_call"
@@ -71,11 +72,55 @@ export interface BeliefUpdatedData {
   reason: string;
 }
 
+export interface ClarificationOption {
+  id: string;
+  label: string;
+  title: string;
+  description: string;
+  focus: string;
+}
+
+export interface ClarificationRequestData {
+  should_clarify: boolean;
+  question_summary: string;
+  options: ClarificationOption[];
+  reasoning: string;
+  skip_option: ClarificationOption;
+}
+
+export interface ClarificationSelection {
+  option_id: string;
+  label: string;
+  title: string;
+  focus: string;
+  skip: boolean;
+}
+
+export interface ReasoningSummaryData {
+  summary: string;
+}
+
+export interface SelfCritiqueData {
+  summary: string;
+  risks: string[];
+  missing_data: string[];
+  counterpoints: string[];
+  confidence_note: string;
+}
+
 export type ThinkingItem =
+  | {
+      type: "clarification_request";
+      data: ClarificationRequestData;
+      status: "pending" | "selected" | "skipped";
+      selectedOption?: ClarificationSelection;
+    }
   | { type: "graph_recall"; nodes: GraphNode[] }
+  | { type: "reasoning_summary"; data: ReasoningSummaryData }
   | { type: "thinking_round"; round: number; maxRounds: number }
   | { type: "tool_call"; data: ToolCallData; result?: ToolResultData; status: "pending" | "done" | "error" }
   | { type: "tool_result"; data: ToolResultData }
+  | { type: "self_critique"; data: SelfCritiqueData }
   | { type: "belief_updated"; data: BeliefUpdatedData };
 
 export interface ExpertMessage {
@@ -88,7 +133,15 @@ export interface ExpertMessage {
   sendStatus?: "pending" | "sent" | "failed";
 }
 
-export type ExpertStatus = "idle" | "thinking" | "error";
+export type ExpertStatus = "idle" | "clarifying" | "thinking" | "error";
+
+export interface PendingClarification {
+  sessionId: string | null;
+  userMessageId: string;
+  expertMessageId: string;
+  request: ClarificationRequestData;
+  originalMessage: string;
+}
 
 /** 对话 Session */
 export interface Session {
@@ -141,5 +194,13 @@ export const DEFAULT_EXPERT_PROFILES: ExpertProfile[] = [
     color: "#EC4899",
     description: "自由对话、知识图谱、信念系统、综合分析",
     suggestions: ["宁德时代近期走势如何？", "A股政策面有什么变化？", "新能源板块值得关注吗？", "帮我做一份市场研判"],
+  },
+  {
+    type: "short_term",
+    name: "短线专家",
+    icon: "⚡",
+    color: "#F97316",
+    description: "短线交易、量价节奏、板块轮动、1-5日操作策略",
+    suggestions: ["今天有什么短线机会？", "这只票现在能不能做？", "帮我看下支撑位和止损位", "这个板块谁是龙头？"],
   },
 ];

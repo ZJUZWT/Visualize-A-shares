@@ -219,7 +219,7 @@ scripts\setup.bat
 scripts\start.bat
 ```
 
-### 6.2 Docker Compose
+### 6.2 Docker Compose（本地）
 
 ```bash
 cp .env.example .env
@@ -230,9 +230,47 @@ docker compose up
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | backend | 8000 | FastAPI + Uvicorn |
-| frontend | 3000 | Next.js Dev Server |
+| frontend | 3000 | Next.js Production Server |
 
-### 6.3 手动启动 — 后端（FastAPI）
+### 6.3 生产部署（推荐）
+
+```bash
+cp .env.production.example .env.production
+# 修改域名、CORS、LLM API Key、Tunnel Token（如使用）
+
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+```
+
+生产拓扑：
+
+- `backend`：FastAPI + Uvicorn
+- `frontend`：Next.js 生产构建
+- `nginx`：统一反向代理 `/` 与 `/api`
+- `cloudflared`：可选 profile，用于免公网 IP 暴露服务
+
+#### 可选：Cloudflare Tunnel
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml --profile tunnel up -d
+```
+
+Tunnel 配置示例文件：
+
+- `deploy/cloudflared/config.yml.example`
+
+#### Nginx 与 SSL
+
+- 主配置：`deploy/nginx/nginx.conf`
+- 证书目录：`deploy/ssl/`
+- 若已有证书，可按文件内注释启用 `443 ssl` server block
+
+#### 持久化目录
+
+- `./data` → DuckDB / ChromaDB / expert_kg.json
+- `./logs` → 后端日志
+- `./deploy/ssl` → Nginx SSL 证书挂载
+
+### 6.4 手动启动 — 后端（FastAPI）
 
 ```bash
 cd backend
@@ -253,7 +291,7 @@ python main.py
 | CORS 允许 | `localhost:3000`, `localhost:5173` |
 | 日志目录 | `logs/engine_{date}.log`（保留 30 天） |
 
-### 6.4 手动启动 — 前端（Next.js）
+### 6.5 手动启动 — 前端（Next.js）
 
 ```bash
 cd frontend

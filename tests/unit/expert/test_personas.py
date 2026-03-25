@@ -7,6 +7,9 @@ from engine.expert.personas import (
     INITIAL_STANCES,
     THINK_SYSTEM_PROMPT,
     BELIEF_UPDATE_PROMPT,
+    PERSONA_PROFILES,
+    build_reply_system,
+    build_think_prompt,
     format_beliefs_for_prompt,
     format_stances_for_prompt,
     format_graph_context,
@@ -48,6 +51,59 @@ def test_belief_update_prompt_valid():
     assert "{beliefs_context}" in BELIEF_UPDATE_PROMPT
     assert "{user_message}" in BELIEF_UPDATE_PROMPT
     assert "{expert_reply}" in BELIEF_UPDATE_PROMPT
+
+
+def test_persona_profiles_exist_for_rag_and_short_term():
+    assert "rag" in PERSONA_PROFILES
+    assert "short_term" in PERSONA_PROFILES
+    assert len(PERSONA_PROFILES["rag"]["few_shot_examples"]) >= 3
+    assert len(PERSONA_PROFILES["short_term"]["few_shot_examples"]) >= 3
+
+
+def test_build_think_prompt_for_rag_emphasizes_margin_of_safety_and_conflict_posture():
+    prompt = build_think_prompt(
+        "rag",
+        current_date="2026年03月24日 10:00 周二",
+        graph_context="测试图谱",
+        memory_context="测试记忆",
+    )
+
+    assert "安全边际" in prompt
+    assert "仓位管理" in prompt
+    assert "不追涨" in prompt
+    assert "不做日内判断" in prompt
+    assert "可以与短线专家得出不同结论" in prompt
+    assert "Few-shot" in prompt
+
+
+def test_build_think_prompt_for_short_term_emphasizes_timing_and_stop_loss():
+    prompt = build_think_prompt(
+        "short_term",
+        current_date="2026年03月24日 10:00 周二",
+        graph_context="测试图谱",
+        memory_context="测试记忆",
+    )
+
+    assert "量价关系" in prompt
+    assert "盘口语言" in prompt
+    assert "止损" in prompt
+    assert "不谈估值PE" in prompt
+    assert "不谈三年规划" in prompt
+    assert "可以与投资顾问得出不同结论" in prompt
+    assert "Few-shot" in prompt
+
+
+def test_build_reply_systems_are_deliberately_distinct_between_personas():
+    rag = build_reply_system("rag", current_date="2026年03月24日 10:00 周二")
+    short_term = build_reply_system("short_term", current_date="2026年03月24日 10:00 周二")
+
+    assert "总师爷" in rag
+    assert "风险收益比" in rag
+    assert "不轻易推荐" in rag
+    assert "游资一哥" in short_term
+    assert "现在就进" in short_term
+    assert "别犹豫出" in short_term
+    assert "不谈三年规划" in short_term
 
 
 def test_format_beliefs_for_prompt_with_objects():

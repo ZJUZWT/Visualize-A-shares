@@ -414,6 +414,7 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
             async for event in expert.chat(
                 req.message, history=history,
                 deep_think=req.deep_think, max_rounds=req.max_rounds,
+                clarification_selection=req.clarification_selection,
             ):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":
@@ -442,6 +443,10 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
                     thinking_items.append({"type": "thinking_round", "data": event["data"]})
                 elif evt_type == "belief_updated":
                     thinking_items.append({"type": "belief_updated", "data": event["data"]})
+                elif evt_type == "reasoning_summary":
+                    thinking_items.append({"type": "reasoning_summary", "data": event["data"]})
+                elif evt_type == "self_critique":
+                    thinking_items.append({"type": "self_critique", "data": event["data"]})
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"{expert_type} expert chat 错误: {e}")
@@ -454,6 +459,22 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
             _auto_title(session_id, req.message)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/clarify/{expert_type}")
+async def clarify_expert_question(expert_type: ExpertType, req: ExpertChatRequest):
+    """深度思考模式的 clarification 阶段。"""
+    if expert_type not in ("rag", "short_term"):
+        return {"error": f"专家类型 {expert_type} 不支持 clarification"}
+
+    agent = get_expert_agent()
+    session_id = req.session_id or ""
+    history = _get_session_history(session_id) if session_id else []
+    persona = "short_term" if expert_type == "short_term" else "rag"
+    result = await agent.clarify(req.message, history=history, persona=persona)
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+    return result
 
 
 @router.post("/chat")
@@ -477,6 +498,7 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
             async for event in agent.chat(
                 req.message, history=history, persona=persona,
                 deep_think=req.deep_think, max_rounds=req.max_rounds,
+                clarification_selection=req.clarification_selection,
             ):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":
@@ -504,6 +526,10 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
                     thinking_items.append({"type": "belief_updated", "data": event["data"]})
                 elif evt_type == "graph_recall":
                     thinking_items.append({"type": "graph_recall", "data": event["data"]})
+                elif evt_type == "reasoning_summary":
+                    thinking_items.append({"type": "reasoning_summary", "data": event["data"]})
+                elif evt_type == "self_critique":
+                    thinking_items.append({"type": "self_critique", "data": event["data"]})
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"expert chat 错误: {e}")

@@ -5,7 +5,7 @@ StockScape LLM 模块 — 统一大模型抽象层
 用户只需配置 base_url + api_key + model 即可切换任意厂商
 """
 
-from .providers import LLMProviderFactory, BaseLLMProvider, ToolCallResult
+from .providers import LLMProviderFactory, BaseLLMProvider, ToolCallResult, ModelRouter
 from .config import LLMConfig, llm_settings
 
-__all__ = ["LLMProviderFactory", "BaseLLMProvider", "ToolCallResult", "LLMConfig", "llm_settings"]
+__all__ = ["LLMProviderFactory", "BaseLLMProvider", "ToolCallResult", "ModelRouter", "LLMConfig", "llm_settings"]

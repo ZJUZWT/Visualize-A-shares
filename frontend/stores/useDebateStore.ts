@@ -1,10 +1,9 @@
 import { create } from "zustand";
+import { API_BASE } from "@/lib/api-base";
 import type {
   DebateEntry, JudgeVerdict, DebateStatus,
   ObserverState, RoleState, DebateReplayRecord, RoundEval,
 } from "@/types/debate";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
 // 模块级变量，不放入 Zustand state，避免序列化问题
 let _abortController: AbortController | null = null;

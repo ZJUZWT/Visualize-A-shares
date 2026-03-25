@@ -59,6 +59,8 @@ class TestAgentDB:
             "daily_reviews",
             "weekly_reflections",
             "agent_memories",
+            "backtest_runs",
+            "backtest_days",
         }
         assert table_names == expected
 

@@ -43,6 +43,20 @@ class FakeChatRuntime:
         }
 
 
+class CapturingChatRuntime:
+    def __init__(self):
+        self.last_history = None
+
+    async def stream_reply(self, *, portfolio_id, session_id, message, history):
+        self.last_history = history
+        yield {
+            "event": "reply_complete",
+            "data": {
+                "full_text": "收到上下文",
+            },
+        }
+
+
 def _install_fake_runtime():
     try:
         import engine.agent.chat as chat_module
@@ -196,3 +210,55 @@ class TestMountedAgentChatRoutes:
                 },
             }
         ]
+
+    def test_stream_chat_events_injects_latest_industry_digest_context(self):
+        from engine.agent.chat import AgentChatService
+
+        run(
+            self.db.execute_write(
+                """
+                INSERT INTO agent.info_digests (
+                    id, portfolio_id, run_id, stock_code, digest_type,
+                    raw_summary, structured_summary, strategy_relevance,
+                    impact_assessment, missing_sources, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    "digest-ctx-1",
+                    "live",
+                    "run-ctx-1",
+                    "600519",
+                    "wake",
+                    "{}",
+                    '{"summary":"标的 600519 | industry=饮料制造 | cycle=高位震荡","key_evidence":["industry_cycle=高位震荡","capital=北向增持"]}',
+                    "monitor only",
+                    "minor_adjust",
+                    "[]",
+                    "2026-03-22T10:01:00",
+                ],
+            )
+        )
+
+        runtime = CapturingChatRuntime()
+        svc = AgentChatService(db=self.db, chat_runtime=runtime)
+        session = run(svc.create_session("live", "Industry Context"))
+
+        async def collect():
+            events = []
+            async for event in svc.stream_chat_events(
+                portfolio_id="live",
+                session_id=session["id"],
+                message="现在怎么看茅台？",
+            ):
+                events.append(event)
+            return events
+
+        events = run(collect())
+
+        assert events[-1]["data"]["full_text"] == "收到上下文"
+        assert runtime.last_history is not None
+        assert any(item["role"] == "system" for item in runtime.last_history)
+        system_messages = [item["content"] for item in runtime.last_history if item["role"] == "system"]
+        assert any("饮料制造" in content for content in system_messages)
+        assert any("高位震荡" in content for content in system_messages)

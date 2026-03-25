@@ -14,8 +14,9 @@ from engine.expert.knowledge_graph import KnowledgeGraph
 from engine.expert.personas import (
     INITIAL_BELIEFS,
     SHORT_TERM_BELIEFS,
-    THINK_SYSTEM_PROMPT,
     BELIEF_UPDATE_PROMPT,
+    build_reply_system,
+    build_think_prompt,
     format_graph_context,
     format_memory_context,
     format_beliefs_context,
@@ -24,16 +25,22 @@ from engine.expert.personas import (
 from engine.expert.schemas import (
     BeliefNode,
     BeliefUpdateOutput,
+    ClarificationOption,
+    ClarificationOutput,
+    ClarificationSelection,
     GraphEdge,
     MaterialNode,
     RegionNode,
+    SelfCritiqueOutput,
     SectorNode,
     StockNode,
     ThinkOutput,
     ToolCall,
 )
 from engine.expert.tools import ExpertTools
+from engine.runtime import ExecutionContext, ProgressiveEmitter, QueryPrefetcher, ToolExecutionPlanner
 from llm.context_guard import ContextGuard
+from llm import ModelRouter
 
 
 # 专家类型到中文名的映射
@@ -88,9 +95,16 @@ class ExpertAgent:
         chromadb_dir: str | None = None,
     ):
         self._tools = tools
-        self._llm = tools.llm_engine
+        self._model_router = ModelRouter.from_provider(tools.llm_engine)
+        self._llm = self._model_router.get("quality")
         self._lock = asyncio.Lock()
         self._context_guard = ContextGuard()
+        self._planner = ToolExecutionPlanner()
+        self._emitter = ProgressiveEmitter()
+        self._prefetcher = QueryPrefetcher(
+            getattr(tools, "data_engine", None),
+            stock_name_lookup=self._get_stock_name_map_for_runtime,
+        )
 
         # 知识图谱
         self._graph = KnowledgeGraph(kg_path)
@@ -108,6 +122,18 @@ class ExpertAgent:
                 logger.info(f"AgentMemory 初始化: {chromadb_dir}")
             except Exception as e:
                 logger.warning(f"AgentMemory 初始化失败，跳过记忆功能: {e}")
+
+    def _get_stock_name_map_for_runtime(self) -> dict[str, str]:
+        stock_name_map = getattr(self, "_stock_name_map", None)
+        if isinstance(stock_name_map, dict):
+            return stock_name_map
+        return type(self)._get_stock_name_map()
+
+    def _get_fast_llm(self):
+        return self._model_router.get("fast") if self._model_router else self._llm
+
+    def _get_quality_llm(self):
+        return self._model_router.get("quality") if self._model_router else self._llm
 
     def _seed_initial_beliefs(self) -> None:
         """将初始信念写入图谱（投资顾问 + 短线专家各自独立）"""
@@ -195,24 +221,21 @@ class ExpertAgent:
                 pass
             return any(kw.lower() in text_lower for kw in error_keywords)
 
-    async def execute_tools(self, tool_calls: list[ToolCall]) -> list[dict]:
+    async def execute_tools(self, tool_calls: list[ToolCall], context: ExecutionContext | None = None) -> list[dict]:
         """并行执行工具调用，返回 tool_results（兼容旧接口）"""
         if not tool_calls:
             return []
         results: list[dict] = []
-        async for r in self.execute_tools_streaming(tool_calls):
+        async for r in self.execute_tools_streaming(tool_calls, context=context):
             results.append(r)
         return results
 
-    async def execute_tools_streaming(self, tool_calls: list[ToolCall]) -> AsyncGenerator[dict, None]:
-        """两阶段并行执行工具调用，逐个完成时 yield 结果（用于流式推送）
-
-        阶段 1：数据专家 + 非专家工具（优先执行，为其他专家准备数据）
-        阶段 2：量化/资讯/产业链专家（等数据专家完成后再并发执行）
-
-        这样量化专家在获取技术指标、因子评分等数据时，
-        数据专家已经完成了数据拉取和快照刷新，避免"无数据"问题。
-        """
+    async def execute_tools_streaming(
+        self,
+        tool_calls: list[ToolCall],
+        context: ExecutionContext | None = None,
+    ) -> AsyncGenerator[dict, None]:
+        """基于依赖规划并行执行工具调用，逐个完成时 yield 结果。"""
         if not tool_calls:
             return
 
@@ -224,43 +247,15 @@ class ExpertAgent:
                 "result": result,
                 "is_expert": tc.engine == "expert",
             }
+        phases = self._planner.plan(tool_calls, context=context)
+        if len(phases) > 1:
+            logger.info(f"📋 依赖规划执行: " + " -> ".join(str(len(phase)) for phase in phases))
 
-        # ── 分组：量化专家需要等数据专家先完成（共享快照/日线缓存）──
-        # 资讯/产业链专家不依赖数据专家，可以直接并发
-        has_data_expert = any(tc.engine == "expert" and tc.action == "data" for tc in tool_calls)
-        has_quant_expert = any(tc.engine == "expert" and tc.action == "quant" for tc in tool_calls)
-
-        if not has_data_expert or not has_quant_expert:
-            # 没有 data+quant 同时存在，无需两阶段，直接全部并发
-            tasks = [asyncio.create_task(_exec(i, tc)) for i, tc in enumerate(tool_calls)]
+        for phase in phases:
+            tasks = [asyncio.create_task(_exec(i, tc)) for i, tc in enumerate(phase)]
             for coro in asyncio.as_completed(tasks):
                 _idx, result = await coro
                 yield result
-            return
-
-        # ── 两阶段执行：data 先行，quant 后行，其余并发 ──
-        phase1: list[tuple[int, ToolCall]] = []   # 数据专家 + 非专家工具 + 资讯/产业链
-        phase2: list[tuple[int, ToolCall]] = []   # 量化专家（等数据专家完成后执行）
-
-        for i, tc in enumerate(tool_calls):
-            if tc.engine == "expert" and tc.action == "quant":
-                phase2.append((i, tc))
-            else:
-                phase1.append((i, tc))
-
-        # ── 阶段 1：数据专家 + 资讯/产业链专家并发执行 ──
-        logger.info(f"📋 两阶段执行: 阶段1={len(phase1)}个(含数据专家), 阶段2={len(phase2)}个(量化专家)")
-        tasks1 = [asyncio.create_task(_exec(i, tc)) for i, tc in phase1]
-        for coro in asyncio.as_completed(tasks1):
-            _idx, result = await coro
-            yield result
-
-        # ── 阶段 2：数据专家已完成，量化专家可以安全访问数据 ──
-        logger.info(f"📋 阶段1完成，启动量化专家: {[tc.action for _, tc in phase2]}")
-        tasks2 = [asyncio.create_task(_exec(i, tc)) for i, tc in phase2]
-        for coro in asyncio.as_completed(tasks2):
-            _idx, result = await coro
-            yield result
 
     async def learn_from_context(self, message: str, tool_results: list[dict]) -> None:
         """图谱自动学习 — 从对话和工具结果中提取股票/板块/产业链节点"""
@@ -291,9 +286,150 @@ class ExpertAgent:
             events.append(event)
         return events
 
+    @staticmethod
+    def _merge_clarification_selection(
+        message: str,
+        clarification_selection: ClarificationSelection | dict | None,
+    ) -> str:
+        if not clarification_selection:
+            return message
+        selection = (
+            clarification_selection
+            if isinstance(clarification_selection, ClarificationSelection)
+            else ClarificationSelection(**clarification_selection)
+        )
+        if selection.skip:
+            return message
+        return (
+            f"{message}\n\n"
+            "【用户已确认的分析方向】\n"
+            f"- 选项：{selection.label}. {selection.title}\n"
+            f"- 重点：{selection.focus}\n"
+            "请优先围绕这个重点组织拆题、证据和最终回答。"
+        )
+
+    async def clarify(
+        self,
+        message: str,
+        history: list[dict] | None = None,
+        persona: str = "rag",
+    ) -> ClarificationOutput:
+        """为深度思考模式生成 clarification 选项。"""
+        _ = history or []
+        clean_message = (message or "").strip() or "当前问题"
+        question_summary = (
+            f"我理解你的问题是：{clean_message[:80]}"
+            + ("，想先明确分析重点再展开。" if persona == "rag" else "，想先明确这笔交易最该盯的短线焦点。")
+        )
+
+        if persona == "short_term":
+            options = [
+                ClarificationOption(
+                    id="timing",
+                    label="A",
+                    title="先看买点与节奏",
+                    description="确认现在能不能上、什么时候上。",
+                    focus="买点、节奏、执行窗口",
+                ),
+                ClarificationOption(
+                    id="technical",
+                    label="B",
+                    title="先看量价与技术位",
+                    description="判断支撑阻力、量能和技术信号。",
+                    focus="量价、技术位、支撑阻力",
+                ),
+                ClarificationOption(
+                    id="theme",
+                    label="C",
+                    title="先看板块与龙头",
+                    description="确认题材强弱和龙头辨识。",
+                    focus="板块强弱、龙头地位、题材发酵",
+                ),
+                ClarificationOption(
+                    id="risk",
+                    label="D",
+                    title="先看止损与撤退条件",
+                    description="先定义做错了怎么退。",
+                    focus="止损位、失效条件、风险控制",
+                ),
+            ]
+            reasoning = "短线问题通常有多个执行维度，先确认你最关心节奏、技术、板块还是风控，后续回答会更聚焦。"
+        else:
+            options = [
+                ClarificationOption(
+                    id="valuation",
+                    label="A",
+                    title="先看估值与安全边际",
+                    description="判断值不值、贵不贵、赔率够不够。",
+                    focus="估值、安全边际、风险收益比",
+                ),
+                ClarificationOption(
+                    id="fundamental",
+                    label="B",
+                    title="先看基本面与行业逻辑",
+                    description="判断生意质量和行业周期。",
+                    focus="基本面、行业周期、核心逻辑",
+                ),
+                ClarificationOption(
+                    id="position",
+                    label="C",
+                    title="先看仓位与操作策略",
+                    description="判断该不该买、怎么买、配多少。",
+                    focus="仓位管理、买入策略、持有计划",
+                ),
+                ClarificationOption(
+                    id="catalyst",
+                    label="D",
+                    title="先看催化与观察清单",
+                    description="先看需要继续确认什么，再决定出手。",
+                    focus="催化剂、验证点、观察清单",
+                ),
+            ]
+            reasoning = "投资顾问视角下，这类问题通常同时涉及价值、风险和执行方式，先确认分析重点能避免一股脑给结论。"
+
+        return ClarificationOutput(
+            should_clarify=True,
+            question_summary=question_summary,
+            options=options,
+            reasoning=reasoning,
+            skip_option=ClarificationOption(
+                id="skip",
+                label="S",
+                title="跳过，直接分析",
+                description="不做澄清，直接进入完整分析。",
+                focus="完整分析",
+            ),
+        )
+
+    async def _self_critique(
+        self,
+        message: str,
+        reply: str,
+        tool_results: list[dict],
+        persona: str = "rag",
+    ) -> SelfCritiqueOutput:
+        """在最终回复前补一段轻量自我质疑。"""
+        _ = (message, reply, tool_results)
+        if persona == "short_term":
+            return SelfCritiqueOutput(
+                summary="短线判断更依赖盘中节奏，若量能和承接不配合，执行质量会明显下降。",
+                risks=["量能不足时，突破很容易失败。"],
+                missing_data=["盘中承接和次日情绪还未验证。"],
+                counterpoints=["如果龙头强度不够，跟风股更容易先掉队。"],
+                confidence_note="短线结论对执行时点敏感。",
+            )
+        return SelfCritiqueOutput(
+            summary="结论仍依赖后续基本面和市场验证，若安全边际不足，操作节奏应更保守。",
+            risks=["行业逻辑若继续走弱，原判断会被削弱。"],
+            missing_data=["关键验证点还需要后续财务或行业数据确认。"],
+            counterpoints=["如果价格已经提前透支预期，风险收益比会变差。"],
+            confidence_note="更适合结合仓位管理分步判断。",
+        )
+
     async def chat(
         self, message: str, history: list[dict] | None = None, persona: str = "rag",
         deep_think: bool = False, max_rounds: int = 3,
+        clarification_selection: ClarificationSelection | dict | None = None,
     ) -> AsyncGenerator[dict, None]:
         """完整对话流程，yield 结构化事件 dict
 
@@ -305,12 +441,24 @@ class ExpertAgent:
             max_rounds: deep_think 模式下最大工具调用轮数
         """
         conv_history = history or []
+        analysis_message = self._merge_clarification_selection(message, clarification_selection)
         agent_role = "short_term" if persona == "short_term" else "expert"
         t0_chat = time.monotonic()
+        runtime_context = ExecutionContext(
+            message=analysis_message,
+            module="expert",
+            history=conv_history,
+            persona=persona,
+        )
+        prefetch_task = asyncio.create_task(self._prefetcher.prefetch(analysis_message, runtime_context))
         yield {"event": "thinking_start", "data": {}}
 
         # 1-3. 图谱召回 + 记忆召回 + think
-        recalled_nodes, memories, think_output = await self.recall_and_think(message, conv_history, persona=persona)
+        recalled_nodes, memories, think_output = await self.recall_and_think(analysis_message, conv_history, persona=persona)
+        runtime_context = await prefetch_task
+        prefetch_event = self._emitter.build_prefetch_ready(runtime_context)
+        if prefetch_event:
+            yield prefetch_event
         yield {"event": "graph_recall", "data": {"nodes": [
             {
                 "id": n["id"],
@@ -320,6 +468,8 @@ class ExpertAgent:
             }
             for n in recalled_nodes
         ]}}
+        if think_output.reasoning.strip():
+            yield {"event": "reasoning_summary", "data": {"summary": think_output.reasoning.strip()}}
 
         # ══════════════════════════════════════════════════════
         # 多轮渐进工具调用循环
@@ -328,6 +478,7 @@ class ExpertAgent:
         all_tool_results: list[dict] = []
         round_num = 0
         current_tool_calls = think_output.tool_calls if think_output.needs_data else []
+        early_insight_emitted = False
 
         while round_num < effective_max_rounds:
             round_num += 1
@@ -356,7 +507,7 @@ class ExpertAgent:
                 if tc.engine == "expert":
                     q = (tc.params.get("question") or "").strip()
                     if not q or len(q) < 4:
-                        tc.params["question"] = message
+                        tc.params["question"] = analysis_message
                 is_expert_call = tc.engine == "expert"
                 expert_label = EXPERT_NAMES.get(tc.action, tc.action) if is_expert_call else ""
                 yield {"event": "tool_call", "data": {
@@ -366,7 +517,7 @@ class ExpertAgent:
                 }}
 
             round_results: list[dict] = []
-            async for r in self.execute_tools_streaming(tool_calls):
+            async for r in self.execute_tools_streaming(tool_calls, context=runtime_context):
                 round_results.append(r)
                 is_expert = r.get("is_expert")
                 expert_label = EXPERT_NAMES.get(r["action"], r["action"]) if is_expert else ""
@@ -392,6 +543,11 @@ class ExpertAgent:
                     "round": round_num if deep_think else None,
                     **chart_data,
                 }}
+                if not early_insight_emitted:
+                    early_insight = self._emitter.build_early_insight(r)
+                    if early_insight:
+                        yield early_insight
+                        early_insight_emitted = True
 
             all_tool_results.extend(round_results)
 
@@ -405,7 +561,7 @@ class ExpertAgent:
                 f"本轮 {len(round_results)} 条, 累计 {len(all_tool_results)} 条"
             )
             next_think = await self._think_with_results(
-                message, recalled_nodes, memories, all_tool_results, conv_history, persona, round_num
+                analysis_message, recalled_nodes, memories, all_tool_results, conv_history, persona, round_num
             )
             if not next_think.needs_data or not next_think.tool_calls:
                 logger.info(f"🏁 [{persona}] deep_think 第{round_num}轮后 LLM 认为数据充足，停止补查")
@@ -423,13 +579,24 @@ class ExpertAgent:
             logger.debug(f"开始 _reply_stream, tool_results={len(tool_results)}条, "
                          f"expert={len([r for r in tool_results if r.get('is_expert')])}条")
             async for token, full_text in self.generate_reply_stream(
-                message, recalled_nodes, memories, tool_results, conv_history, persona=persona
+                analysis_message, recalled_nodes, memories, tool_results, conv_history, persona=persona
             ):
                 expert_reply = full_text
                 yield {"event": "reply_token", "data": {"token": token}}
             logger.debug(f"_reply_stream 完成, 回复长度={len(expert_reply)}")
         else:
             expert_reply = "LLM 未配置，无法生成回复。"
+
+        if self._llm and expert_reply:
+            critique = await self._self_critique(
+                analysis_message,
+                expert_reply,
+                tool_results,
+                persona=persona,
+            )
+            if not isinstance(critique, SelfCritiqueOutput):
+                critique = SelfCritiqueOutput(**critique)
+            yield {"event": "self_critique", "data": critique.model_dump()}
 
         yield {"event": "reply_complete", "data": {"full_text": expert_reply}}
 
@@ -586,6 +753,9 @@ class ExpertAgent:
     ) -> ThinkOutput:
         """多轮渐进模式：带上之前工具结果，让 LLM 决定是否需要继续补查"""
         from llm.providers import ChatMessage
+        llm = self._get_fast_llm()
+        if not llm:
+            return ThinkOutput(needs_data=False)
 
         # 构建已有工具结果摘要
         results_summary_parts = []
@@ -596,19 +766,12 @@ class ExpertAgent:
             results_summary_parts.append(f"[{engine}.{action}]: {result_text}")
         results_summary = "\n---\n".join(results_summary_parts)
 
-        if persona == "short_term":
-            from engine.expert.personas import SHORT_TERM_THINK_PROMPT
-            base_prompt = SHORT_TERM_THINK_PROMPT.format(
-                current_date=get_current_date_context(),
-                graph_context=format_graph_context(nodes),
-                memory_context=format_memory_context(memories),
-            )
-        else:
-            base_prompt = THINK_SYSTEM_PROMPT.format(
-                current_date=get_current_date_context(),
-                graph_context=format_graph_context(nodes),
-                memory_context=format_memory_context(memories),
-            )
+        base_prompt = build_think_prompt(
+            persona,
+            current_date=get_current_date_context(),
+            graph_context=format_graph_context(nodes),
+            memory_context=format_memory_context(memories),
+        )
 
         supplement = f"""
 
@@ -633,7 +796,7 @@ class ExpertAgent:
             messages.append(ChatMessage("user", message))
 
             chunks: list[str] = []
-            async for token in self._llm.chat_stream(messages):
+            async for token in llm.chat_stream(messages):
                 chunks.append(token)
             raw_text = "".join(chunks).strip()
 
@@ -677,20 +840,16 @@ class ExpertAgent:
     ) -> ThinkOutput:
         """think 步骤：LLM 决策是否需要工具调用（流式收集 + 多层容错解析）"""
         from llm.providers import ChatMessage
+        llm = self._get_fast_llm()
+        if not llm:
+            return ThinkOutput(needs_data=False)
         # 根据 persona 选择 system prompt
-        if persona == "short_term":
-            from engine.expert.personas import SHORT_TERM_THINK_PROMPT
-            prompt = SHORT_TERM_THINK_PROMPT.format(
-                current_date=get_current_date_context(),
-                graph_context=format_graph_context(nodes),
-                memory_context=format_memory_context(memories),
-            )
-        else:
-            prompt = THINK_SYSTEM_PROMPT.format(
-                current_date=get_current_date_context(),
-                graph_context=format_graph_context(nodes),
-                memory_context=format_memory_context(memories),
-            )
+        prompt = build_think_prompt(
+            persona,
+            current_date=get_current_date_context(),
+            graph_context=format_graph_context(nodes),
+            memory_context=format_memory_context(memories),
+        )
 
         # 注入工具使用经验（借鉴 OpenClaw TOOLS 层）
         try:
@@ -719,7 +878,7 @@ class ExpertAgent:
 
             # 流式收集
             chunks: list[str] = []
-            async for token in self._llm.chat_stream(messages):
+            async for token in llm.chat_stream(messages):
                 chunks.append(token)
             raw_text = "".join(chunks).strip()
 
@@ -1262,6 +1421,9 @@ class ExpertAgent:
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复（含 <think> 标签过滤），yield (token, accumulated_text)"""
         from llm.providers import ChatMessage
+        llm = self._get_quality_llm()
+        if not llm:
+            return
 
         # 构建上下文
         context_parts = [format_graph_context(nodes)]
@@ -1301,41 +1463,10 @@ class ExpertAgent:
             )
 
         # 根据 persona 选择 system prompt
-        if persona == "short_term":
-            from engine.expert.personas import SHORT_TERM_REPLY_SYSTEM
-            system = SHORT_TERM_REPLY_SYSTEM.format(
-                current_date=get_current_date_context(),
-            ) + "\n\n".join(context_parts) + data_ready_notice
-        else:
-            system = (
-                "你是「总师爷」，A股投资专家总顾问，在市场摸爬滚打25年的老江湖。\n"
-                "你手下有4个顶级专家（数据、量化、资讯、产业链），他们已经完成了各自的分析。\n"
-                f"⏰ 当前时间：{get_current_date_context()}\n\n"
-                "## 你的人格\n"
-                "- 你不是和事佬，你是拍板的人。综合专家意见后，你必须给出**自己的明确判断**\n"
-                "- 你敢推荐：当多数证据指向同一方向时，你会直说「我推荐关注XX」「XX值得买入」\n"
-                "- 你也敢否定：当专家们意见分歧时，你会明确站队并解释为什么\n"
-                "- 你善于发现专家们各自角度的盲区，给出更全面的判断\n"
-                "- 你对用户负责，不说正确但无用的废话\n\n"
-                "## 多维度交叉验证（推荐股票时必须遵守）\n"
-                "当用户请求推荐股票时，你的分析框架是：\n"
-                "1. **数据面筛选**：从数据专家的全市场扫描中找出量价异动的候选标的\n"
-                "2. **技术面确认**：用量化专家的技术信号验证候选标的的买点/卖点\n"
-                "3. **消息面催化**：用资讯专家的新闻验证候选标的是否有催化剂\n"
-                "4. **产业面支撑**：用产业链专家的行业分析验证候选标的是否处于景气赛道\n"
-                "5. **交叉验证**：只有2个以上维度同时看好的标的才值得推荐\n\n"
-                "⚠️ **重要：不要只推荐你之前聊过的股票！** 你必须基于专家的新鲜数据分析来推荐。\n"
-                "如果专家没有找到好的标的，你要诚实地说「目前市场没有明显机会」，而不是凑数推荐。\n\n"
-                "## 输出要求\n"
-                "1. **结论先行**：开头就给出核心判断（看多/看空/中性 + 具体标的）\n"
-                "2. 综合各专家的一致观点和分歧点\n"
-                "3. 给出你自己的独立判断和具体建议\n"
-                "4. 涉及个股时，给出操作建议（买入/持有/卖出）和关键价位\n"
-                "5. 使用 Markdown 格式，善用表格展示数据\n"
-                "6. ⚠️ 末尾附一句简短风险提示即可\n\n"
-                + "\n\n".join(context_parts)
-                + data_ready_notice
-            )
+        system = build_reply_system(
+            persona,
+            current_date=get_current_date_context(),
+        ) + "\n\n" + "\n\n".join(context_parts) + data_ready_notice
 
         # 注入用户偏好（借鉴 OpenClaw USER 层）
         try:
@@ -1468,7 +1599,7 @@ class ExpertAgent:
         try:
             # 流式收集
             chunks: list[str] = []
-            async for token in self._llm.chat_stream([
+            async for token in llm.chat_stream([
                 ChatMessage("user", prompt),
             ]):
                 chunks.append(token)

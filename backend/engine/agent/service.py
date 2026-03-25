@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from engine.agent.models import StrategyMemoInput, TradeInput
 from engine.agent.state import get_state, upsert_state
 from engine.agent.validator import TradeValidator
-from engine.data import get_data_engine
+import engine.data as data_module
 
 
 BRAIN_RUN_JSON_FIELDS = (
@@ -1341,13 +1341,18 @@ class AgentService:
         if not stock_codes:
             return {}
 
-        engine = get_data_engine()
+        engine = data_module.get_data_engine()
         start_iso = start_day.isoformat()
         end_iso = end_day.isoformat()
         result: dict[str, dict[str, float]] = {}
 
         for code in sorted(set(stock_codes)):
-            df = await asyncio.to_thread(engine.get_daily_history, code, start_iso, end_iso)
+            store = getattr(engine, "store", None)
+            if store is not None and hasattr(store, "get_daily"):
+                # Agent timeline/replay/backtest read paths must stay local-only.
+                df = await asyncio.to_thread(store.get_daily, code, start_iso, end_iso)
+            else:
+                df = await asyncio.to_thread(engine.get_daily_history, code, start_iso, end_iso)
             history: dict[str, float] = {}
             if df is not None and not df.empty:
                 date_col = "date" if "date" in df.columns else "trade_date" if "trade_date" in df.columns else None
@@ -1707,6 +1712,52 @@ class AgentService:
             "reflections": reflection_items,
             "what_ai_knew": what_ai_knew,
             "what_happened": what_happened,
+        }
+
+    async def get_replay_learning(
+        self,
+        portfolio_id: str,
+        replay_date: str,
+    ) -> dict:
+        replay = await self.get_replay_snapshot(portfolio_id, replay_date)
+        what_ai_knew = replay.get("what_ai_knew") or {}
+        what_happened = replay.get("what_happened") or {}
+        reviews = replay.get("reviews") or []
+        trade_theses = what_ai_knew.get("trade_theses") or []
+        review_statuses = what_happened.get("review_statuses") or []
+        next_day_move_pct = what_happened.get("next_day_move_pct")
+
+        would_change = False
+        action_bias = "hold_course"
+        rationale = "当时的动作和事后结果基本一致，优先保留原计划。"
+
+        if "loss" in review_statuses:
+            would_change = True
+            action_bias = "tighten_confirmation"
+            rationale = "事后复盘出现亏损，下一次应先提高确认门槛。"
+        elif isinstance(next_day_move_pct, (int, float)) and next_day_move_pct < 0:
+            would_change = True
+            action_bias = "reduce_earlier"
+            rationale = "次日延续走弱，若重来一次应更早收缩仓位。"
+        elif isinstance(next_day_move_pct, (int, float)) and next_day_move_pct > 0:
+            action_bias = "hold_course"
+            rationale = "次日走势没有否定原判断，本次动作更适合保留。"
+
+        thesis_text = trade_theses[0] if trade_theses else "当日动作"
+        lesson_summary = f"{thesis_text}；复盘结论：{rationale}"
+
+        return {
+            "portfolio_id": replay["portfolio_id"],
+            "date": replay["date"],
+            "what_ai_knew": what_ai_knew,
+            "what_happened": what_happened,
+            "counterfactual": {
+                "would_change": would_change,
+                "action_bias": action_bias,
+                "rationale": rationale,
+            },
+            "lesson_summary": lesson_summary,
+            "reviews": reviews,
         }
 
     # ── Ledger Read Model ────────────────────────────

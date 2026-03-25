@@ -91,14 +91,14 @@ def test_data_fetcher_fetch_by_request_unknown_action():
         run(fetcher.fetch_by_request(FakeReq()))
 
 
-def test_data_fetcher_action_dispatch_has_expected_keys():
-    """ACTION_DISPATCH 包含 spec 定义的全部 7 个 action"""
-    from engine.arena.data_fetcher import ACTION_DISPATCH
+def test_data_fetcher_supported_actions_cover_phase45_spec():
+    """DataFetcher 支持 Phase 4/5 spec 要求的核心 action"""
+    from engine.arena.data_fetcher import SUPPORTED_ACTIONS
     expected = {
         "get_stock_info", "get_daily_history", "get_technical_indicators",
         "get_factor_scores", "get_news", "get_announcements", "get_cluster_for_stock",
     }
-    assert expected.issubset(set(ACTION_DISPATCH.keys()))
+    assert expected.issubset(SUPPORTED_ACTIONS)
 
 
 def test_data_fetcher_fetch_by_request_sync_action():
@@ -116,3 +116,19 @@ def test_data_fetcher_fetch_by_request_sync_action():
     with patch("engine.data.get_data_engine", return_value=mock_engine):
         result = run(fetcher.fetch_by_request(FakeReq()))
     assert result == {"name": "茅台"}
+
+
+def test_data_fetcher_fetch_by_request_self_action():
+    """self action 通过 SELF_DISPATCH 路由到 DataFetcher 方法"""
+    from engine.arena.data_fetcher import DataFetcher
+    fetcher = DataFetcher()
+
+    class FakeReq:
+        action = "get_daily_history"
+        params = {"code": "600519", "days": 5}
+
+    with patch.object(fetcher, "get_daily_history", return_value={"recent": []}) as mock_method:
+        result = run(fetcher.fetch_by_request(FakeReq()))
+
+    assert result == {"recent": []}
+    mock_method.assert_called_once_with(code="600519", days=5)

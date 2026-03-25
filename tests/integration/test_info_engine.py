@@ -3,7 +3,7 @@
 import pytest
 import asyncio
 import pandas as pd
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture
@@ -32,8 +32,9 @@ def mock_data_engine():
 
 class TestInfoEngineGetNews:
     def test_returns_news_with_sentiment(self, mock_data_engine):
+        from llm.capability import LLMCapability
         from engine.info.engine import InfoEngine
-        ie = InfoEngine(data_engine=mock_data_engine, llm_provider=None)
+        ie = InfoEngine(data_engine=mock_data_engine, llm_capability=LLMCapability())
         news = asyncio.run(ie.get_news("600519", limit=10))
         assert len(news) == 2
         assert news[0].title == "茅台业绩大增"
@@ -41,16 +42,18 @@ class TestInfoEngineGetNews:
 
     def test_returns_empty_on_no_data(self, mock_data_engine):
         mock_data_engine.get_news.return_value = pd.DataFrame()
+        from llm.capability import LLMCapability
         from engine.info.engine import InfoEngine
-        ie = InfoEngine(data_engine=mock_data_engine, llm_provider=None)
+        ie = InfoEngine(data_engine=mock_data_engine, llm_capability=LLMCapability())
         news = asyncio.run(ie.get_news("999999", limit=10))
         assert news == []
 
 
 class TestInfoEngineGetAnnouncements:
     def test_returns_announcements_with_sentiment(self, mock_data_engine):
+        from llm.capability import LLMCapability
         from engine.info.engine import InfoEngine
-        ie = InfoEngine(data_engine=mock_data_engine, llm_provider=None)
+        ie = InfoEngine(data_engine=mock_data_engine, llm_capability=LLMCapability())
         anns = asyncio.run(ie.get_announcements("600519", limit=10))
         assert len(anns) == 1
         assert anns[0].type == "股份变动"
@@ -58,8 +61,9 @@ class TestInfoEngineGetAnnouncements:
 
 class TestInfoEngineAssessEvent:
     def test_assess_without_llm(self, mock_data_engine):
+        from llm.capability import LLMCapability
         from engine.info.engine import InfoEngine
-        ie = InfoEngine(data_engine=mock_data_engine, llm_provider=None)
+        ie = InfoEngine(data_engine=mock_data_engine, llm_capability=LLMCapability())
         impact = asyncio.run(ie.assess_event_impact("600519", "控股股东增持"))
         assert impact.impact == "neutral"
         assert "未配置" in impact.reasoning

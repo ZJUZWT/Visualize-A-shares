@@ -314,6 +314,25 @@ export function ThinkingPanel({
                 </div>
               );
 
+            if (item.type === "reasoning_summary")
+              return (
+                <div key={i} className="px-3 py-2 flex gap-2">
+                  <Users
+                    size={13}
+                    className="shrink-0 mt-0.5"
+                    style={{ color }}
+                  />
+                  <div>
+                    <span className="font-medium text-[var(--text-secondary)]">
+                      拆题摘要
+                    </span>
+                    <p className="mt-0.5 text-[var(--text-tertiary)] leading-relaxed">
+                      {item.data.summary}
+                    </p>
+                  </div>
+                </div>
+              );
+
             if (item.type === "tool_call") {
               const isExpert = item.data.engine === "expert";
               const status = item.status ?? "pending";
@@ -456,6 +475,34 @@ export function ThinkingPanel({
                     <p className="mt-0.5 text-[var(--text-tertiary)] line-clamp-2">
                       {item.data.new.content}
                     </p>
+                  </div>
+                </div>
+              );
+
+            if (item.type === "self_critique")
+              return (
+                <div key={i} className="px-3 py-2 flex gap-2">
+                  <AlertTriangle
+                    size={13}
+                    className="text-amber-500 shrink-0 mt-0.5"
+                  />
+                  <div className="min-w-0">
+                    <span className="font-medium text-[var(--text-secondary)]">
+                      自我质疑
+                    </span>
+                    <p className="mt-0.5 text-[var(--text-tertiary)] leading-relaxed">
+                      {item.data.summary}
+                    </p>
+                    {item.data.counterpoints.length > 0 && (
+                      <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">
+                        反方观点：{item.data.counterpoints.join("；")}
+                      </p>
+                    )}
+                    {item.data.risks.length > 0 && (
+                      <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">
+                        风险：{item.data.risks.join("；")}
+                      </p>
+                    )}
                   </div>
                 </div>
               );

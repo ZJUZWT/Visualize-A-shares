@@ -1,4 +1,5 @@
-import { create } from "zustand";
+import { create, type StoreApi } from "zustand";
+import { API_BASE } from "@/lib/api-base";
 import type {
   ExpertMessage,
   ExpertStatus,
@@ -10,12 +11,17 @@ import type {
   ToolCallData,
   ToolResultData,
   BeliefUpdatedData,
+  ClarificationRequestData,
+  ClarificationSelection,
+  PendingClarification,
+  ReasoningSummaryData,
+  SelfCritiqueData,
 } from "@/types/expert";
 import { DEFAULT_EXPERT_PROFILES } from "@/types/expert";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 /** 每个专家独立的 AbortController（支持并行生成） */
 const _abortMap: Map<ExpertType, AbortController> = new Map();
+const CLARIFICATION_EXPERTS = new Set<ExpertType>(["rag", "short_term"]);
 
 /** 每个专家独立的对话历史 */
 type ChatHistory = Record<ExpertType, ExpertMessage[]>;
@@ -41,11 +47,15 @@ interface ExpertStore {
   sessions: Record<ExpertType, Session[]>;
   /** 每个专家当前激活的 session ID */
   activeSessions: ActiveSessions;
+  /** 每个专家是否有待确认的 clarification */
+  pendingClarifications: Record<ExpertType, PendingClarification | null>;
 
   /** 切换专家 */
   setActiveExpert: (type: ExpertType) => void;
   /** 发送消息 */
   sendMessage: (text: string) => Promise<void>;
+  /** 选择 clarification 选项并继续分析 */
+  submitClarification: (selection: ClarificationSelection) => Promise<void>;
   /** 停止当前流式请求 */
   stopStreaming: () => void;
   /** 重试失败的消息 */
@@ -78,6 +88,7 @@ const EMPTY_HISTORY: ChatHistory = {
   info: [],
   industry: [],
   rag: [],
+  short_term: [],
 };
 
 const EMPTY_SESSIONS: Record<ExpertType, Session[]> = {
@@ -86,6 +97,7 @@ const EMPTY_SESSIONS: Record<ExpertType, Session[]> = {
   info: [],
   industry: [],
   rag: [],
+  short_term: [],
 };
 
 const EMPTY_ACTIVE: ActiveSessions = {
@@ -94,6 +106,7 @@ const EMPTY_ACTIVE: ActiveSessions = {
   info: null,
   industry: null,
   rag: null,
+  short_term: null,
 };
 
 const EMPTY_STATUS: Record<ExpertType, ExpertStatus> = {
@@ -102,6 +115,7 @@ const EMPTY_STATUS: Record<ExpertType, ExpertStatus> = {
   info: "idle",
   industry: "idle",
   rag: "idle",
+  short_term: "idle",
 };
 
 const EMPTY_ERRORS: Record<ExpertType, string | null> = {
@@ -110,7 +124,259 @@ const EMPTY_ERRORS: Record<ExpertType, string | null> = {
   info: null,
   industry: null,
   rag: null,
+  short_term: null,
 };
+
+const EMPTY_PENDING: Record<ExpertType, PendingClarification | null> = {
+  data: null,
+  quant: null,
+  info: null,
+  industry: null,
+  rag: null,
+  short_term: null,
+};
+
+type ExpertSetState = StoreApi<ExpertStore>["setState"];
+
+function setExpertStatus(
+  set: ExpertSetState,
+  expertType: ExpertType,
+  status: ExpertStatus,
+  error: string | null = null
+) {
+  set((prev) => {
+    const newStatusMap = { ...prev.statusMap, [expertType]: status };
+    const newErrorMap = { ...prev.errorMap, [expertType]: error };
+    return {
+      statusMap: newStatusMap,
+      errorMap: newErrorMap,
+      ...(prev.activeExpert === expertType ? { status, error } : {}),
+    };
+  });
+}
+
+function applyEventToMessage(
+  message: ExpertMessage,
+  eventType: string,
+  data: Record<string, unknown>
+): ExpertMessage {
+  const msg: ExpertMessage = {
+    ...message,
+    thinking: [...message.thinking],
+  };
+
+  if (eventType === "reply_token") {
+    msg.content += (data.token as string) ?? "";
+  } else if (eventType === "reply_complete") {
+    msg.content = (data.full_text as string) ?? msg.content;
+    msg.isStreaming = false;
+  } else if (eventType === "thinking_round") {
+    msg.thinking = [
+      ...msg.thinking,
+      {
+        type: "thinking_round" as const,
+        round: data.round as number,
+        maxRounds: data.max_rounds as number,
+      },
+    ];
+  } else if (eventType === "graph_recall") {
+    msg.thinking = [
+      ...msg.thinking,
+      {
+        type: "graph_recall" as const,
+        nodes: data.nodes as GraphNode[],
+      },
+    ];
+  } else if (eventType === "reasoning_summary") {
+    msg.thinking = [
+      ...msg.thinking,
+      {
+        type: "reasoning_summary" as const,
+        data: data as unknown as ReasoningSummaryData,
+      },
+    ];
+  } else if (eventType === "tool_call") {
+    msg.thinking = [
+      ...msg.thinking,
+      {
+        type: "tool_call" as const,
+        data: data as unknown as ToolCallData,
+        status: "pending" as const,
+      },
+    ];
+  } else if (eventType === "tool_result") {
+    const resultData = data as unknown as ToolResultData;
+    const callIdx = msg.thinking.findLastIndex(
+      (t) =>
+        t.type === "tool_call" &&
+        t.data.engine === resultData.engine &&
+        t.data.action === resultData.action &&
+        t.status === "pending"
+    );
+    if (callIdx !== -1) {
+      const callItem = msg.thinking[callIdx] as Extract<typeof msg.thinking[number], { type: "tool_call" }>;
+      msg.thinking = [...msg.thinking];
+      msg.thinking[callIdx] = {
+        ...callItem,
+        result: resultData,
+        status: resultData.hasError ? "error" : "done",
+      };
+    } else {
+      msg.thinking = [
+        ...msg.thinking,
+        { type: "tool_result" as const, data: resultData },
+      ];
+    }
+  } else if (eventType === "self_critique") {
+    msg.thinking = [
+      ...msg.thinking,
+      {
+        type: "self_critique" as const,
+        data: data as unknown as SelfCritiqueData,
+      },
+    ];
+  } else if (eventType === "belief_updated") {
+    msg.thinking = [
+      ...msg.thinking,
+      {
+        type: "belief_updated" as const,
+        data: data as unknown as BeliefUpdatedData,
+      },
+    ];
+  } else if (eventType === "error") {
+    msg.content = `错误: ${data.message as string}`;
+    msg.isStreaming = false;
+  }
+
+  return msg;
+}
+
+async function streamExpertReply(opts: {
+  expertType: ExpertType;
+  expertMessageId: string;
+  sessionId: string | null;
+  userMessageId?: string;
+  payload: Record<string, unknown>;
+  set: ExpertSetState;
+  get: () => ExpertStore;
+}) {
+  const { expertType, expertMessageId, sessionId, userMessageId, payload, set, get } = opts;
+  const ac = new AbortController();
+  _abortMap.set(expertType, ac);
+
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/expert/chat/${expertType}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: ac.signal,
+    });
+
+    if (!res.body) throw new Error("No response body");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let eventType = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventType = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          const rawData = line.slice(5).trim();
+          if (!rawData) continue;
+          let data: Record<string, unknown>;
+          try {
+            data = JSON.parse(rawData);
+          } catch {
+            continue;
+          }
+
+          set((s) => {
+            const history = [...(s.chatHistories[expertType] ?? [])];
+            const idx = history.findIndex((m) => m.id === expertMessageId);
+            if (idx === -1) return s;
+            history[idx] = applyEventToMessage(history[idx], eventType, data);
+            return {
+              chatHistories: {
+                ...s.chatHistories,
+                [expertType]: history,
+              },
+            };
+          });
+        }
+      }
+    }
+
+    if (sessionId) {
+      get().fetchSessions(expertType);
+    }
+  } catch (e: unknown) {
+    if ((e as Error).name === "AbortError") {
+      set((s) => {
+        const history = [...(s.chatHistories[expertType] ?? [])];
+        const idx = history.findIndex((m) => m.id === expertMessageId);
+        if (idx !== -1) {
+          history[idx] = {
+            ...history[idx],
+            isStreaming: false,
+            content: history[idx].content || "（已停止生成）",
+          };
+        }
+        return {
+          chatHistories: { ...s.chatHistories, [expertType]: history },
+        };
+      });
+      return;
+    }
+
+    const errMsg = (e as Error).message;
+    set((s) => {
+      const history = [...(s.chatHistories[expertType] ?? [])];
+      if (userMessageId) {
+        const userIdx = history.findIndex((m) => m.id === userMessageId);
+        if (userIdx !== -1) {
+          history[userIdx] = { ...history[userIdx], sendStatus: "failed" };
+        }
+      }
+      const expIdx = history.findIndex((m) => m.id === expertMessageId);
+      if (expIdx !== -1) {
+        history[expIdx] = {
+          ...history[expIdx],
+          content: `请求失败: ${errMsg}`,
+          isStreaming: false,
+        };
+      }
+      const newStatusMap = { ...s.statusMap, [expertType]: "error" as ExpertStatus };
+      const newErrorMap = { ...s.errorMap, [expertType]: errMsg };
+      return {
+        chatHistories: { ...s.chatHistories, [expertType]: history },
+        statusMap: newStatusMap,
+        errorMap: newErrorMap,
+        ...(s.activeExpert === expertType ? { status: "error" as ExpertStatus, error: errMsg } : {}),
+      };
+    });
+  } finally {
+    _abortMap.delete(expertType);
+    set((s) => {
+      if (s.statusMap[expertType] !== "error" && !s.pendingClarifications[expertType]) {
+        const newStatusMap = { ...s.statusMap, [expertType]: "idle" as ExpertStatus };
+        return {
+          statusMap: newStatusMap,
+          ...(s.activeExpert === expertType ? { status: "idle" as ExpertStatus } : {}),
+        };
+      }
+      return s;
+    });
+  }
+}
 
 export const useExpertStore = create<ExpertStore>((set, get) => ({
   activeExpert: "rag",
@@ -123,6 +389,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   deepThink: false,
   sessions: { ...EMPTY_SESSIONS },
   activeSessions: { ...EMPTY_ACTIVE },
+  pendingClarifications: { ...EMPTY_PENDING },
 
   setActiveExpert: (type: ExpertType) => {
     // 切换专家时 **不中止** 任何请求，让其在后台继续生成
@@ -144,6 +411,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     set((s) => ({
       chatHistories: { ...s.chatHistories, [activeExpert]: [] },
       activeSessions: { ...s.activeSessions, [activeExpert]: null },
+      pendingClarifications: { ...s.pendingClarifications, [activeExpert]: null },
       statusMap: { ...s.statusMap, [activeExpert]: "idle" },
       errorMap: { ...s.errorMap, [activeExpert]: null },
       status: "idle",
@@ -158,6 +426,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     set({
       chatHistories: { ...EMPTY_HISTORY },
       activeSessions: { ...EMPTY_ACTIVE },
+      pendingClarifications: { ...EMPTY_PENDING },
       statusMap: { ...EMPTY_STATUS },
       errorMap: { ...EMPTY_ERRORS },
       status: "idle",
@@ -235,6 +504,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     if (ac) { ac.abort(); _abortMap.delete(activeExpert); }
     set((s) => ({
       activeSessions: { ...s.activeSessions, [activeExpert]: sessionId },
+      pendingClarifications: { ...s.pendingClarifications, [activeExpert]: null },
       statusMap: { ...s.statusMap, [activeExpert]: "idle" },
       errorMap: { ...s.errorMap, [activeExpert]: null },
       status: "idle",
@@ -257,12 +527,25 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           id: m.id,
           role: m.role as "user" | "expert",
           content: m.content,
-          thinking: (m.thinking || []).map((t: ThinkingItem) => {
+          thinking: (m.thinking || []).map((t: any) => {
             // 兼容旧数据：tool_call 缺少 status 字段时默认设为 "done"（历史数据肯定已完成）
             if (t.type === "tool_call" && !t.status) {
-              return { ...t, status: "done" as const };
+              return {
+                type: "tool_call" as const,
+                data: t.data,
+                result: t.result,
+                status: "done" as const,
+              };
             }
-            return t;
+            if (t.type === "clarification_request" && !t.status) {
+              return {
+                type: "clarification_request" as const,
+                data: t.data,
+                status: "selected" as const,
+                selectedOption: t.selectedOption,
+              };
+            }
+            return t as ThinkingItem;
           }),
           isStreaming: false,
         }));
@@ -298,6 +581,10 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         if (activeSessions[activeExpert] === sessionId) {
           newState.activeSessions = {
             ...s.activeSessions,
+            [activeExpert]: null,
+          };
+          newState.pendingClarifications = {
+            ...s.pendingClarifications,
             [activeExpert]: null,
           };
           newState.chatHistories = {
@@ -358,34 +645,22 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   },
 
   sendMessage: async (text: string) => {
-    const { activeExpert, activeSessions } = get();
+    const { activeExpert, activeSessions, pendingClarifications, deepThink } = get();
     const expertType = activeExpert; // 闭包捕获，防止中途切走后写错专家
+    if (pendingClarifications[expertType]) return;
 
     // 如果该专家已有进行中的请求，先中止（同一专家不并发）
     const existingAc = _abortMap.get(expertType);
     if (existingAc) { existingAc.abort(); _abortMap.delete(expertType); }
-
-    // 辅助函数：更新指定专家的 status
-    const setExpertStatus = (s: ExpertStatus, err: string | null = null) => {
-      set((prev) => {
-        const newStatusMap = { ...prev.statusMap, [expertType]: s };
-        const newErrorMap = { ...prev.errorMap, [expertType]: err };
-        return {
-          statusMap: newStatusMap,
-          errorMap: newErrorMap,
-          // 只有当该专家是当前活跃专家时才同步便捷 getter
-          ...(prev.activeExpert === expertType ? { status: s, error: err } : {}),
-        };
-      });
-    };
-
-    setExpertStatus("thinking");
 
     // 自动创建 session（如果没有）
     let sessionId = activeSessions[expertType];
     if (!sessionId) {
       sessionId = await get().createSession(expertType);
     }
+
+    const shouldClarify = deepThink && CLARIFICATION_EXPERTS.has(expertType);
+    setExpertStatus(set, expertType, shouldClarify ? "clarifying" : "thinking");
 
     const userMsg: ExpertMessage = {
       id: newId(),
@@ -400,7 +675,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       role: "expert",
       content: "",
       thinking: [],
-      isStreaming: true,
+      isStreaming: !shouldClarify,
     };
 
     set((s) => ({
@@ -437,202 +712,136 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       }
       return { chatHistories: { ...s.chatHistories, [expertType]: history } };
     });
-
-    const ac = new AbortController();
-    _abortMap.set(expertType, ac);
-
-    try {
-      const res = await fetch(
-        `${API_BASE}/api/v1/expert/chat/${expertType}`,
-        {
+    if (shouldClarify) {
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/expert/clarify/${expertType}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: text,
             session_id: sessionId,
-            deep_think: get().deepThink,
           }),
-          signal: ac.signal,
-        }
-      );
-
-      if (!res.body) throw new Error("No response body");
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      let eventType = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (line.startsWith("event:")) {
-            eventType = line.slice(6).trim();
-          } else if (line.startsWith("data:")) {
-            const rawData = line.slice(5).trim();
-            if (!rawData) continue;
-            let data: Record<string, unknown>;
-            try {
-              data = JSON.parse(rawData);
-            } catch {
-              continue;
-            }
-
-            set((s) => {
-              const history = [...(s.chatHistories[expertType] ?? [])];
-              const idx = history.findIndex((m) => m.id === expertMsg.id);
-              if (idx === -1) return s;
-              const msg: ExpertMessage = {
-                ...history[idx],
-                thinking: [...history[idx].thinking],
-              };
-
-              if (eventType === "reply_token") {
-                msg.content += (data.token as string) ?? "";
-              } else if (eventType === "reply_complete") {
-                msg.content = (data.full_text as string) ?? msg.content;
-                msg.isStreaming = false;
-              } else if (eventType === "thinking_round") {
-                msg.thinking = [
-                  ...msg.thinking,
-                  {
-                    type: "thinking_round" as const,
-                    round: data.round as number,
-                    maxRounds: data.max_rounds as number,
-                  },
-                ];
-              } else if (eventType === "graph_recall") {
-                msg.thinking = [
-                  ...msg.thinking,
-                  {
-                    type: "graph_recall" as const,
-                    nodes: data.nodes as GraphNode[],
-                  },
-                ];
-              } else if (eventType === "tool_call") {
-                msg.thinking = [
-                  ...msg.thinking,
-                  {
-                    type: "tool_call" as const,
-                    data: data as unknown as ToolCallData,
-                    status: "pending" as const,
-                  },
-                ];
-              } else if (eventType === "tool_result") {
-                const resultData = data as unknown as ToolResultData;
-                const callIdx = msg.thinking.findLastIndex(
-                  (t) =>
-                    t.type === "tool_call" &&
-                    t.data.engine === resultData.engine &&
-                    t.data.action === resultData.action &&
-                    t.status === "pending"
-                );
-                if (callIdx !== -1) {
-                  const callItem = msg.thinking[callIdx] as Extract<typeof msg.thinking[number], { type: "tool_call" }>;
-                  msg.thinking = [...msg.thinking];
-                  msg.thinking[callIdx] = {
-                    ...callItem,
-                    result: resultData,
-                    status: resultData.hasError ? "error" : "done",
-                  };
-                } else {
-                  msg.thinking = [
-                    ...msg.thinking,
-                    { type: "tool_result" as const, data: resultData },
-                  ];
-                }
-              } else if (eventType === "belief_updated") {
-                msg.thinking = [
-                  ...msg.thinking,
-                  {
-                    type: "belief_updated" as const,
-                    data: data as unknown as BeliefUpdatedData,
-                  },
-                ];
-              } else if (eventType === "error") {
-                msg.content = `错误: ${data.message as string}`;
-                msg.isStreaming = false;
-              }
-
-              history[idx] = msg;
-              return {
-                chatHistories: {
-                  ...s.chatHistories,
-                  [expertType]: history,
-                },
-              };
-            });
-          }
-        }
-      }
-
-      // 完成后刷新 session 列表
-      if (sessionId) {
-        get().fetchSessions(expertType);
-      }
-    } catch (e: unknown) {
-      if ((e as Error).name === "AbortError") {
-        // abort 时将 streaming 消息标记为完成
+        });
+        const data = await res.json() as ClarificationRequestData;
         set((s) => {
           const history = [...(s.chatHistories[expertType] ?? [])];
           const idx = history.findIndex((m) => m.id === expertMsg.id);
           if (idx !== -1) {
             history[idx] = {
               ...history[idx],
+              thinking: [
+                {
+                  type: "clarification_request" as const,
+                  data,
+                  status: "pending" as const,
+                },
+              ],
               isStreaming: false,
-              content: history[idx].content || "（已停止生成）",
             };
           }
-          const newStatusMap = { ...s.statusMap, [expertType]: "idle" as ExpertStatus };
           return {
             chatHistories: { ...s.chatHistories, [expertType]: history },
-            statusMap: newStatusMap,
-            ...(s.activeExpert === expertType ? { status: "idle" as ExpertStatus } : {}),
+            pendingClarifications: {
+              ...s.pendingClarifications,
+              [expertType]: {
+                sessionId,
+                userMessageId: userMsg.id,
+                expertMessageId: expertMsg.id,
+                request: data,
+                originalMessage: text,
+              },
+            },
           };
         });
+        setExpertStatus(set, expertType, "idle");
+        return;
+      } catch (e: unknown) {
+        const errMsg = (e as Error).message;
+        set((s) => {
+          const history = [...(s.chatHistories[expertType] ?? [])];
+          const userIdx = history.findIndex((m) => m.id === userMsg.id);
+          if (userIdx !== -1) {
+            history[userIdx] = { ...history[userIdx], sendStatus: "failed" };
+          }
+          const expIdx = history.findIndex((m) => m.id === expertMsg.id);
+          if (expIdx !== -1) {
+            history[expIdx] = {
+              ...history[expIdx],
+              content: `澄清阶段失败: ${errMsg}`,
+              isStreaming: false,
+            };
+          }
+          return {
+            chatHistories: { ...s.chatHistories, [expertType]: history },
+          };
+        });
+        setExpertStatus(set, expertType, "error", errMsg);
         return;
       }
-      const errMsg = (e as Error).message;
-      set((s) => {
-        const history = [...(s.chatHistories[expertType] ?? [])];
-        const userIdx = history.findIndex((m) => m.id === userMsg.id);
-        if (userIdx !== -1) {
-          history[userIdx] = { ...history[userIdx], sendStatus: "failed" };
-        }
-        const expIdx = history.findIndex((m) => m.id === expertMsg.id);
-        if (expIdx !== -1) {
-          history[expIdx] = {
-            ...history[expIdx],
-            content: `请求失败: ${errMsg}`,
-            isStreaming: false,
-          };
-        }
-        const newStatusMap = { ...s.statusMap, [expertType]: "error" as ExpertStatus };
-        const newErrorMap = { ...s.errorMap, [expertType]: errMsg };
-        return {
-          chatHistories: { ...s.chatHistories, [expertType]: history },
-          statusMap: newStatusMap,
-          errorMap: newErrorMap,
-          ...(s.activeExpert === expertType ? { status: "error" as ExpertStatus, error: errMsg } : {}),
-        };
-      });
-    } finally {
-      _abortMap.delete(expertType);
-      set((s) => {
-        if (s.statusMap[expertType] !== "error") {
-          const newStatusMap = { ...s.statusMap, [expertType]: "idle" as ExpertStatus };
-          return {
-            statusMap: newStatusMap,
-            ...(s.activeExpert === expertType ? { status: "idle" as ExpertStatus } : {}),
-          };
-        }
-        return s;
-      });
     }
+
+    await streamExpertReply({
+      expertType,
+      expertMessageId: expertMsg.id,
+      sessionId,
+      userMessageId: userMsg.id,
+      payload: {
+        message: text,
+        session_id: sessionId,
+        deep_think: deepThink,
+      },
+      set,
+      get,
+    });
+  },
+
+  submitClarification: async (selection: ClarificationSelection) => {
+    const { activeExpert, pendingClarifications, deepThink } = get();
+    const expertType = activeExpert;
+    const pending = pendingClarifications[expertType];
+    if (!pending) return;
+
+    const existingAc = _abortMap.get(expertType);
+    if (existingAc) { existingAc.abort(); _abortMap.delete(expertType); }
+
+    set((s) => {
+      const history = [...(s.chatHistories[expertType] ?? [])];
+      const idx = history.findIndex((m) => m.id === pending.expertMessageId);
+      if (idx !== -1) {
+        history[idx] = {
+          ...history[idx],
+          isStreaming: true,
+          thinking: history[idx].thinking.map((item) =>
+            item.type === "clarification_request"
+              ? {
+                  ...item,
+                  status: selection.skip ? "skipped" as const : "selected" as const,
+                  selectedOption: selection,
+                }
+              : item
+          ),
+        };
+      }
+      return {
+        chatHistories: { ...s.chatHistories, [expertType]: history },
+        pendingClarifications: { ...s.pendingClarifications, [expertType]: null },
+      };
+    });
+
+    setExpertStatus(set, expertType, "thinking");
+
+    await streamExpertReply({
+      expertType,
+      expertMessageId: pending.expertMessageId,
+      sessionId: pending.sessionId,
+      payload: {
+        message: pending.originalMessage,
+        session_id: pending.sessionId,
+        deep_think: deepThink,
+        clarification_selection: selection,
+      },
+      set,
+      get,
+    });
   },
 }));

@@ -11,6 +11,7 @@ StockScape Engine — FastAPI 应用入口
 
 import sys
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 # 将 backend 目录加入 Python 路径
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -48,61 +49,9 @@ logger.add(
     level="DEBUG",
 )
 
-# ─── 创建 FastAPI 应用 ─────────────────────────────────
-app = FastAPI(
-    title="StockScape Engine",
-    description="A股多维聚类 3D 地形可视化平台 — 数据与算法引擎",
-    version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-)
-
-# ─── CORS 中间件 ──────────────────────────────────────
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.server.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-# ─── 请求耗时中间件 ──────────────────────────────────
-@app.middleware("http")
-async def timing_middleware(request: Request, call_next):
-    """记录每个请求的耗时，慢请求额外 warning"""
-    start = time.monotonic()
-    response = await call_next(request)
-    elapsed = time.monotonic() - start
-    path = request.url.path
-    method = request.method
-    status = response.status_code
-    # 跳过健康检查等高频低价值路由
-    if path not in ("/api/v1/health", "/", "/docs", "/redoc", "/openapi.json"):
-        logger.info(f"⏱️ {method} {path} → {status} 耗时 {elapsed:.2f}s")
-    if elapsed > 5.0:
-        logger.warning(f"🐢 慢请求: {method} {path} 耗时 {elapsed:.1f}s")
-    response.headers["X-Response-Time"] = f"{elapsed:.3f}s"
-    return response
-
-# ─── 注册路由 ─────────────────────────────────────────
-app.include_router(data_router)
-app.include_router(cluster_router)
-app.include_router(chat_router)
-app.include_router(quant_router)
-app.include_router(analysis_router)
-app.include_router(debate_router)
-app.include_router(info_router)
-app.include_router(expert_router)
-app.include_router(industry_router)
-app.include_router(sector_router)
-app.include_router(create_agent_router(), prefix="/api/v1/agent")
-
-
-# ─── 启动/关闭事件 ────────────────────────────────────
-@app.on_event("startup")
-async def startup():
+async def _startup() -> None:
     from llm.config import llm_settings
+
     logger.info("=" * 60)
     logger.info("🌄  StockScape Engine 启动")
     logger.info(f"   数据源: AKShare(主力) + BaoStock(备选)")
@@ -158,8 +107,7 @@ async def startup():
         logger.warning(f"⚠️ Agent Brain 调度器启动失败: {e}")
 
 
-@app.on_event("shutdown")
-async def shutdown():
+async def _shutdown() -> None:
     # 关闭定时任务调度器
     try:
         from engine.expert.routes import get_task_manager
@@ -196,6 +144,67 @@ async def shutdown():
         pass
 
     logger.info("🌄  StockScape Engine 关闭")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await _startup()
+    try:
+        yield
+    finally:
+        await _shutdown()
+
+
+# ─── 创建 FastAPI 应用 ─────────────────────────────────
+app = FastAPI(
+    title="StockScape Engine",
+    description="A股多维聚类 3D 地形可视化平台 — 数据与算法引擎",
+    version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan,
+)
+
+# ─── CORS 中间件 ──────────────────────────────────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.server.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ─── 请求耗时中间件 ──────────────────────────────────
+@app.middleware("http")
+async def timing_middleware(request: Request, call_next):
+    """记录每个请求的耗时，慢请求额外 warning"""
+    start = time.monotonic()
+    response = await call_next(request)
+    elapsed = time.monotonic() - start
+    path = request.url.path
+    method = request.method
+    status = response.status_code
+    # 跳过健康检查等高频低价值路由
+    if path not in ("/api/v1/health", "/", "/docs", "/redoc", "/openapi.json"):
+        logger.info(f"⏱️ {method} {path} → {status} 耗时 {elapsed:.2f}s")
+    if elapsed > 5.0:
+        logger.warning(f"🐢 慢请求: {method} {path} 耗时 {elapsed:.1f}s")
+    response.headers["X-Response-Time"] = f"{elapsed:.3f}s"
+    return response
+
+# ─── 注册路由 ─────────────────────────────────────────
+app.include_router(data_router)
+app.include_router(cluster_router)
+app.include_router(chat_router)
+app.include_router(quant_router)
+app.include_router(analysis_router)
+app.include_router(debate_router)
+app.include_router(info_router)
+app.include_router(expert_router)
+app.include_router(industry_router)
+app.include_router(sector_router)
+app.include_router(create_agent_router(), prefix="/api/v1/agent")
 
 
 # ─── 根路由 ────────────────────────────────────────────

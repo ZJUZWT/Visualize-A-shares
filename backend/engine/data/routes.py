@@ -174,3 +174,42 @@ async def fetch_realtime():
         return {"status": "ok", "stock_count": len(snapshot)}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"行情拉取失败: {str(e)}")
+
+
+@router.get("/assets/search")
+async def search_assets(
+    q: str = Query(..., description="搜索关键词"),
+    market: str = Query("all", description="市场: all/cn/hk/us/fund/futures"),
+    limit: int = Query(20, description="返回条数限制"),
+):
+    de = get_data_engine()
+    return {"results": de.search_assets(q, market=market, limit=limit), "market": market}
+
+
+@router.get("/assets/profile")
+async def get_asset_profile(
+    symbol: str = Query(..., description="标的代码"),
+    market: str = Query(..., description="市场"),
+):
+    de = get_data_engine()
+    return de.get_asset_profile(symbol, market)
+
+
+@router.get("/assets/quote")
+async def get_asset_quote(
+    symbol: str = Query(..., description="标的代码"),
+    market: str = Query(..., description="市场"),
+):
+    de = get_data_engine()
+    return de.get_asset_quote(symbol, market)
+
+
+@router.get("/assets/daily")
+async def get_asset_daily(
+    symbol: str = Query(..., description="标的代码"),
+    market: str = Query(..., description="市场"),
+    start: str = Query(..., description="开始日期 YYYY-MM-DD"),
+    end: str = Query(..., description="结束日期 YYYY-MM-DD"),
+):
+    de = get_data_engine()
+    return de.get_asset_daily_history(symbol, market, start, end)

@@ -1,5 +1,6 @@
 import {
   AgentEquityTimeline,
+  AgentReplayLearning,
   AgentReplaySnapshot,
   LedgerOverview,
 } from "../types";
@@ -9,6 +10,7 @@ import {
   summarizeSelectedEquityPoint,
   summarizeEquityTimeline,
 } from "../lib/rightRailTimelineViewModel";
+import { summarizeReplayLearning } from "../lib/replayLearningViewModel";
 import { buildRightRailPositionGroups } from "../lib/rightRailPositionViewModel";
 
 interface ExecutionLedgerPanelProps {
@@ -22,6 +24,9 @@ interface ExecutionLedgerPanelProps {
   replay: AgentReplaySnapshot | null;
   replayLoading: boolean;
   replayError: string | null;
+  replayLearning: AgentReplayLearning | null;
+  replayLearningLoading: boolean;
+  replayLearningError: string | null;
   replayDate: string;
   replayMinDate: string | null;
   replayMaxDate: string | null;
@@ -85,6 +90,9 @@ export default function ExecutionLedgerPanel({
   replay,
   replayLoading,
   replayError,
+  replayLearning,
+  replayLearningLoading,
+  replayLearningError,
   replayDate,
   replayMinDate,
   replayMaxDate,
@@ -114,6 +122,7 @@ export default function ExecutionLedgerPanel({
   const hasTimelineData = Boolean(
     timeline && (timeline.mark_to_market.length > 0 || timeline.realized_only.length > 0)
   );
+  const replayLearningSummary = summarizeReplayLearning(replayLearning);
 
   return (
     <section className="space-y-4">
@@ -487,6 +496,49 @@ export default function ExecutionLedgerPanel({
                       </div>
                     </div>
                   </div>
+                </div>
+
+                <div className="rounded-lg bg-white/5 p-3 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <h4 className="text-sm font-medium text-gray-300">Replay Learning</h4>
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] ${
+                      replayLearningSummary.badgeTone === "warn"
+                        ? "bg-amber-500/15 text-amber-200"
+                        : "bg-emerald-500/15 text-emerald-200"
+                    }`}>
+                      {replayLearningSummary.badgeTone === "warn" ? "Would Change" : "Keep Plan"}
+                    </span>
+                  </div>
+
+                  {replayLearningLoading && !replayLearning ? (
+                    <div className="mt-3 text-xs text-gray-500">加载 replay learning 中...</div>
+                  ) : replayLearningError ? (
+                    <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
+                      {replayLearningError}
+                    </div>
+                  ) : !replayLearning ? (
+                    <div className="mt-3 text-xs text-gray-500">暂无 replay learning 结果</div>
+                  ) : (
+                    <div className="mt-3 space-y-3 text-xs text-gray-300">
+                      <div className="leading-5 text-gray-200">{replayLearningSummary.headline}</div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-gray-500">Action Bias</div>
+                          <div className="mt-1 text-white">{replayLearning.counterfactual.action_bias || "--"}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">Would Change</div>
+                          <div className="mt-1 text-white">{replayLearning.counterfactual.would_change ? "yes" : "no"}</div>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">Counterfactual</div>
+                        <div className="mt-1 leading-5 text-gray-200">
+                          {replayLearning.counterfactual.rationale || "--"}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

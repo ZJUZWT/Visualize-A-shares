@@ -5,6 +5,7 @@ import { CRON_PRESETS, EXPERT_OPTIONS } from "@/types/scheduler";
 import type { ScheduledTask } from "@/types/scheduler";
 import { useSchedulerStore } from "@/stores/useSchedulerStore";
 import { Clock, Bot, MessageSquare, RotateCw } from "lucide-react";
+import { API_BASE } from "@/lib/api-base";
 
 interface Props {
   task: ScheduledTask;
@@ -16,8 +17,6 @@ interface SessionMessage {
   content: string;
   created_at: string;
 }
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export function TaskHistory({ task }: Props) {
   const { runNow } = useSchedulerStore();

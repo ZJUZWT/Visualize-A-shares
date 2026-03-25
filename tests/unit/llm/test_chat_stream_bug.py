@@ -21,8 +21,9 @@ async def test_anthropic_chat_stream_url_uses_config_base_url():
         mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        mock_resp = AsyncMock()
+        mock_resp = MagicMock()
         mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
 
         async def fake_lines():
             for line in [

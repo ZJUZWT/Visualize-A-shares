@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from .market_bridge import CrossMarketBridge
 from .schemas import IndustryCognition, IndustryMapping, CapitalStructure
 
 
@@ -25,6 +26,7 @@ class IndustryEngine:
         self._store = data_engine.store
         self._llm = llm_provider
         self._agent = None  # 延迟初始化
+        self._bridge = CrossMarketBridge()
 
     @property
     def agent(self):
@@ -185,6 +187,9 @@ class IndustryEngine:
             "llm_available": self._llm is not None,
             "industry_count": len(self.get_industry_mapping()),
         }
+
+    def bridge_market_assets(self, target: str, market: str = "", limit: int = 10) -> dict:
+        return self._bridge.bridge(target, market=market, limit=limit)
 
     # ── 私有方法 ──
 

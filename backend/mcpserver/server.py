@@ -252,6 +252,62 @@ async def get_demo_agent_cycle_summary(
     )
 
 
+@server.tool()
+async def run_agent_backtest(
+    portfolio_id: str,
+    start_date: str,
+    end_date: str,
+    execution_price_mode: str = "next_open",
+) -> str:
+    """运行 Main Agent 回测，并返回适合操作员阅读的摘要。"""
+    from . import agent_backtest
+
+    return await agent_backtest.run_agent_backtest(
+        portfolio_id=portfolio_id,
+        start_date=start_date,
+        end_date=end_date,
+        execution_price_mode=execution_price_mode,
+    )
+
+
+@server.tool()
+async def get_agent_backtest_summary(run_id: str) -> str:
+    """返回 Main Agent 回测摘要 JSON，供 agent 验收与机器消费。"""
+    from . import agent_backtest
+
+    return await agent_backtest.get_agent_backtest_summary(run_id)
+
+
+@server.tool()
+async def get_agent_backtest_day(run_id: str, date: str) -> str:
+    """返回 Main Agent 回测某一天的关键信息，包括 brain run、trades、review effect 与 memory delta。"""
+    from . import agent_backtest
+
+    return await agent_backtest.get_agent_backtest_day(run_id, date)
+
+
+@server.tool()
+async def run_demo_agent_verification_suite(
+    scenario_id: str = "demo-evolution",
+    backtest_start_date: str | None = None,
+    backtest_end_date: str | None = None,
+    timeout_seconds: int = 30,
+    execution_price_mode: str = "next_open",
+    smoke_mode: bool = False,
+) -> str:
+    """统一运行 demo agent 闭环验证和短窗口回测，并返回机器可消费的验收 JSON。"""
+    from . import agent_verification_suite
+
+    return await agent_verification_suite.run_demo_agent_verification_suite(
+        scenario_id=scenario_id,
+        backtest_start_date=backtest_start_date,
+        backtest_end_date=backtest_end_date,
+        timeout_seconds=timeout_seconds,
+        execution_price_mode=execution_price_mode,
+        smoke_mode=smoke_mode,
+    )
+
+
 # ─── IndustryEngine Tools ──────────────────────────────
 
 @server.tool()
