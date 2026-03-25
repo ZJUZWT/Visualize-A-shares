@@ -54,7 +54,7 @@ async def get_mapping():
     industries = ie.list_industries()
     return {
         "total_industries": len(industries),
-        "industries": [m.model_dump() for m in industries[:50]],
+        "industries": [m.model_dump() for m in industries],
     }
 
 

@@ -2262,6 +2262,10 @@ class ChainAgent:
         BATCH_SIZE = 5  # 每批最多合并 5 个节点
 
         targets = targets[:15]
+        # 多目标时限制深度，防止指数爆炸（单节点展开可以深，批量展开必须浅）
+        if len(targets) > 2 and max_depth > 1:
+            logger.info(f"expand_all: {len(targets)} 个目标, max_depth={max_depth} → 自动降为 1（防止指数爆炸）")
+            max_depth = 1
         target_names = [t[0] for t in targets]
 
         yield {
@@ -2355,10 +2359,22 @@ class ChainAgent:
                 asyncio.create_task(_expand_batch(batch_names, direction))
 
             finished = 0
+            new_node_count = 0
+            new_link_count = 0
             while finished < pending:
                 evt = await queue.get()
                 if evt is None:
                     finished += 1
+                    # 每完成一个批次，推送进度
+                    yield {
+                        "event": "expand_progress",
+                        "data": {
+                            "batch_done": finished,
+                            "batch_total": pending,
+                            "new_nodes": new_node_count,
+                            "new_links": new_link_count,
+                        },
+                    }
                     continue
 
                 etype = evt.get("event", "")
@@ -2371,6 +2387,7 @@ class ChainAgent:
                     for n in unique_nodes:
                         seen_nodes.add(n.get("name", ""))
                     if unique_nodes:
+                        new_node_count += len(unique_nodes)
                         yield {
                             "event": "nodes_discovered",
                             "data": {"depth": evt["data"].get("depth", 1), "nodes": unique_nodes},
@@ -2384,6 +2401,7 @@ class ChainAgent:
                             seen_links.add(key)
                             unique_links.append(l)
                     if unique_links:
+                        new_link_count += len(unique_links)
                         yield {
                             "event": "links_discovered",
                             "data": {"depth": evt["data"].get("depth", 1), "links": unique_links},
