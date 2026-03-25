@@ -207,6 +207,22 @@ app.include_router(sector_router)
 app.include_router(create_agent_router(), prefix="/api/v1/agent")
 
 
+# ─── 健康检查 ──────────────────────────────────────────
+@app.get("/health")
+@app.get("/api/v1/health")
+async def global_health():
+    """全局健康检查"""
+    from engine.data import get_data_engine
+    de = get_data_engine()
+    health = de.health_check()
+    return {
+        "status": "ok",
+        "engine": "StockScape",
+        "version": "0.1.0",
+        "stock_count": health.get("stock_count", 0),
+    }
+
+
 # ─── 根路由 ────────────────────────────────────────────
 @app.get("/")
 async def root():

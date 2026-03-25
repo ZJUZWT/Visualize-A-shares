@@ -83,10 +83,17 @@ async def get_state(db: AgentDB, portfolio_id: str) -> dict:
                VALUES (?, ?, ?)""",
             [portfolio_id, now, now],
         )
-        rows = await db.execute_read(
-            "SELECT * FROM agent.agent_state WHERE portfolio_id = ?",
-            [portfolio_id],
-        )
+        # 直接构造返回，避免多余的 re-fetch
+        return {
+            "portfolio_id": portfolio_id,
+            "market_view": None,
+            "position_level": None,
+            "sector_preferences": None,
+            "risk_alerts": None,
+            "source_run_id": None,
+            "created_at": now,
+            "updated_at": now,
+        }
     return _normalize_state_row(rows[0])
 
 

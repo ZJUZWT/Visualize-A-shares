@@ -23,7 +23,7 @@ import { KLinePreview } from "./KLinePreview";
 interface ThinkingPanelProps {
   thinking: ThinkingItem[];
   color?: string;
-  /** 是否默认展开（流式消息 true，历史消息 false） */
+  /** 是否默认展开（默认 true，始终展开思考过程） */
   defaultOpen?: boolean;
 }
 
@@ -452,7 +452,7 @@ export function ThinkingPanel({
                           content={item.data.content}
                           label={item.data.label || "专家"}
                           hasError={hasError}
-                          defaultOpen={!hasError}
+                          defaultOpen={false}
                         />
                       )}
                     </div>
