@@ -1,5 +1,5 @@
 import { create, type StoreApi } from "zustand";
-import { API_BASE } from "@/lib/api-base";
+import { API_BASE, SSE_BASE } from "@/lib/api-base";
 import type {
   ExpertMessage,
   ExpertStatus,
@@ -13,6 +13,7 @@ import type {
   BeliefUpdatedData,
   ClarificationRequestData,
   ClarificationSelection,
+  ClarificationRoundSelection,
   PendingClarification,
   ReasoningSummaryData,
   SelfCritiqueData,
@@ -54,8 +55,10 @@ interface ExpertStore {
   setActiveExpert: (type: ExpertType) => void;
   /** 发送消息 */
   sendMessage: (text: string) => Promise<void>;
-  /** 选择 clarification 选项并继续分析 */
+  /** 选择 clarification 选项并继续分析（单选兼容） */
   submitClarification: (selection: ClarificationSelection) => Promise<void>;
+  /** 提交多选 clarification 选项并继续分析 */
+  submitClarifications: (selections: ClarificationSelection[]) => Promise<void>;
   /** 停止当前流式请求 */
   stopStreaming: () => void;
   /** 重试失败的消息 */
@@ -265,7 +268,7 @@ async function streamExpertReply(opts: {
   _abortMap.set(expertType, ac);
 
   try {
-    const res = await fetch(`${API_BASE}/api/v1/expert/chat/${expertType}`, {
+    const res = await fetch(`${SSE_BASE}/api/v1/expert/chat/${expertType}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -314,6 +317,17 @@ async function streamExpertReply(opts: {
         }
       }
     }
+
+    // 流结束后确保 isStreaming=false（防止 reply_complete 事件未到达）
+    set((s) => {
+      const history = [...(s.chatHistories[expertType] ?? [])];
+      const idx = history.findIndex((m) => m.id === expertMessageId);
+      if (idx !== -1 && history[idx].isStreaming) {
+        history[idx] = { ...history[idx], isStreaming: false };
+        return { chatHistories: { ...s.chatHistories, [expertType]: history } };
+      }
+      return s;
+    });
 
     if (sessionId) {
       get().fetchSessions(expertType);
@@ -675,7 +689,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       role: "expert",
       content: "",
       thinking: [],
-      isStreaming: !shouldClarify,
+      isStreaming: true,  // 始终显示 loading 动画（clarify 返回后会关闭）
     };
 
     set((s) => ({
@@ -720,9 +734,11 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           body: JSON.stringify({
             message: text,
             session_id: sessionId,
+            previous_selections: [],
           }),
         });
         const data = await res.json() as ClarificationRequestData;
+        const currentRound = data.round ?? 1;
         set((s) => {
           const history = [...(s.chatHistories[expertType] ?? [])];
           const idx = history.findIndex((m) => m.id === expertMsg.id);
@@ -734,6 +750,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
                   type: "clarification_request" as const,
                   data,
                   status: "pending" as const,
+                  round: currentRound,
                 },
               ],
               isStreaming: false,
@@ -749,6 +766,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
                 expertMessageId: expertMsg.id,
                 request: data,
                 originalMessage: text,
+                previousSelections: [],
               },
             },
           };
@@ -796,6 +814,12 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   },
 
   submitClarification: async (selection: ClarificationSelection) => {
+    // 单选兼容包装：转发到 submitClarifications
+    await get().submitClarifications([selection]);
+  },
+
+  submitClarifications: async (selections: ClarificationSelection[]) => {
+    if (selections.length === 0) return;
     const { activeExpert, pendingClarifications, deepThink } = get();
     const expertType = activeExpert;
     const pending = pendingClarifications[expertType];
@@ -804,19 +828,42 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     const existingAc = _abortMap.get(expertType);
     if (existingAc) { existingAc.abort(); _abortMap.delete(expertType); }
 
+    // 当前轮次（从 pending.request 取，默认1）
+    const currentRound = pending.request.round ?? 1;
+
+    // 判断是否全部 skip
+    const allSkip = selections.every(s => s.skip);
+
+    // 构建这一轮的选择记录（多选 selections 列表 + 旧字段兼容）
+    const firstSel = selections[0];
+    const thisRoundSelection: ClarificationRoundSelection = {
+      round: currentRound,
+      selections: selections,
+      // 旧字段向后兼容（取第一个选择）
+      option_id: firstSel.option_id,
+      label: firstSel.label,
+      title: firstSel.title,
+      focus: firstSel.focus,
+      skip: firstSel.skip,
+    };
+
+    // 累积所有轮次的选择
+    const allRoundSelections = [...pending.previousSelections, thisRoundSelection];
+
+    // 标记当前轮为已选
     set((s) => {
       const history = [...(s.chatHistories[expertType] ?? [])];
       const idx = history.findIndex((m) => m.id === pending.expertMessageId);
       if (idx !== -1) {
         history[idx] = {
           ...history[idx],
-          isStreaming: true,
           thinking: history[idx].thinking.map((item) =>
-            item.type === "clarification_request"
+            item.type === "clarification_request" && item.status === "pending"
               ? {
                   ...item,
-                  status: selection.skip ? "skipped" as const : "selected" as const,
-                  selectedOption: selection,
+                  status: allSkip ? "skipped" as const : "selected" as const,
+                  selectedOption: firstSel,
+                  selectedOptions: selections,
                 }
               : item
           ),
@@ -824,24 +871,170 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       }
       return {
         chatHistories: { ...s.chatHistories, [expertType]: history },
-        pendingClarifications: { ...s.pendingClarifications, [expertType]: null },
       };
     });
 
-    setExpertStatus(set, expertType, "thinking");
+    // 如果用户选了 skip，或者后端说不需要继续 (needs_more=false)，直接进入 chat
+    const needsMore = pending.request.needs_more !== false; // 默认 true（安全）
+    if (allSkip || !needsMore) {
+      // 清除 pending，进入 chat
+      set((s) => ({
+        pendingClarifications: { ...s.pendingClarifications, [expertType]: null },
+      }));
+      setExpertStatus(set, expertType, "thinking");
 
-    await streamExpertReply({
-      expertType,
-      expertMessageId: pending.expertMessageId,
-      sessionId: pending.sessionId,
-      payload: {
-        message: pending.originalMessage,
-        session_id: pending.sessionId,
-        deep_think: deepThink,
-        clarification_selection: selection,
-      },
-      set,
-      get,
+      // 设置 streaming 状态
+      set((s) => {
+        const history = [...(s.chatHistories[expertType] ?? [])];
+        const idx = history.findIndex((m) => m.id === pending.expertMessageId);
+        if (idx !== -1) {
+          history[idx] = { ...history[idx], isStreaming: true };
+        }
+        return { chatHistories: { ...s.chatHistories, [expertType]: history } };
+      });
+
+      await streamExpertReply({
+        expertType,
+        expertMessageId: pending.expertMessageId,
+        sessionId: pending.sessionId,
+        payload: {
+          message: pending.originalMessage,
+          session_id: pending.sessionId,
+          deep_think: deepThink,
+          clarification_chain: allRoundSelections,
+          // 向后兼容：也发送最后一轮的 clarification_selection
+          clarification_selection: firstSel,
+        },
+        set,
+        get,
+      });
+      return;
+    }
+
+    // 需要继续追问：调用 /clarify 获取下一轮选项
+    setExpertStatus(set, expertType, "clarifying");
+    // 显示 loading 动画等待下一轮选项
+    set((s) => {
+      const history = [...(s.chatHistories[expertType] ?? [])];
+      const idx = history.findIndex((m) => m.id === pending.expertMessageId);
+      if (idx !== -1) {
+        history[idx] = { ...history[idx], isStreaming: true };
+      }
+      return { chatHistories: { ...s.chatHistories, [expertType]: history } };
     });
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/expert/clarify/${expertType}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: pending.originalMessage,
+          session_id: pending.sessionId,
+          previous_selections: allRoundSelections,
+        }),
+      });
+      const nextData = await res.json() as ClarificationRequestData;
+      const nextRound = nextData.round ?? (currentRound + 1);
+
+      // 如果后端返回 should_clarify=false 或没有选项，直接进入 chat
+      if (!nextData.should_clarify || !nextData.options?.length) {
+        set((s) => ({
+          pendingClarifications: { ...s.pendingClarifications, [expertType]: null },
+        }));
+        setExpertStatus(set, expertType, "thinking");
+
+        set((s) => {
+          const history = [...(s.chatHistories[expertType] ?? [])];
+          const idx = history.findIndex((m) => m.id === pending.expertMessageId);
+          if (idx !== -1) {
+            history[idx] = { ...history[idx], isStreaming: true };
+          }
+          return { chatHistories: { ...s.chatHistories, [expertType]: history } };
+        });
+
+        await streamExpertReply({
+          expertType,
+          expertMessageId: pending.expertMessageId,
+          sessionId: pending.sessionId,
+          payload: {
+            message: pending.originalMessage,
+            session_id: pending.sessionId,
+            deep_think: deepThink,
+            clarification_chain: allRoundSelections,
+            clarification_selection: firstSel,
+          },
+          set,
+          get,
+        });
+        return;
+      }
+
+      // 追加新一轮的 clarification_request ThinkingItem
+      set((s) => {
+        const history = [...(s.chatHistories[expertType] ?? [])];
+        const idx = history.findIndex((m) => m.id === pending.expertMessageId);
+        if (idx !== -1) {
+          history[idx] = {
+            ...history[idx],
+            thinking: [
+              ...history[idx].thinking,
+              {
+                type: "clarification_request" as const,
+                data: nextData,
+                status: "pending" as const,
+                round: nextRound,
+              },
+            ],
+            isStreaming: false,
+          };
+        }
+        return {
+          chatHistories: { ...s.chatHistories, [expertType]: history },
+          pendingClarifications: {
+            ...s.pendingClarifications,
+            [expertType]: {
+              sessionId: pending.sessionId,
+              userMessageId: pending.userMessageId,
+              expertMessageId: pending.expertMessageId,
+              request: nextData,
+              originalMessage: pending.originalMessage,
+              previousSelections: allRoundSelections,
+            },
+          },
+        };
+      });
+      setExpertStatus(set, expertType, "idle");
+    } catch (e: unknown) {
+      // 追问失败时降级：直接带已有选择进入 chat
+      const errMsg = (e as Error).message;
+      console.warn("多轮澄清追问失败，降级进入 chat:", errMsg);
+      set((s) => ({
+        pendingClarifications: { ...s.pendingClarifications, [expertType]: null },
+      }));
+      setExpertStatus(set, expertType, "thinking");
+
+      set((s) => {
+        const history = [...(s.chatHistories[expertType] ?? [])];
+        const idx = history.findIndex((m) => m.id === pending.expertMessageId);
+        if (idx !== -1) {
+          history[idx] = { ...history[idx], isStreaming: true };
+        }
+        return { chatHistories: { ...s.chatHistories, [expertType]: history } };
+      });
+
+      await streamExpertReply({
+        expertType,
+        expertMessageId: pending.expertMessageId,
+        sessionId: pending.sessionId,
+        payload: {
+          message: pending.originalMessage,
+          session_id: pending.sessionId,
+          deep_think: deepThink,
+          clarification_chain: allRoundSelections,
+          clarification_selection: firstSel,
+        },
+        set,
+        get,
+      });
+    }
   },
 }));

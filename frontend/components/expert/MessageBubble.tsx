@@ -1,9 +1,10 @@
 "use client";
 
-import type { ExpertMessage } from "@/types/expert";
+import { useState, useEffect, useCallback } from "react";
+import type { ExpertMessage, ThinkingItem, ClarificationSelection, ClarificationOption } from "@/types/expert";
 import { useExpertStore } from "@/stores/useExpertStore";
 import { ThinkingPanel } from "./ThinkingPanel";
-import { AlertCircle, RotateCw, CheckCircle2 } from "lucide-react";
+import { AlertCircle, RotateCw, CheckCircle2, ChevronDown, ChevronRight, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { splitByTradePlan, hasTradePlan } from "@/lib/parseTradePlan";
@@ -17,19 +18,161 @@ interface MessageBubbleProps {
   expertName: string;
 }
 
+/** 单轮澄清卡片 — 支持单选 / 多选 / 子选项 */
 function ClarificationCard({
-  message,
+  item,
   expertColor,
+  isLastPending,
 }: {
-  message: ExpertMessage;
+  item: Extract<ThinkingItem, { type: "clarification_request" }>;
   expertColor: string;
+  /** 是否是最后一个 pending 的轮次（只有它可交互） */
+  isLastPending: boolean;
 }) {
-  const { submitClarification, pendingClarifications, activeExpert } = useExpertStore();
-  const item = message.thinking.find((thinking) => thinking.type === "clarification_request");
-  if (!item || item.type !== "clarification_request") return null;
-
+  const { submitClarification, submitClarifications, pendingClarifications, activeExpert } = useExpertStore();
   const isPending = item.status === "pending";
-  const canSubmit = isPending && !!pendingClarifications[activeExpert];
+  const canSubmit = isPending && isLastPending && !!pendingClarifications[activeExpert];
+  const isResolved = item.status === "selected" || item.status === "skipped";
+  const [expanded, setExpanded] = useState(!isResolved);
+  const multiSelect = item.data.multi_select ?? false;
+
+  // 多选模式本地状态：{ optionId: ClarificationSelection }
+  const [selectedMap, setSelectedMap] = useState<Map<string, ClarificationSelection>>(new Map());
+  // 子选项展开状态：哪个 option 的子选项正在展开
+  const [expandedSubId, setExpandedSubId] = useState<string | null>(null);
+
+  // 当选项被选中后自动折叠
+  useEffect(() => {
+    if (isResolved) {
+      setExpanded(false);
+    }
+  }, [isResolved]);
+
+  const roundLabel = item.round ?? item.data.round;
+
+  // 切换选中状态（多选模式）
+  const toggleOption = useCallback((option: ClarificationOption) => {
+    if (!canSubmit || !multiSelect) return;
+    setSelectedMap(prev => {
+      const next = new Map(prev);
+      if (option.sub_choices && option.sub_choices.length > 0) {
+        // 有子选项：展开/折叠子选项面板（不直接选中）
+        setExpandedSubId(prev2 => prev2 === option.id ? null : option.id);
+        return next;
+      }
+      if (next.has(option.id)) {
+        next.delete(option.id);
+      } else {
+        next.set(option.id, {
+          option_id: option.id,
+          label: option.label,
+          title: option.title,
+          focus: option.focus,
+          skip: false,
+        });
+      }
+      return next;
+    });
+  }, [canSubmit, multiSelect]);
+
+  // 选择子选项（多选模式下的子选项互斥）
+  const selectSubChoice = useCallback((option: ClarificationOption, subId: string, subText: string) => {
+    if (!canSubmit) return;
+    setSelectedMap(prev => {
+      const next = new Map(prev);
+      next.set(option.id, {
+        option_id: option.id,
+        label: option.label,
+        title: option.title,
+        focus: option.focus,
+        skip: false,
+        sub_choice_id: subId,
+        sub_choice_text: subText,
+      });
+      return next;
+    });
+  }, [canSubmit]);
+
+  // 单选模式：直接提交
+  const handleSingleSelect = useCallback((option: ClarificationOption) => {
+    if (!canSubmit) return;
+    // 如果有子选项，展开子选项而不是直接提交
+    if (option.sub_choices && option.sub_choices.length > 0) {
+      setExpandedSubId(prev => prev === option.id ? null : option.id);
+      return;
+    }
+    submitClarification({
+      option_id: option.id,
+      label: option.label,
+      title: option.title,
+      focus: option.focus,
+      skip: false,
+    });
+  }, [canSubmit, submitClarification]);
+
+  // 单选模式下的子选项选择（直接提交）
+  const handleSingleSubChoice = useCallback((option: ClarificationOption, subId: string, subText: string) => {
+    if (!canSubmit) return;
+    submitClarification({
+      option_id: option.id,
+      label: option.label,
+      title: option.title,
+      focus: option.focus,
+      skip: false,
+      sub_choice_id: subId,
+      sub_choice_text: subText,
+    });
+  }, [canSubmit, submitClarification]);
+
+  // 确认多选
+  const handleConfirmMultiSelect = useCallback(() => {
+    if (!canSubmit || selectedMap.size === 0) return;
+    submitClarifications(Array.from(selectedMap.values()));
+  }, [canSubmit, selectedMap, submitClarifications]);
+
+  // 构建已选摘要文本
+  const buildSelectedSummary = (): string => {
+    if (item.status === "skipped") return "跳过，直接分析";
+    // 多选模式
+    if (item.selectedOptions && item.selectedOptions.length > 0) {
+      return item.selectedOptions.map(s => {
+        let text = `${s.label}`;
+        if (s.sub_choice_text) text += `(${s.sub_choice_text})`;
+        return text;
+      }).join(" + ");
+    }
+    // 单选模式
+    if (item.selectedOption) {
+      let text = `${item.selectedOption.label}. ${item.selectedOption.title}`;
+      if (item.selectedOption.sub_choice_text) {
+        text += `（${item.selectedOption.sub_choice_text}）`;
+      }
+      return text;
+    }
+    return "";
+  };
+
+  // 选中后的摘要显示（折叠态）
+  if (isResolved && !expanded) {
+    const selectedLabel = buildSelectedSummary();
+    return (
+      <button
+        onClick={() => setExpanded(true)}
+        className="mb-2 flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2 text-left transition-colors hover:border-[var(--accent)]/30 w-full"
+      >
+        <div
+          className="h-5 w-5 shrink-0 rounded-md flex items-center justify-center text-[10px] text-white"
+          style={{ backgroundColor: expertColor }}
+        >
+          ✓
+        </div>
+        <span className="text-xs text-[var(--text-secondary)] truncate">
+          {roundLabel ? `第${roundLabel}轮 · ` : ""}分析方向：<span className="text-[var(--text-primary)] font-medium">{selectedLabel}</span>
+        </span>
+        <ChevronRight size={12} className="ml-auto shrink-0 text-[var(--text-tertiary)]" />
+      </button>
+    );
+  }
 
   return (
     <div className="mb-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
@@ -41,66 +184,138 @@ function ClarificationCard({
           ?
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold text-[var(--text-primary)]">
-            先确认分析方向
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-[11px] font-semibold text-[var(--text-primary)]">
+              {roundLabel ? `第${roundLabel}轮 · ` : ""}先确认分析方向{multiSelect ? "（可多选）" : ""}
+            </p>
+            {isResolved && (
+              <button onClick={() => setExpanded(false)} className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
+                <ChevronDown size={14} />
+              </button>
+            )}
+          </div>
           <p className="mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">
             {item.data.question_summary}
           </p>
           <div className="mt-3 grid gap-2">
             {item.data.options.map((option) => {
-              const selected = item.selectedOption?.option_id === option.id;
+              const isSelectedSingle = item.selectedOption?.option_id === option.id;
+              const isSelectedMulti = selectedMap.has(option.id);
+              const isSelected = isResolved ? isSelectedSingle || (item.selectedOptions ?? []).some(s => s.option_id === option.id) : isSelectedMulti;
+              const hasSubChoices = (option.sub_choices ?? []).length > 0;
+              const isSubExpanded = expandedSubId === option.id;
+              const currentSubChoiceId = selectedMap.get(option.id)?.sub_choice_id;
+
               return (
-                <button
-                  key={option.id}
-                  onClick={() =>
-                    canSubmit &&
-                    submitClarification({
-                      option_id: option.id,
-                      label: option.label,
-                      title: option.title,
-                      focus: option.focus,
-                      skip: false,
-                    })
-                  }
-                  disabled={!canSubmit}
-                  className={`w-full rounded-xl border px-3 py-2.5 text-left transition-all duration-150 ${
-                    selected
-                      ? "border-transparent text-white"
-                      : "border-[var(--border)] hover:border-current"
-                  } ${!canSubmit ? "opacity-70 cursor-default" : ""}`}
-                  style={selected ? { backgroundColor: expertColor } : undefined}
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
-                        selected ? "bg-white/20" : ""
-                      }`}
-                      style={selected ? undefined : { backgroundColor: expertColor + "15", color: expertColor }}
-                    >
-                      {option.label}
-                    </span>
-                    <span className="text-sm font-medium">{option.title}</span>
-                    {selected && <CheckCircle2 size={14} className="ml-auto" />}
-                  </div>
-                  <p className={`mt-1 text-xs leading-relaxed ${selected ? "text-white/80" : "text-[var(--text-tertiary)]"}`}>
-                    {option.description}
-                  </p>
-                </button>
+                <div key={option.id}>
+                  <button
+                    onClick={() => multiSelect ? toggleOption(option) : handleSingleSelect(option)}
+                    disabled={!canSubmit}
+                    className={`w-full rounded-xl border px-3 py-2.5 text-left transition-all duration-150 ${
+                      isSelected
+                        ? "border-transparent text-white"
+                        : "border-[var(--border)] hover:border-current"
+                    } ${!canSubmit ? "opacity-70 cursor-default" : ""}`}
+                    style={isSelected ? { backgroundColor: expertColor } : undefined}
+                  >
+                    <div className="flex items-center gap-2">
+                      {multiSelect && canSubmit && (
+                        <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[9px] ${
+                          isSelected ? "border-white/40 bg-white/20" : "border-[var(--border)]"
+                        }`}>
+                          {isSelected && <Check size={10} />}
+                        </span>
+                      )}
+                      <span
+                        className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
+                          isSelected ? "bg-white/20" : ""
+                        }`}
+                        style={isSelected ? undefined : { backgroundColor: expertColor + "15", color: expertColor }}
+                      >
+                        {option.label}
+                      </span>
+                      <span className="text-sm font-medium">{option.title}</span>
+                      {hasSubChoices && (
+                        <span className={`text-[10px] ${isSelected ? "text-white/60" : "text-[var(--text-tertiary)]"}`}>
+                          {isSubExpanded ? "▾" : "▸"} 展开选项
+                        </span>
+                      )}
+                      {isSelected && !hasSubChoices && <CheckCircle2 size={14} className="ml-auto" />}
+                      {isSelected && currentSubChoiceId && (
+                        <span className="ml-auto text-xs text-white/80">
+                          {selectedMap.get(option.id)?.sub_choice_text}
+                        </span>
+                      )}
+                    </div>
+                    <p className={`mt-1 text-xs leading-relaxed ${isSelected ? "text-white/80" : "text-[var(--text-tertiary)]"}`}>
+                      {option.description}
+                    </p>
+                  </button>
+
+                  {/* 子选项展开区 */}
+                  {hasSubChoices && isSubExpanded && canSubmit && (
+                    <div className="ml-8 mt-1.5 mb-1 flex flex-wrap gap-1.5">
+                      {(option.sub_choices ?? []).map((sc) => {
+                        const isSubSelected = currentSubChoiceId === sc.id;
+                        return (
+                          <button
+                            key={sc.id}
+                            onClick={() => multiSelect
+                              ? selectSubChoice(option, sc.id, sc.text)
+                              : handleSingleSubChoice(option, sc.id, sc.text)
+                            }
+                            className={`rounded-full border px-3 py-1 text-xs transition-all ${
+                              isSubSelected
+                                ? "border-transparent text-white"
+                                : "border-[var(--border)] hover:border-current text-[var(--text-secondary)]"
+                            }`}
+                            style={isSubSelected ? { backgroundColor: expertColor } : undefined}
+                          >
+                            {sc.label} {sc.text}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
 
+          {/* 多选确认按钮 */}
+          {multiSelect && canSubmit && (
+            <button
+              onClick={handleConfirmMultiSelect}
+              disabled={selectedMap.size === 0}
+              className={`mt-3 rounded-xl border px-4 py-2 text-sm font-medium transition-all ${
+                selectedMap.size > 0
+                  ? "text-white border-transparent"
+                  : "border-[var(--border)] text-[var(--text-tertiary)] cursor-not-allowed"
+              }`}
+              style={selectedMap.size > 0 ? { backgroundColor: expertColor } : undefined}
+            >
+              确认选择{selectedMap.size > 0 ? `（${selectedMap.size}项）` : ""}
+            </button>
+          )}
+
           <button
             onClick={() =>
               canSubmit &&
-              submitClarification({
-                option_id: item.data.skip_option.id,
-                label: item.data.skip_option.label,
-                title: item.data.skip_option.title,
-                focus: item.data.skip_option.focus,
-                skip: true,
-              })
+              (multiSelect
+                ? submitClarifications([{
+                    option_id: item.data.skip_option.id,
+                    label: item.data.skip_option.label,
+                    title: item.data.skip_option.title,
+                    focus: item.data.skip_option.focus,
+                    skip: true,
+                  }])
+                : submitClarification({
+                    option_id: item.data.skip_option.id,
+                    label: item.data.skip_option.label,
+                    title: item.data.skip_option.title,
+                    focus: item.data.skip_option.focus,
+                    skip: true,
+                  }))
             }
             disabled={!canSubmit}
             className={`mt-3 inline-flex items-center rounded-full border px-3 py-1.5 text-xs transition-colors ${
@@ -116,6 +331,37 @@ function ClarificationCard({
         </div>
       </div>
     </div>
+  );
+}
+
+/** 多轮澄清卡片组：遍历所有 clarification_request ThinkingItem */
+function ClarificationCards({
+  message,
+  expertColor,
+}: {
+  message: ExpertMessage;
+  expertColor: string;
+}) {
+  const clarificationItems = message.thinking.filter(
+    (t): t is Extract<ThinkingItem, { type: "clarification_request" }> =>
+      t.type === "clarification_request"
+  );
+  if (clarificationItems.length === 0) return null;
+
+  // 找到最后一个 pending 的索引
+  const lastPendingIdx = clarificationItems.findLastIndex((t) => t.status === "pending");
+
+  return (
+    <>
+      {clarificationItems.map((item, idx) => (
+        <ClarificationCard
+          key={`clarify-${idx}`}
+          item={item}
+          expertColor={expertColor}
+          isLastPending={idx === lastPendingIdx}
+        />
+      ))}
+    </>
   );
 }
 
@@ -230,11 +476,11 @@ export function MessageBubble({
       </div>
 
       <div className="flex-1 min-w-0 max-w-[80%]">
-        {/* 思考面板：历史消息默认折叠，流式消息默认展开 */}
-        <ClarificationCard message={message} expertColor={expertColor} />
+        {/* 多轮澄清卡片 */}
+        <ClarificationCards message={message} expertColor={expertColor} />
 
         {thinkingItems.length > 0 && (
-          <ThinkingPanel thinking={thinkingItems} color={expertColor} defaultOpen={message.isStreaming} />
+          <ThinkingPanel thinking={thinkingItems} color={expertColor} defaultOpen />
         )}
 
         {/* 正文 */}

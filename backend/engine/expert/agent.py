@@ -27,7 +27,9 @@ from engine.expert.schemas import (
     BeliefUpdateOutput,
     ClarificationOption,
     ClarificationOutput,
+    ClarificationRoundSelection,
     ClarificationSelection,
+    ClarificationSubChoice,
     GraphEdge,
     MaterialNode,
     RegionNode,
@@ -38,6 +40,7 @@ from engine.expert.schemas import (
     ToolCall,
 )
 from engine.expert.tools import ExpertTools
+from engine.expert.engine_experts import TRADE_PLAN_PROMPT
 from engine.runtime import ExecutionContext, ProgressiveEmitter, QueryPrefetcher, ToolExecutionPlanner
 from llm.context_guard import ContextGuard
 from llm import ModelRouter
@@ -308,97 +311,254 @@ class ExpertAgent:
             "请优先围绕这个重点组织拆题、证据和最终回答。"
         )
 
+    @staticmethod
+    def _merge_clarification_chain(
+        message: str,
+        clarification_chain: list[ClarificationRoundSelection | dict] | None,
+    ) -> str:
+        """将多轮澄清选择合并为上下文，注入到用户消息中（支持多选 + 子选项）"""
+        if not clarification_chain:
+            return message
+
+        all_lines: list[str] = []
+        for raw_sel in clarification_chain:
+            if isinstance(raw_sel, dict):
+                sel = ClarificationRoundSelection(**raw_sel)
+            else:
+                sel = raw_sel
+
+            # 优先使用 selections 列表（多选模式），否则从旧字段构建单条
+            if sel.selections:
+                for s in sel.selections:
+                    if s.skip:
+                        continue
+                    desc = f"{s.label}. {s.title}"
+                    if s.sub_choice_id and s.sub_choice_text:
+                        desc += f"（{s.sub_choice_text}）"
+                    all_lines.append(f"- 第{sel.round}轮：{desc}（重点：{s.focus}）")
+            elif sel.option_id and not sel.skip:
+                # 向后兼容旧字段
+                all_lines.append(f"- 第{sel.round}轮：{sel.label}. {sel.title}（重点：{sel.focus}）")
+
+        if not all_lines:
+            return message
+
+        return (
+            f"{message}\n\n"
+            "【用户已确认的分析方向（多轮澄清）】\n"
+            + "\n".join(all_lines) + "\n"
+            "请综合以上所有用户选择的分析重点，组织拆题、证据和最终回答。"
+        )
+
     async def clarify(
         self,
         message: str,
         history: list[dict] | None = None,
         persona: str = "rag",
+        previous_selections: list[ClarificationRoundSelection | dict] | None = None,
     ) -> ClarificationOutput:
-        """为深度思考模式生成 clarification 选项。"""
-        _ = history or []
+        """为深度思考模式生成 clarification 选项 — 经 LLM 动态生成。
+
+        支持多轮澄清：previous_selections 包含之前轮次的用户选择，
+        LLM 根据这些选择决定是否需要继续追问。
+        """
+        conv_history = history or []
         clean_message = (message or "").strip() or "当前问题"
-        question_summary = (
-            f"我理解你的问题是：{clean_message[:80]}"
-            + ("，想先明确分析重点再展开。" if persona == "rag" else "，想先明确这笔交易最该盯的短线焦点。")
-        )
+        prev_sels = previous_selections or []
+        # 规范化为 ClarificationRoundSelection 对象
+        normalized_sels: list[ClarificationRoundSelection] = []
+        for sel in prev_sels:
+            if isinstance(sel, dict):
+                normalized_sels.append(ClarificationRoundSelection(**sel))
+            else:
+                normalized_sels.append(sel)
+        current_round = len(normalized_sels) + 1
+        max_rounds = 3
 
         if persona == "short_term":
-            options = [
-                ClarificationOption(
-                    id="timing",
-                    label="A",
-                    title="先看买点与节奏",
-                    description="确认现在能不能上、什么时候上。",
-                    focus="买点、节奏、执行窗口",
-                ),
-                ClarificationOption(
-                    id="technical",
-                    label="B",
-                    title="先看量价与技术位",
-                    description="判断支撑阻力、量能和技术信号。",
-                    focus="量价、技术位、支撑阻力",
-                ),
-                ClarificationOption(
-                    id="theme",
-                    label="C",
-                    title="先看板块与龙头",
-                    description="确认题材强弱和龙头辨识。",
-                    focus="板块强弱、龙头地位、题材发酵",
-                ),
-                ClarificationOption(
-                    id="risk",
-                    label="D",
-                    title="先看止损与撤退条件",
-                    description="先定义做错了怎么退。",
-                    focus="止损位、失效条件、风险控制",
-                ),
+            role_desc = "你是一位经验丰富的短线交易专家"
+            fallback_options = [
+                ClarificationOption(id="timing", label="A", title="先看买点与节奏",
+                    description="确认现在能不能上、什么时候上。", focus="买点、节奏、执行窗口"),
+                ClarificationOption(id="technical", label="B", title="先看量价与技术位",
+                    description="判断支撑阻力、量能和技术信号。", focus="量价、技术位、支撑阻力"),
+                ClarificationOption(id="theme", label="C", title="先看板块与龙头",
+                    description="确认题材强弱和龙头辨识。", focus="板块强弱、龙头地位、题材发酵"),
+                ClarificationOption(id="risk", label="D", title="先看止损与撤退条件",
+                    description="先定义做错了怎么退。", focus="止损位、失效条件、风险控制"),
             ]
-            reasoning = "短线问题通常有多个执行维度，先确认你最关心节奏、技术、板块还是风控，后续回答会更聚焦。"
         else:
-            options = [
-                ClarificationOption(
-                    id="valuation",
-                    label="A",
-                    title="先看估值与安全边际",
-                    description="判断值不值、贵不贵、赔率够不够。",
-                    focus="估值、安全边际、风险收益比",
-                ),
-                ClarificationOption(
-                    id="fundamental",
-                    label="B",
-                    title="先看基本面与行业逻辑",
-                    description="判断生意质量和行业周期。",
-                    focus="基本面、行业周期、核心逻辑",
-                ),
-                ClarificationOption(
-                    id="position",
-                    label="C",
-                    title="先看仓位与操作策略",
-                    description="判断该不该买、怎么买、配多少。",
-                    focus="仓位管理、买入策略、持有计划",
-                ),
-                ClarificationOption(
-                    id="catalyst",
-                    label="D",
-                    title="先看催化与观察清单",
-                    description="先看需要继续确认什么，再决定出手。",
-                    focus="催化剂、验证点、观察清单",
-                ),
+            role_desc = "你是一位专业的投资顾问"
+            fallback_options = [
+                ClarificationOption(id="valuation", label="A", title="先看估值与安全边际",
+                    description="判断值不值、贵不贵、赔率够不够。", focus="估值、安全边际、风险收益比"),
+                ClarificationOption(id="fundamental", label="B", title="先看基本面与行业逻辑",
+                    description="判断生意质量和行业周期。", focus="基本面、行业周期、核心逻辑"),
+                ClarificationOption(id="position", label="C", title="先看仓位与操作策略",
+                    description="判断该不该买、怎么买、配多少。", focus="仓位管理、买入策略、持有计划"),
+                ClarificationOption(id="catalyst", label="D", title="先看催化与观察清单",
+                    description="先看需要继续确认什么，再决定出手。", focus="催化剂、验证点、观察清单"),
             ]
-            reasoning = "投资顾问视角下，这类问题通常同时涉及价值、风险和执行方式，先确认分析重点能避免一股脑给结论。"
 
+        # 构建之前选择的上下文（支持多选 selections）
+        prev_context = ""
+        if normalized_sels:
+            lines = []
+            for sel in normalized_sels:
+                if sel.selections:
+                    # 多选模式：列出本轮所有选择
+                    sel_descs = []
+                    for s in sel.selections:
+                        if s.skip:
+                            continue
+                        desc = f"{s.label}. {s.title}"
+                        if s.sub_choice_id and s.sub_choice_text:
+                            desc += f"（{s.sub_choice_text}）"
+                        sel_descs.append(desc)
+                    if sel_descs:
+                        lines.append(f"  第{sel.round}轮用户选了：{' + '.join(sel_descs)}（重点：{', '.join(s.focus for s in sel.selections if not s.skip)}）")
+                elif sel.option_id and not sel.skip:
+                    lines.append(f"  第{sel.round}轮用户选了：{sel.label}. {sel.title}（重点：{sel.focus}）")
+            if lines:
+                prev_context = (
+                    "\n\n之前的澄清轮次中，用户已经做了以下选择：\n"
+                    + "\n".join(lines) + "\n"
+                )
+
+        # 第3轮强制结束
+        if current_round >= max_rounds:
+            force_end_hint = "\n\n注意：这是最后一轮澄清，你必须设置 needs_more=false，不再继续追问。\n"
+        else:
+            force_end_hint = (
+                "\n\n你需要判断是否还需要继续追问用户。"
+                "如果前面的选择已经足够明确分析方向，设置 needs_more=false；"
+                "如果某个维度还需要进一步细化，设置 needs_more=true 并生成下一轮选项。"
+                "不要为了多轮而多轮——如果一轮就够了，直接 needs_more=false。\n"
+            )
+
+        prompt = (
+            f"{role_desc}。用户向你提问：\n\n「{clean_message}」\n"
+            f"{prev_context}"
+            f"{force_end_hint}\n"
+            f"当前是第 {current_round} 轮澄清（最多 {max_rounds} 轮）。\n\n"
+            "请你根据问题内容和之前的选择，生成 3-4 个分析方向选项，帮助用户进一步聚焦。\n"
+            "每个选项要贴合用户的具体问题（不要千篇一律的通用选项），让用户选择最关心的维度。\n\n"
+            "要求：\n"
+            "1. question_summary: 用一句话重述当前轮次要确认的问题核心（自然、口语化）\n"
+            "2. multi_select: 是否允许用户多选（true/false）。如果各选项之间不冲突、用户可能同时关心多个维度，设为 true\n"
+            "3. options: 3-4个选项，每个包含 id(英文标识)、label(A/B/C/D)、title(8字以内)、description(一句话说明)、focus(分析关键词)\n"
+            "   - 如果某个选项本质上是一个「二选一/三选一」的子问题（如「你是短线还是长线？」），给它加 sub_choices 字段\n"
+            "   - sub_choices 示例: [{\"id\": \"short\", \"label\": \"①\", \"text\": \"短线（1-5日）\"}, ...]\n"
+            "   - 普通选项不需要 sub_choices\n"
+            "4. reasoning: 一句话解释为什么需要这轮确认\n"
+            "5. needs_more: true 表示还需要继续追问，false 表示这轮选完就够了\n\n"
+            "严格返回 JSON 格式：\n"
+            "```json\n"
+            "{\n"
+            '  "question_summary": "...",\n'
+            '  "multi_select": false,\n'
+            '  "options": [\n'
+            '    {"id": "style", "label": "A", "title": "先确认投资风格", "description": "...", "focus": "...",\n'
+            '     "sub_choices": [{"id": "short", "label": "①", "text": "短线"}, {"id": "mid", "label": "②", "text": "中线"}, {"id": "long", "label": "③", "text": "长线"}]},\n'
+            '    {"id": "valuation", "label": "B", "title": "看估值", "description": "...", "focus": "..."},\n'
+            '    ...\n'
+            '  ],\n'
+            '  "reasoning": "...",\n'
+            '  "needs_more": true\n'
+            "}\n"
+            "```"
+        )
+
+        try:
+            from llm.providers import ChatMessage
+            t0 = time.monotonic()
+            chunks: list[str] = []
+            async for token in self._llm.chat_stream([ChatMessage("user", prompt)]):
+                chunks.append(token)
+            raw = "".join(chunks)
+            elapsed = time.monotonic() - t0
+            logger.info(f"⏱️ clarify LLM 耗时 {elapsed:.1f}s (第{current_round}轮)")
+
+            import re, json as json_mod
+            json_match = re.search(r'\{[\s\S]*\}', raw)
+            if json_match:
+                parsed = json_mod.loads(json_match.group())
+                options = []
+                labels = ["A", "B", "C", "D"]
+                for i, opt in enumerate(parsed.get("options", [])[:4]):
+                    # 解析子选项
+                    sub_choices = []
+                    for sc in opt.get("sub_choices", []):
+                        sub_choices.append(ClarificationSubChoice(
+                            id=sc.get("id", f"sc_{i}"),
+                            label=sc.get("label", ""),
+                            text=sc.get("text", ""),
+                        ))
+                    options.append(ClarificationOption(
+                        id=opt.get("id", f"opt_{i}"),
+                        label=labels[i] if i < len(labels) else opt.get("label", str(i)),
+                        title=opt.get("title", ""),
+                        description=opt.get("description", ""),
+                        focus=opt.get("focus", ""),
+                        sub_choices=sub_choices,
+                    ))
+                # 第3轮强制 needs_more=false
+                needs_more = parsed.get("needs_more", True) if current_round < max_rounds else False
+                multi_select = bool(parsed.get("multi_select", False))
+                if options:
+                    return ClarificationOutput(
+                        should_clarify=True,
+                        question_summary=parsed.get("question_summary", f"你在问：{clean_message[:60]}"),
+                        options=options,
+                        reasoning=parsed.get("reasoning", ""),
+                        skip_option=ClarificationOption(
+                            id="skip", label="S", title="跳过，直接分析",
+                            description="不做澄清，直接进入完整分析。", focus="完整分析",
+                        ),
+                        needs_more=needs_more,
+                        round=current_round,
+                        max_rounds=max_rounds,
+                        multi_select=multi_select,
+                    )
+        except Exception as e:
+            logger.warning(f"clarify LLM 生成失败，降级到预设选项: {e}")
+
+        # 降级：使用预设选项（第1轮才用预设，后续轮降级直接结束）
+        if current_round > 1:
+            return ClarificationOutput(
+                should_clarify=False,
+                question_summary="已收集足够信息，开始分析。",
+                options=[],
+                reasoning="澄清降级，直接进入分析。",
+                skip_option=ClarificationOption(
+                    id="skip", label="S", title="跳过，直接分析",
+                    description="不做澄清，直接进入完整分析。", focus="完整分析",
+                ),
+                needs_more=False,
+                round=current_round,
+                max_rounds=max_rounds,
+            )
+        question_summary = (
+            f"你在问：{clean_message[:80]}"
+            + ("，想先明确分析重点再展开。" if persona == "rag" else "，想先明确这笔交易最该盯的短线焦点。")
+        )
+        reasoning = (
+            "投资顾问视角下，这类问题通常同时涉及价值、风险和执行方式，先确认分析重点能避免一股脑给结论。"
+            if persona != "short_term"
+            else "短线问题通常有多个执行维度，先确认你最关心节奏、技术、板块还是风控，后续回答会更聚焦。"
+        )
         return ClarificationOutput(
             should_clarify=True,
             question_summary=question_summary,
-            options=options,
+            options=fallback_options,
             reasoning=reasoning,
             skip_option=ClarificationOption(
-                id="skip",
-                label="S",
-                title="跳过，直接分析",
-                description="不做澄清，直接进入完整分析。",
-                focus="完整分析",
+                id="skip", label="S", title="跳过，直接分析",
+                description="不做澄清，直接进入完整分析。", focus="完整分析",
             ),
+            needs_more=True,
+            round=current_round,
+            max_rounds=max_rounds,
         )
 
     async def _self_critique(
@@ -430,6 +590,7 @@ class ExpertAgent:
         self, message: str, history: list[dict] | None = None, persona: str = "rag",
         deep_think: bool = False, max_rounds: int = 3,
         clarification_selection: ClarificationSelection | dict | None = None,
+        clarification_chain: list[ClarificationRoundSelection | dict] | None = None,
     ) -> AsyncGenerator[dict, None]:
         """完整对话流程，yield 结构化事件 dict
 
@@ -439,9 +600,15 @@ class ExpertAgent:
             persona: 人格类型 "rag"(投资顾问) 或 "short_term"(短线专家)
             deep_think: 多轮渐进模式 — 每轮工具执行完后 LLM 可以决定是否继续补查
             max_rounds: deep_think 模式下最大工具调用轮数
+            clarification_chain: 多轮澄清选择链（优先使用）
+            clarification_selection: 单轮澄清选择（向后兼容）
         """
         conv_history = history or []
-        analysis_message = self._merge_clarification_selection(message, clarification_selection)
+        # 优先使用多轮澄清链，其次降级到单轮选择
+        if clarification_chain:
+            analysis_message = self._merge_clarification_chain(message, clarification_chain)
+        else:
+            analysis_message = self._merge_clarification_selection(message, clarification_selection)
         agent_role = "short_term" if persona == "short_term" else "expert"
         t0_chat = time.monotonic()
         runtime_context = ExecutionContext(
@@ -1454,6 +1621,15 @@ class ExpertAgent:
                 f"**请直接基于上面的专家分析报告进行综合研判，不要说「我在等数据」「让我查一下」之类的话。**\n"
                 f"**禁止输出任何工具调用格式（如 [tool:...]、<tool_call>、```tool 等），你不需要也不能调用任何工具。**\n"
                 f"**你的唯一任务是：阅读专家报告 → 综合分析 → 给出你的判断和建议。**\n"
+                f"\n"
+                f"## 📋 回复格式要求\n"
+                f"你必须在回复中**大量引用专家报告中的具体数据**，包括但不限于：\n"
+                f"- 📊 数据专家提供的行情数据（价格、涨跌幅、成交量、市值等）\n"
+                f"- 🔬 量化专家提供的技术指标（RSI、MACD、布林带、因子评分等）\n"
+                f"- 📰 资讯专家提供的新闻和情感分析结果\n"
+                f"- 🏭 产业链专家提供的行业分析和资金流向\n"
+                f"不要只给结论——每个判断都要附上来自专家报告的原始数据作为证据。\n"
+                f"输出应为**详细的研判报告**，而非简短的三两句结论。\n"
             )
         elif not tool_results:
             data_ready_notice = (
@@ -1484,6 +1660,9 @@ class ExpertAgent:
             "\n\n⚠️ 重要：专家团队的所有数据通过工具从 AKShare/EastMoney 等数据源实时拉取，"
             "不受模型训练截止日期限制。绝对不要提及「知识截止」「训练数据截止」等字眼。"
         )
+
+        # 注入交易计划格式约定（使 RAG/短线专家也能生成策略卡片）
+        system += TRADE_PLAN_PROMPT
 
         # 构建消息列表（含对话历史）
         messages = [ChatMessage("system", system)]
@@ -1599,7 +1778,7 @@ class ExpertAgent:
         try:
             # 流式收集
             chunks: list[str] = []
-            async for token in llm.chat_stream([
+            async for token in self._llm.chat_stream([
                 ChatMessage("user", prompt),
             ]):
                 chunks.append(token)

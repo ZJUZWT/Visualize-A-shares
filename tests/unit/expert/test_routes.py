@@ -109,4 +109,5 @@ def test_clarify_short_term_uses_short_term_persona(client):
             "今天有没有短线机会？",
             history=[],
             persona="short_term",
+            previous_selections=[],
         )

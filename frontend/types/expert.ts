@@ -72,12 +72,19 @@ export interface BeliefUpdatedData {
   reason: string;
 }
 
+export interface ClarificationSubChoice {
+  id: string;
+  label: string;  // "①"
+  text: string;    // "短线（1-5日）"
+}
+
 export interface ClarificationOption {
   id: string;
   label: string;
   title: string;
   description: string;
   focus: string;
+  sub_choices?: ClarificationSubChoice[];
 }
 
 export interface ClarificationRequestData {
@@ -86,6 +93,14 @@ export interface ClarificationRequestData {
   options: ClarificationOption[];
   reasoning: string;
   skip_option: ClarificationOption;
+  /** 多轮澄清：是否需要继续追问 */
+  needs_more?: boolean;
+  /** 多轮澄清：当前轮次 */
+  round?: number;
+  /** 多轮澄清：最大轮数 */
+  max_rounds?: number;
+  /** 是否允许多选 */
+  multi_select?: boolean;
 }
 
 export interface ClarificationSelection {
@@ -94,6 +109,20 @@ export interface ClarificationSelection {
   title: string;
   focus: string;
   skip: boolean;
+  sub_choice_id?: string | null;
+  sub_choice_text?: string | null;
+}
+
+/** 多轮澄清中每一轮的用户选择（支持多选） */
+export interface ClarificationRoundSelection {
+  round: number;
+  selections: ClarificationSelection[];  // 本轮所有选择（多选时>1）
+  // 旧字段保留向后兼容
+  option_id?: string;
+  label?: string;
+  title?: string;
+  focus?: string;
+  skip?: boolean;
 }
 
 export interface ReasoningSummaryData {
@@ -114,6 +143,10 @@ export type ThinkingItem =
       data: ClarificationRequestData;
       status: "pending" | "selected" | "skipped";
       selectedOption?: ClarificationSelection;
+      /** 多选模式下的所有选中项 */
+      selectedOptions?: ClarificationSelection[];
+      /** 多轮澄清：该卡片所属轮次 */
+      round?: number;
     }
   | { type: "graph_recall"; nodes: GraphNode[] }
   | { type: "reasoning_summary"; data: ReasoningSummaryData }
@@ -141,6 +174,8 @@ export interface PendingClarification {
   expertMessageId: string;
   request: ClarificationRequestData;
   originalMessage: string;
+  /** 多轮澄清：之前所有轮次的用户选择 */
+  previousSelections: ClarificationRoundSelection[];
 }
 
 /** 对话 Session */

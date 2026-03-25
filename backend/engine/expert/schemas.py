@@ -112,12 +112,20 @@ class ThinkOutput(BaseModel):
     reasoning: str = ""
 
 
+class ClarificationSubChoice(BaseModel):
+    """选项内的互斥子选项（适合"你是 X 还是 Y？"型问题）"""
+    id: str          # "short_term"
+    label: str       # "①"
+    text: str        # "短线（1-5日）"
+
+
 class ClarificationOption(BaseModel):
     id: str
     label: str
     title: str
     description: str
     focus: str
+    sub_choices: list[ClarificationSubChoice] = Field(default_factory=list)  # 空=普通选项，非空=问题型选项
 
 
 class ClarificationOutput(BaseModel):
@@ -126,6 +134,11 @@ class ClarificationOutput(BaseModel):
     options: list[ClarificationOption] = Field(default_factory=list)
     reasoning: str = ""
     skip_option: ClarificationOption
+    # 多轮澄清字段
+    needs_more: bool = True        # LLM 是否需要继续追问
+    round: int = 1                 # 当前轮次
+    max_rounds: int = 3            # 最大轮数安全限制
+    multi_select: bool = False     # LLM 决定本轮是否多选
 
 
 class ClarificationSelection(BaseModel):
@@ -134,6 +147,27 @@ class ClarificationSelection(BaseModel):
     title: str
     focus: str
     skip: bool = False
+    sub_choice_id: str | None = None    # 选中了哪个子选项
+    sub_choice_text: str | None = None  # 子选项文本
+
+
+class ClarificationRoundSelection(BaseModel):
+    """多轮澄清中每一轮的用户选择（支持多选）"""
+    round: int
+    selections: list[ClarificationSelection] = Field(default_factory=list)  # 本轮所有选择（多选时>1）
+    # 保留旧字段向后兼容（单选模式降级）
+    option_id: str = ""
+    label: str = ""
+    title: str = ""
+    focus: str = ""
+    skip: bool = False
+
+
+class ClarifyRequest(BaseModel):
+    """多轮澄清请求体"""
+    message: str
+    session_id: str | None = None
+    previous_selections: list[ClarificationRoundSelection] = Field(default_factory=list)
 
 
 class SelfCritiqueOutput(BaseModel):
@@ -161,7 +195,8 @@ class ExpertChatRequest(BaseModel):
     session_id: str | None = None
     deep_think: bool = False          # 多轮渐进工具调用（AI 看数据后可以继续补查）
     max_rounds: int = Field(default=3, ge=1, le=5)  # 最大工具调用轮数
-    clarification_selection: ClarificationSelection | None = None
+    clarification_selection: ClarificationSelection | None = None  # 向后兼容：单轮选择
+    clarification_chain: list[ClarificationRoundSelection] | None = None  # 多轮澄清链
     use_clarification: bool = True
 
 
