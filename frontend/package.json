@@ -2,12 +2,18 @@
   "name": "stockterrain-web",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "StockScape — A股 AI 投研平台",
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:unit": "node --test app/agent/lib/*.test.ts app/agent/reflectionFeed.test.ts lib/webglSupport.test.ts lib/sseResponse.test.ts tests/smoke/support/runtimeIssues.test.ts",
+    "test:all": "npm run test:unit && npm run test:smoke",
+    "test:smoke:install": "playwright install chromium",
+    "test:smoke": "playwright test",
+    "test:smoke:headed": "playwright test --headed"
   },
   "dependencies": {
     "@react-three/drei": "^10.0.0",
@@ -29,6 +35,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",

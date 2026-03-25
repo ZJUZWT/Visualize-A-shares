@@ -2,6 +2,7 @@
 StockScape 全局配置
 """
 
+import os
 from pathlib import Path
 from pydantic import BaseModel
 
@@ -15,22 +16,78 @@ AGENT_DB_PATH = DATA_DIR / "main_agent.duckdb"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _load_env_file() -> None:
+    env_file = PROJECT_ROOT / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, value)
+
+
+def _env_str(name: str, default: str) -> str:
+    return os.getenv(name, default)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    return raw.lower() in ("1", "true", "yes", "on")
+
+
+def _env_list(name: str, default: list[str]) -> list[str]:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+_load_env_file()
+
+
 # ─── 数据源配置 ─────────────────────────────────────────
 class DataSourceConfig(BaseModel):
     """三级数据源优先级与降级策略"""
 
     # AKShare: 主力数据源 (无需 API Key)
-    akshare_enabled: bool = True
+    akshare_enabled: bool = _env_bool("AKSHARE_ENABLED", True)
 
     # BaoStock: 备选数据源 (匿名可用)
-    baostock_enabled: bool = True
+    baostock_enabled: bool = _env_bool("BAOSTOCK_ENABLED", True)
 
     # Tushare Pro: 补充数据源 (需要 token)
-    tushare_enabled: bool = False
-    tushare_token: str = ""
+    tushare_enabled: bool = _env_bool("TUSHARE_ENABLED", False)
+    tushare_token: str = _env_str("TUSHARE_TOKEN", "")
 
     # 盘中快照自动刷新间隔（分钟），交易时段内快照超过此时间自动重新拉取
-    snapshot_refresh_minutes: int = 30
+    snapshot_refresh_minutes: int = _env_int("SNAPSHOT_REFRESH_MINUTES", 30)
 
 
 # ─── 算法配置 ───────────────────────────────────────────
@@ -71,52 +128,60 @@ class InterpolationConfig(BaseModel):
 
 # ─── 服务配置 ───────────────────────────────────────────
 class ServerConfig(BaseModel):
-    host: str = "0.0.0.0"
-    port: int = 8000
-    reload: bool = True
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    host: str = _env_str("SERVER_HOST", "0.0.0.0")
+    port: int = _env_int("SERVER_PORT", 8000)
+    reload: bool = _env_bool("SERVER_RELOAD", True)
+    cors_origins: list[str] = _env_list(
+        "CORS_ORIGINS",
+        [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
+    )
 
 
 # ─── 缓存配置 ───────────────────────────────────────────
 class RedisConfig(BaseModel):
     """Redis 可选 — 无 Redis 时退化为内存缓存"""
 
-    enabled: bool = False
-    host: str = "localhost"
-    port: int = 6379
-    db: int = 0
+    enabled: bool = _env_bool("REDIS_ENABLED", False)
+    host: str = _env_str("REDIS_HOST", "localhost")
+    port: int = _env_int("REDIS_PORT", 6379)
+    db: int = _env_int("REDIS_DB", 0)
 
 
 # ─── 量化引擎配置 ─────────────────────────────────────
 class QuantConfig(BaseModel):
     """量化引擎配置"""
-    icir_rolling_window: int = 20        # ICIR 滚动窗口天数
-    auto_inject_on_startup: bool = True  # 启动时自动注入 ICIR 权重
-    min_history_days: int = 5            # 自动校准最少需要的历史天数
+    icir_rolling_window: int = _env_int("QUANT_ICIR_ROLLING_WINDOW", 20)
+    auto_inject_on_startup: bool = _env_bool("QUANT_AUTO_INJECT_ON_STARTUP", True)
+    min_history_days: int = _env_int("QUANT_MIN_HISTORY_DAYS", 5)
 
 
 # ─── ChromaDB 配置 ────────────────────────────────────
 class ChromaDBConfig(BaseModel):
     """ChromaDB 嵌入式向量数据库配置"""
-    persist_dir: str = str(DATA_DIR / "chromadb")
-    retention_days: int = 90
+    persist_dir: str = _env_str("CHROMADB_PERSIST_DIR", str(DATA_DIR / "chromadb"))
+    retention_days: int = _env_int("CHROMADB_RETENTION_DAYS", 90)
 
 
 # ─── 信息引擎配置 ─────────────────────────────────────
 class InfoConfig(BaseModel):
     """信息引擎配置"""
-    news_cache_hours: int = 24
-    announcement_cache_hours: int = 48
-    default_news_limit: int = 50
-    default_announcement_limit: int = 20
-    sentiment_mode: str = "auto"  # "auto" | "llm" | "rules"
+    news_cache_hours: int = _env_int("INFO_NEWS_CACHE_HOURS", 24)
+    announcement_cache_hours: int = _env_int("INFO_ANNOUNCEMENT_CACHE_HOURS", 48)
+    default_news_limit: int = _env_int("INFO_DEFAULT_NEWS_LIMIT", 50)
+    default_announcement_limit: int = _env_int("INFO_DEFAULT_ANNOUNCEMENT_LIMIT", 20)
+    sentiment_mode: str = _env_str("INFO_SENTIMENT_MODE", "auto")
 
 
 # ─── RAG 配置 ─────────────────────────────────────────
 class RAGConfig(BaseModel):
     """RAG 历史报告检索配置"""
-    persist_dir: str = str(DATA_DIR / "chromadb_rag")  # 与 AgentMemory 的 chromadb 隔离
-    search_top_k: int = 3                               # Orchestrator 检索时的默认 top_k
+    persist_dir: str = _env_str("RAG_PERSIST_DIR", str(DATA_DIR / "chromadb_rag"))
+    search_top_k: int = _env_int("RAG_SEARCH_TOP_K", 3)
 
 
 # ─── 聚合配置 ───────────────────────────────────────────

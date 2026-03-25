@@ -1,7 +1,7 @@
 import { create } from "zustand";
+import { API_BASE } from "@/lib/api-base";
+import { inspectSseResponse } from "@/lib/sseResponse";
 import type { ChainNode, ChainLink, NodeShock, ExploreStatus } from "@/types/chain";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
 // ── 冲击传播算法（纯前端 BFS）──
 // 设计原则：
@@ -558,6 +558,12 @@ export const useChainStore = create<ChainStore>((set, get) => ({
         return;
       }
 
+      const inspection = await inspectSseResponse(res);
+      if (!inspection.ok) {
+        set({ status: "error", error: inspection.error });
+        return;
+      }
+
       await _parseSSE(res, set, get);
     } catch (e: unknown) {
       if ((e as Error).name === "AbortError") return;
@@ -626,6 +632,11 @@ export const useChainStore = create<ChainStore>((set, get) => ({
         });
 
         if (placeRes.ok) {
+          const inspection = await inspectSseResponse(placeRes);
+          if (!inspection.ok) {
+            set({ status: get().nodes.length > 0 ? "ready" : "idle", error: inspection.error });
+            return;
+          }
           await _parseSSE(placeRes, set, get, true);
         }
       }
@@ -662,6 +673,12 @@ export const useChainStore = create<ChainStore>((set, get) => ({
 
       if (!res.ok) {
         set({ status: "ready", error: `HTTP ${res.status}` });
+        return;
+      }
+
+      const inspection = await inspectSseResponse(res);
+      if (!inspection.ok) {
+        set({ status: "ready", error: inspection.error });
         return;
       }
 
@@ -738,6 +755,12 @@ export const useChainStore = create<ChainStore>((set, get) => ({
         return;
       }
 
+      const inspection = await inspectSseResponse(res);
+      if (!inspection.ok) {
+        set({ status: "ready", expandingNodes: [], error: inspection.error });
+        return;
+      }
+
       await _parseSSE(res, set, get, true);
       set({ status: "ready", expandingNodes: [] });
     } catch (e: unknown) {
@@ -768,6 +791,12 @@ export const useChainStore = create<ChainStore>((set, get) => ({
 
       if (!res.ok) {
         set({ status: "ready", error: `HTTP ${res.status}` });
+        return;
+      }
+
+      const inspection = await inspectSseResponse(res);
+      if (!inspection.ok) {
+        set({ status: "ready", error: inspection.error });
         return;
       }
 
@@ -870,6 +899,12 @@ export const useChainStore = create<ChainStore>((set, get) => ({
         return;
       }
 
+      const inspection = await inspectSseResponse(res);
+      if (!inspection.ok) {
+        set({ status: "ready", error: inspection.error });
+        return;
+      }
+
       await _parseSimulateSSE(res, set, get);
     } catch (e: unknown) {
       set({ status: "ready", error: (e as Error).message });
@@ -910,6 +945,16 @@ export const useChainStore = create<ChainStore>((set, get) => ({
         return;
       }
 
+      const inspection = await inspectSseResponse(res);
+      if (!inspection.ok) {
+        set((s) => ({
+          status: "ready",
+          error: inspection.error,
+          expandingNodes: s.expandingNodes.filter((n) => n !== nodeName),
+        }));
+        return;
+      }
+
       await _parseSSE(res, set, get, true);
 
       // ── 阶段 2：批量 relate — 一次 LLM 调用发现所有新节点与旧图的关系 ──
@@ -928,7 +973,12 @@ export const useChainStore = create<ChainStore>((set, get) => ({
             }),
           });
           if (relateRes.ok) {
-            await _parseSSE(relateRes, set, get, true);
+            const inspection = await inspectSseResponse(relateRes);
+            if (!inspection.ok) {
+              set({ error: inspection.error });
+            } else {
+              await _parseSSE(relateRes, set, get, true);
+            }
           }
         } catch {
           // relate 失败不影响展开结果

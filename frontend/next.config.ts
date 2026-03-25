@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const isGHPages = process.env.GITHUB_PAGES === "true";
 const repoName = "/Visualize-A-shares";
+const devApiTarget = process.env.INTERNAL_API_PROXY_TARGET || "http://localhost:8000";
 
 const nextConfig: NextConfig = {
   // GitHub Pages 静态导出
@@ -27,7 +28,7 @@ const nextConfig: NextConfig = {
       return [
         {
           source: "/api/:path*",
-          destination: "http://localhost:8000/api/:path*",
+          destination: `${devApiTarget}/api/:path*`,
         },
       ];
     },
