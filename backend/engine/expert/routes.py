@@ -13,7 +13,7 @@ from loguru import logger
 from config import settings, DB_PATH, DATA_DIR
 from engine.expert.agent import ExpertAgent
 from engine.expert.engine_experts import EngineExpert, ExpertType, get_expert_profiles
-from engine.expert.schemas import ExpertChatRequest, SessionCreateRequest, ScheduledTaskRequest
+from engine.expert.schemas import ExpertChatRequest, SessionCreateRequest, ScheduledTaskRequest, ClarifyRequest
 from engine.expert.scheduler import ScheduledTaskManager
 from engine.expert.tools import ExpertTools
 from engine.expert.tool_tracker import ToolOutcomeTracker
@@ -414,7 +414,6 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
             async for event in expert.chat(
                 req.message, history=history,
                 deep_think=req.deep_think, max_rounds=req.max_rounds,
-                clarification_selection=req.clarification_selection,
             ):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":
@@ -462,8 +461,8 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
 
 
 @router.post("/clarify/{expert_type}")
-async def clarify_expert_question(expert_type: ExpertType, req: ExpertChatRequest):
-    """深度思考模式的 clarification 阶段。"""
+async def clarify_expert_question(expert_type: ExpertType, req: ClarifyRequest):
+    """深度思考模式的 clarification 阶段（支持多轮澄清）。"""
     if expert_type not in ("rag", "short_term"):
         return {"error": f"专家类型 {expert_type} 不支持 clarification"}
 
@@ -471,7 +470,12 @@ async def clarify_expert_question(expert_type: ExpertType, req: ExpertChatReques
     session_id = req.session_id or ""
     history = _get_session_history(session_id) if session_id else []
     persona = "short_term" if expert_type == "short_term" else "rag"
-    result = await agent.clarify(req.message, history=history, persona=persona)
+    result = await agent.clarify(
+        req.message,
+        history=history,
+        persona=persona,
+        previous_selections=req.previous_selections,
+    )
     if hasattr(result, "model_dump"):
         return result.model_dump()
     return result
@@ -499,6 +503,7 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
                 req.message, history=history, persona=persona,
                 deep_think=req.deep_think, max_rounds=req.max_rounds,
                 clarification_selection=req.clarification_selection,
+                clarification_chain=req.clarification_chain,
             ):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":
