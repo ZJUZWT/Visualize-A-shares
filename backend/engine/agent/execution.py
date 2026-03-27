@@ -20,14 +20,19 @@ class ExecutionCoordinator:
     async def create_plan_from_decision(self, run_id: str, decision: dict) -> dict:
         action = decision.get("action", "")
         direction = "buy" if action in ("buy", "add") else "sell"
+        # TradePlanInput.entry_price 是 str（支持多档如 "15.2 / 14.5"），需要转换
+        raw_price = decision.get("price")
+        entry_price = str(raw_price) if raw_price is not None else None
+        raw_tp = decision.get("take_profit")
+        take_profit = str(raw_tp) if raw_tp is not None else None
         return await self.service.create_plan(
             TradePlanInput(
                 stock_code=decision["stock_code"],
                 stock_name=decision.get("stock_name", decision["stock_code"]),
                 direction=direction,
-                entry_price=decision.get("price"),
+                entry_price=entry_price,
                 position_pct=decision.get("position_pct"),
-                take_profit=decision.get("take_profit"),
+                take_profit=take_profit,
                 stop_loss=decision.get("stop_loss"),
                 stop_loss_method=decision.get("stop_loss_method"),
                 take_profit_method=decision.get("take_profit_method"),

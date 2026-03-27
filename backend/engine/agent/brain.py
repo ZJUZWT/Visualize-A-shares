@@ -9,6 +9,7 @@ AgentBrain — Main Agent 决策大脑
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 import traceback
@@ -71,12 +72,14 @@ class AgentBrain:
             state_before = await self.service.get_agent_state(self.portfolio_id)
             await self.service.update_brain_run(run_id, {
                 "state_before": state_before,
+                "current_step": "scanning",
             })
             config = await self.service.get_brain_config()
             signal_hits = await self._scan_watch_signals()
             triggered_signal_ids = self._collect_triggered_signal_ids(signal_hits)
 
             # Step 1: 标的筛选
+            await self.service.update_brain_run(run_id, {"current_step": "selecting"})
             candidates = await self._select_candidates(config)
             candidates = self._merge_signal_candidates(candidates, signal_hits)
             await self.service.update_brain_run(run_id, {
@@ -106,12 +109,14 @@ class AgentBrain:
                 return
 
             # Step 2: 逐标的分析
+            await self.service.update_brain_run(run_id, {"current_step": "analyzing"})
             analysis_results = await self._analyze_candidates(candidates, config)
             await self.service.update_brain_run(run_id, {
                 "analysis_results": analysis_results,
             })
             logger.info(f"🧠 分析完成: {len(analysis_results)} 只")
 
+            await self.service.update_brain_run(run_id, {"current_step": "digesting"})
             digest_results = await self._digest_candidates(run_id, candidates, signal_hits)
             info_digest_ids = [
                 digest["id"] for digest in digest_results
@@ -125,6 +130,7 @@ class AgentBrain:
             })
 
             # Step 3: LLM 综合决策
+            await self.service.update_brain_run(run_id, {"current_step": "deciding"})
             portfolio = await self.service.get_portfolio(self.portfolio_id)
             decisions = await self._make_decisions(analysis_results, portfolio, config, run_id)
             await self.service.update_brain_run(run_id, {
@@ -133,6 +139,7 @@ class AgentBrain:
             logger.info(f"🧠 决策完成: {len(decisions)} 个操作")
 
             # Step 4: 自动执行
+            await self.service.update_brain_run(run_id, {"current_step": "executing"})
             self._active_run_id = run_id
             if getattr(self, "_skip_execution", False):
                 plan_ids, trade_ids = [], []
@@ -142,6 +149,7 @@ class AgentBrain:
             state_after = await self.service.get_agent_state(self.portfolio_id)
             await self.service.update_brain_run(run_id, {
                 "status": "completed",
+                "current_step": None,
                 "plan_ids": plan_ids,
                 "trade_ids": trade_ids,
                 "info_digest_ids": info_digest_ids,
@@ -160,10 +168,19 @@ class AgentBrain:
             })
             logger.info(f"🧠 AgentBrain 运行完成: {elapsed:.1f}s, {len(plan_ids)} plans, {len(trade_ids)} trades")
 
+        except asyncio.CancelledError as e:
+            logger.warning(f"🧠 AgentBrain 运行取消: run_id={run_id}")
+            await self.service.update_brain_run(run_id, {
+                "status": "failed",
+                "current_step": None,
+                "error_message": str(e) or "运行取消",
+            })
+            raise
         except Exception as e:
             logger.error(f"🧠 AgentBrain 运行失败: {e}\n{traceback.format_exc()}")
             await self.service.update_brain_run(run_id, {
                 "status": "failed",
+                "current_step": None,
                 "error_message": str(e),
             })
 
@@ -171,7 +188,7 @@ class AgentBrain:
 
     async def _select_candidates(self, config: dict) -> list[dict]:
         """合并 watchlist + 量化筛选 + 已有持仓"""
-        watchlist = await self.service.list_watchlist()
+        watchlist = await self.service.list_watchlist(portfolio_id=self.portfolio_id)
         quant_top = await self._quant_screen(config.get("quant_top_n", 20))
         positions = await self.service.get_positions(self.portfolio_id, "open")
 
@@ -248,8 +265,17 @@ class AgentBrain:
                 reverse=True,
             )[:top_n]
 
+            # 构建 code → name 映射
+            name_map = {}
+            if "name" in snapshot_df.columns:
+                for _, row in snapshot_df[["code", "name"]].dropna(subset=["code"]).iterrows():
+                    name_map[str(row["code"])] = str(row["name"])
+            elif "ts_code" in snapshot_df.columns and "name" in snapshot_df.columns:
+                for _, row in snapshot_df[["ts_code", "name"]].dropna(subset=["ts_code"]).iterrows():
+                    name_map[str(row["ts_code"])] = str(row["name"])
+
             return [
-                {"stock_code": code, "score": round(score, 4), "stock_name": code}
+                {"stock_code": code, "score": round(score, 4), "stock_name": name_map.get(code, code)}
                 for code, score in sorted_preds
             ]
         except Exception as e:
@@ -259,25 +285,31 @@ class AgentBrain:
     # ── Step 2: 逐标的分析 ────────────────────────────
 
     async def _analyze_candidates(self, candidates: list[dict], config: dict) -> list[dict]:
-        """对每个候选标的调用专家工具层获取数据"""
-        results = []
-        for c in candidates:
+        """对每个候选标的调用专家工具层获取数据（并发）"""
+        sem = asyncio.Semaphore(6)
+
+        async def _analyze_one(c: dict) -> dict:
             code = c["stock_code"]
-            try:
-                analysis = await self._analyze_single(code)
-                analysis["stock_code"] = code
-                analysis["stock_name"] = c.get("stock_name", code)
-                analysis["source"] = c.get("source", "unknown")
-                results.append(analysis)
-            except Exception as e:
-                logger.warning(f"🧠 分析 {code} 失败: {e}")
-                results.append({
-                    "stock_code": code,
-                    "stock_name": c.get("stock_name", code),
-                    "source": c.get("source", "unknown"),
-                    "error": str(e),
-                })
-        return results
+            async with sem:
+                try:
+                    analysis = await self._analyze_single(code)
+                    analysis["stock_code"] = code
+                    analysis["stock_name"] = c.get("stock_name", code)
+                    analysis["source"] = c.get("source", "unknown")
+                    # 传递量化评分和来源信息
+                    if c.get("score") is not None:
+                        analysis["quant_score"] = c["score"]
+                    return analysis
+                except Exception as e:
+                    logger.warning(f"🧠 分析 {code} 失败: {e}")
+                    return {
+                        "stock_code": code,
+                        "stock_name": c.get("stock_name", code),
+                        "source": c.get("source", "unknown"),
+                        "error": str(e),
+                    }
+
+        return list(await asyncio.gather(*[_analyze_one(c) for c in candidates]))
 
     async def _scan_watch_signals(self) -> list[dict]:
         hunger = getattr(self, "data_hunger", None)
@@ -325,24 +357,46 @@ class AgentBrain:
                 continue
             hits_by_stock.setdefault(stock_code, []).append(hit)
 
-        digests: list[dict] = []
-        for candidate in candidates:
+        # 只对高优先级候选进行 digest（持仓/关注/信号触发）
+        # 量化筛选的标的跳过昂贵的信息消化，只依赖已有的分析数据
+        DIGEST_SOURCES = {"position", "watchlist", "watch_signal"}
+        digest_candidates = [
+            c for c in candidates
+            if c.get("source") in DIGEST_SOURCES or c.get("stock_code") in hits_by_stock
+        ]
+        skipped = len(candidates) - len(digest_candidates)
+        if skipped:
+            logger.info(f"🧠 digest 跳过 {skipped} 只量化筛选标的，仅消化 {len(digest_candidates)} 只高优先级标的")
+
+        # 并发执行 digest，限制并发数避免打爆外部 API
+        sem = asyncio.Semaphore(6)
+        PER_STOCK_TIMEOUT = 90  # 单只股票 digest 超时秒数
+
+        async def _digest_one(candidate: dict) -> dict | None:
             stock_code = candidate.get("stock_code")
             if not stock_code:
-                continue
-            try:
-                digest = await hunger.execute_and_digest(
-                    self.portfolio_id,
-                    run_id,
-                    stock_code,
-                    triggers=hits_by_stock.get(stock_code, []),
-                )
-            except Exception as e:
-                logger.warning(f"🧠 digest {stock_code} 失败: {e}")
-                continue
-            if isinstance(digest, dict):
-                digests.append(digest)
-        return digests
+                return None
+            async with sem:
+                try:
+                    digest = await asyncio.wait_for(
+                        hunger.execute_and_digest(
+                            self.portfolio_id,
+                            run_id,
+                            stock_code,
+                            triggers=hits_by_stock.get(stock_code, []),
+                        ),
+                        timeout=PER_STOCK_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"🧠 digest {stock_code} 超时 ({PER_STOCK_TIMEOUT}s)，跳过")
+                    return None
+                except Exception as e:
+                    logger.warning(f"🧠 digest {stock_code} 失败: {e}")
+                    return None
+                return digest if isinstance(digest, dict) else None
+
+        results = await asyncio.gather(*[_digest_one(c) for c in digest_candidates])
+        return [r for r in results if r is not None]
 
     async def _analyze_single(self, code: str) -> dict:
         """分析单个标的"""
@@ -375,6 +429,12 @@ class AgentBrain:
             analysis["indicators"] = await tools.execute("quant", "get_technical_indicators", {"code": code})
         except Exception as e:
             analysis["indicators"] = f"获取失败: {e}"
+
+        # 因子评分（本地计算，无网络开销）
+        try:
+            analysis["factor_scores"] = await tools.execute("quant", "get_factor_scores", {"code": code})
+        except Exception as e:
+            analysis["factor_scores"] = f"获取失败: {e}"
 
         return analysis
 

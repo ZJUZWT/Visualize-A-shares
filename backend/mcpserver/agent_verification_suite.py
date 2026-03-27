@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from .agent_http import post_agent_json
 from .agent_backtest import _get_engine as _resolve_backtest_engine
 from .agent_verification import _build_demo_cycle_summary
 from .agent_verification import _get_harness as _resolve_verification_harness
@@ -106,6 +107,14 @@ def _get_engine():
     return _resolve_backtest_engine()
 
 
+async def _post_json(
+    path: str,
+    payload: dict[str, Any],
+    timeout: float = 120.0,
+) -> dict[str, Any]:
+    return await post_agent_json(path, payload=payload, timeout=timeout)
+
+
 def _resolve_backtest_window(
     seed_summary: dict[str, Any],
     *,
@@ -168,7 +177,7 @@ def _warn_on_backtest_summary(summary: dict[str, Any], next_actions: list[str]) 
     return warn
 
 
-async def run_demo_agent_verification_suite(
+async def _run_demo_agent_verification_suite_local(
     scenario_id: str = "demo-evolution",
     backtest_start_date: str | None = None,
     backtest_end_date: str | None = None,
@@ -309,3 +318,26 @@ async def run_demo_agent_verification_suite(
         evidence=evidence,
         next_actions=next_actions,
     )
+
+
+async def run_demo_agent_verification_suite(
+    scenario_id: str = "demo-evolution",
+    backtest_start_date: str | None = None,
+    backtest_end_date: str | None = None,
+    timeout_seconds: int = 30,
+    execution_price_mode: str = "next_open",
+    smoke_mode: bool = False,
+) -> str:
+    result = await _post_json(
+        "/api/v1/agent/verification-suite/run",
+        {
+            "scenario_id": scenario_id,
+            "backtest_start_date": backtest_start_date,
+            "backtest_end_date": backtest_end_date,
+            "timeout_seconds": timeout_seconds,
+            "execution_price_mode": execution_price_mode,
+            "smoke_mode": smoke_mode,
+        },
+        timeout=max(float(timeout_seconds), 120.0),
+    )
+    return json.dumps(result, ensure_ascii=False, sort_keys=True)

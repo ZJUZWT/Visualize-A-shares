@@ -58,6 +58,10 @@ def _decode_json_value(value):
         return value
 
 
+import re as _re
+_CONTROL_CHAR_RE = _re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+
 def _normalize_json_safe(value):
     if isinstance(value, dict):
         return {key: _normalize_json_safe(val) for key, val in value.items()}
@@ -65,6 +69,9 @@ def _normalize_json_safe(value):
         return [_normalize_json_safe(item) for item in value]
     if isinstance(value, tuple):
         return [_normalize_json_safe(item) for item in value]
+    if isinstance(value, str):
+        # 移除 JSON 不允许的控制字符（保留 \n \r \t）
+        return _CONTROL_CHAR_RE.sub('', value)
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     isoformat = getattr(value, "isoformat", None)
@@ -295,7 +302,8 @@ def _build_plan_read_model(plan: dict) -> dict:
         "status": plan["status"],
         "entry_price": plan["entry_price"],
         "current_price": plan["current_price"],
-        "position_pct": plan["position_pct"],
+        "position_pct": plan.get("position_pct"),
+        "win_odds": plan.get("win_odds"),
         "created_at": plan["created_at"],
         "updated_at": plan["updated_at"],
         "source_run_id": plan.get("source_run_id"),
@@ -431,6 +439,28 @@ class AgentService:
         return await self.db.execute_read(
             "SELECT * FROM agent.portfolio_config ORDER BY created_at"
         )
+
+    async def delete_portfolio(self, portfolio_id: str):
+        """删除账户及其所有关联数据"""
+        rows = await self.db.execute_read(
+            "SELECT id FROM agent.portfolio_config WHERE id = ?", [portfolio_id]
+        )
+        if not rows:
+            raise ValueError(f"账户 {portfolio_id} 不存在")
+
+        # 级联删除所有关联数据
+        await self.db.execute_transaction([
+            ("DELETE FROM agent.positions WHERE portfolio_id = ?", [portfolio_id]),
+            ("DELETE FROM agent.trades WHERE portfolio_id = ?", [portfolio_id]),
+            ("DELETE FROM agent.trade_groups WHERE portfolio_id = ?", [portfolio_id]),
+            ("DELETE FROM agent.watch_signals WHERE portfolio_id = ?", [portfolio_id]),
+            ("DELETE FROM agent.info_digests WHERE portfolio_id = ?", [portfolio_id]),
+            ("DELETE FROM agent.brain_runs WHERE portfolio_id = ?", [portfolio_id]),
+            ("DELETE FROM agent.agent_state WHERE portfolio_id = ?", [portfolio_id]),
+            ("DELETE FROM agent.strategy_memos WHERE portfolio_id = ?", [portfolio_id]),
+            ("DELETE FROM agent.portfolio_config WHERE id = ?", [portfolio_id]),
+        ])
+        logger.info(f"已删除账户及关联数据: {portfolio_id}")
 
     async def get_portfolio(self, portfolio_id: str) -> dict:
         """获取账户概览"""
@@ -807,15 +837,16 @@ class AgentService:
         await self.db.execute_write(
             """INSERT INTO agent.trade_plans
                (id, stock_code, stock_name, current_price, direction,
-                entry_price, entry_method, position_pct,
+                entry_price, entry_method, position_pct, win_odds,
                 take_profit, take_profit_method, stop_loss, stop_loss_method,
                 reasoning, risk_note, invalidation, valid_until,
                 status, source_type, source_conversation_id, source_run_id,
                 created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
             [plan_id, plan_input.stock_code, plan_input.stock_name,
              plan_input.current_price, plan_input.direction,
-             plan_input.entry_price, plan_input.entry_method, plan_input.position_pct,
+             plan_input.entry_price, plan_input.entry_method,
+             plan_input.position_pct, plan_input.win_odds,
              plan_input.take_profit, plan_input.take_profit_method,
              plan_input.stop_loss, plan_input.stop_loss_method,
              plan_input.reasoning, plan_input.risk_note, plan_input.invalidation,
@@ -899,23 +930,28 @@ class AgentService:
 
     # ── Watchlist CRUD ─────────────────────────────────
 
-    async def add_watchlist(self, item_input) -> dict:
+    async def add_watchlist(self, item_input, portfolio_id: str | None = None) -> dict:
         """添加关注"""
         item_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
         await self.db.execute_write(
-            """INSERT INTO agent.watchlist (id, stock_code, stock_name, reason, added_by, created_at)
-               VALUES (?, ?, ?, ?, 'manual', ?)""",
+            """INSERT INTO agent.watchlist (id, stock_code, stock_name, reason, added_by, portfolio_id, created_at)
+               VALUES (?, ?, ?, ?, 'manual', ?, ?)""",
             [item_id, item_input.stock_code, item_input.stock_name,
-             item_input.reason, now],
+             item_input.reason, portfolio_id, now],
         )
         rows = await self.db.execute_read(
             "SELECT * FROM agent.watchlist WHERE id = ?", [item_id]
         )
         return rows[0]
 
-    async def list_watchlist(self) -> list[dict]:
+    async def list_watchlist(self, portfolio_id: str | None = None) -> list[dict]:
         """关注列表"""
+        if portfolio_id:
+            return await self.db.execute_read(
+                "SELECT * FROM agent.watchlist WHERE portfolio_id = ? ORDER BY created_at DESC",
+                [portfolio_id],
+            )
         return await self.db.execute_read(
             "SELECT * FROM agent.watchlist ORDER BY created_at DESC"
         )
@@ -1917,8 +1953,25 @@ class AgentService:
         )
         return [_normalize_record(row) for row in rows]
 
-    async def list_memories(self, status: str = "active") -> list[dict]:
-        if status == "all":
+    async def list_memories(self, status: str = "active", portfolio_id: str | None = None) -> list[dict]:
+        # 有 portfolio_id 时，通过 source_run_id → brain_runs 关联过滤
+        if portfolio_id:
+            where_clauses = ["br.portfolio_id = ?"]
+            params: list = [portfolio_id]
+            if status != "all":
+                where_clauses.append("m.status = ?")
+                params.append(status)
+            rows = await self.db.execute_read(
+                f"""
+                SELECT m.*
+                FROM agent.agent_memories m
+                JOIN agent.brain_runs br ON m.source_run_id = br.id
+                WHERE {' AND '.join(where_clauses)}
+                ORDER BY m.created_at DESC
+                """,
+                params,
+            )
+        elif status == "all":
             rows = await self.db.execute_read(
                 """
                 SELECT *
@@ -1953,25 +2006,45 @@ class AgentService:
         normalized_runs = [_normalize_brain_run(row) for row in rows]
         return [_build_strategy_history_item(row) for row in normalized_runs]
 
-    async def list_reflections(self, limit: int = 20) -> list[dict]:
-        daily_rows = await self._safe_reflection_query(
-            """
-            SELECT *
-            FROM agent.daily_reviews
-            ORDER BY review_date DESC, created_at DESC
-            LIMIT ?
-            """,
-            [limit],
-        )
-        weekly_rows = await self._safe_reflection_query(
-            """
-            SELECT *
-            FROM agent.weekly_reflections
-            ORDER BY week_end DESC, created_at DESC
-            LIMIT ?
-            """,
-            [limit],
-        )
+    async def list_reflections(self, limit: int = 20, portfolio_id: str | None = None) -> list[dict]:
+        if portfolio_id:
+            # 按 portfolio 过滤：daily_reviews 通过 brain_run_id 关联
+            try:
+                daily_rows = await self._safe_reflection_query(
+                    """
+                    SELECT dr.*
+                    FROM agent.daily_reviews dr
+                    JOIN agent.brain_runs br ON dr.brain_run_id = br.id
+                    WHERE br.portfolio_id = ?
+                    ORDER BY dr.review_date DESC, dr.created_at DESC
+                    LIMIT ?
+                    """,
+                    [portfolio_id, limit],
+                )
+            except Exception as exc:
+                logger.warning(f"daily_reviews portfolio 过滤查询失败: {exc}")
+                daily_rows = []
+            # weekly_reflections 无 portfolio 关联，按 portfolio 过滤时跳过
+            weekly_rows = []
+        else:
+            daily_rows = await self._safe_reflection_query(
+                """
+                SELECT *
+                FROM agent.daily_reviews
+                ORDER BY review_date DESC, created_at DESC
+                LIMIT ?
+                """,
+                [limit],
+            )
+            weekly_rows = await self._safe_reflection_query(
+                """
+                SELECT *
+                FROM agent.weekly_reflections
+                ORDER BY week_end DESC, created_at DESC
+                LIMIT ?
+                """,
+                [limit],
+            )
         items = (
             [_build_daily_reflection_item(_normalize_record(row)) for row in daily_rows]
             + [_build_weekly_reflection_item(_normalize_record(row)) for row in weekly_rows]
@@ -1983,7 +2056,9 @@ class AgentService:
         try:
             return await self.db.execute_read(sql, params)
         except Exception as exc:
-            if "does not exist" in str(exc):
+            err_msg = str(exc).lower()
+            if "does not exist" in err_msg or "not found" in err_msg or "no such" in err_msg:
+                logger.debug(f"反思查询安全降级 (表/列不存在): {exc}")
                 return []
             raise
 
@@ -1991,6 +2066,8 @@ class AgentService:
 
     async def create_brain_run(self, portfolio_id: str, run_type: str = "scheduled") -> dict:
         """创建运行记录"""
+        # 先清理可能存在的过期 running 记录
+        await self._fail_stale_brain_runs()
         run_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
         await self.db.execute_write(
@@ -2017,9 +2094,10 @@ class AgentService:
         await self.get_brain_run(run_id)
         sets = []
         params = []
-        for key in ("status", "candidates", "analysis_results", "decisions",
+        for key in ("status", "current_step", "candidates", "analysis_results", "decisions",
                      "plan_ids", "trade_ids", "thinking_process",
                      "state_before", "state_after", "execution_summary",
+                     "info_digest_ids", "triggered_signal_ids",
                      "error_message", "llm_tokens_used"):
             if key in updates:
                 val = _normalize_json_safe(updates[key])
@@ -2037,11 +2115,31 @@ class AgentService:
 
     async def list_brain_runs(self, portfolio_id: str, limit: int = 50) -> list[dict]:
         """运行记录列表"""
+        await self._fail_stale_brain_runs()
         rows = await self.db.execute_read(
             "SELECT * FROM agent.brain_runs WHERE portfolio_id = ? ORDER BY started_at DESC LIMIT ?",
             [portfolio_id, limit],
         )
         return [_normalize_brain_run(row) for row in rows]
+
+    async def _fail_stale_brain_runs(self, timeout_minutes: int = 10):
+        """将超过 timeout_minutes 仍为 running 的记录标记为 failed"""
+        cutoff = (datetime.now() - timedelta(minutes=timeout_minutes)).isoformat()
+        stale_rows = await self.db.execute_read(
+            "SELECT id FROM agent.brain_runs WHERE status = 'running' AND started_at < ?",
+            [cutoff],
+        )
+        if not stale_rows:
+            return
+        now = datetime.now().isoformat()
+        for row in stale_rows:
+            run_id = row["id"]
+            logger.warning(f"🧠 自动标记过期 brain_run 为 failed: {run_id}")
+            await self.db.execute_write(
+                "UPDATE agent.brain_runs SET status = 'failed', current_step = NULL, "
+                "error_message = '运行超时（超过10分钟未完成）', completed_at = ? WHERE id = ?",
+                [now, run_id],
+            )
 
     # ── BrainConfig CRUD ───────────────────────────────
 

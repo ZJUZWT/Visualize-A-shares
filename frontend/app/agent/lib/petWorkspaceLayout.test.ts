@@ -9,6 +9,6 @@ test("buildPetWorkspaceLayout keeps strategy under stage and chat on the right r
   assert.deepEqual(layout.leftStack, ["stage", "strategy"]);
   assert.deepEqual(layout.rightStack, ["chat"]);
   assert.match(layout.rootClassName, /xl:grid-cols/);
-  assert.match(layout.leftColumnClassName, /grid-rows/);
+  assert.match(layout.leftColumnClassName, /flex-col/);
   assert.match(layout.rightColumnClassName, /min-h-\[780px\]/);
 });

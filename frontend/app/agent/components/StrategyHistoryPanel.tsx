@@ -30,7 +30,7 @@ export default function StrategyHistoryPanel({
       <div>
         <h2 className="text-sm font-medium text-gray-200">策略演进</h2>
         <p className="mt-1 text-xs text-gray-500">
-          来自 `/api/v1/agent/strategy/history` 的 run-level 策略时间线。
+          每次决策后的策略状态变化时间线
         </p>
       </div>
 

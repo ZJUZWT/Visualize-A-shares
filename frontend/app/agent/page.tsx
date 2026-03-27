@@ -1,24 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { API_BASE } from "@/lib/api-base";
 import type { TradePlanData } from "@/lib/parseTradePlan";
 import NavSidebar from "@/components/ui/NavSidebar";
-import AgentChatPanel from "./components/AgentChatPanel";
 import AgentPetStage from "./components/AgentPetStage";
-import AgentStatePanel from "./components/AgentStatePanel";
-import AgentTrainingPanel from "./components/AgentTrainingPanel";
-import DecisionRunPanel from "./components/DecisionRunPanel";
-import ExecutionLedgerPanel from "./components/ExecutionLedgerPanel";
-import WatchSignalsPanel from "./components/WatchSignalsPanel";
-import InfoDigestsPanel from "./components/InfoDigestsPanel";
-import ReviewRecordsPanel from "./components/ReviewRecordsPanel";
-import MemoryRulesPanel from "./components/MemoryRulesPanel";
-import ReflectionFeedPanel from "./components/ReflectionFeedPanel";
-import StrategyHistoryPanel from "./components/StrategyHistoryPanel";
-import StrategyMemoPanel from "./components/StrategyMemoPanel";
-import StrategyBrainPanel from "./components/StrategyBrainPanel";
 import CreatePortfolioDialog from "./components/CreatePortfolioDialog";
+
+// 按需加载重型面板组件
+const AgentChatPanel = dynamic(() => import("./components/AgentChatPanel"), { ssr: false });
+const AgentStatePanel = dynamic(() => import("./components/AgentStatePanel"), { ssr: false });
+const AgentTrainingPanel = dynamic(() => import("./components/AgentTrainingPanel"), { ssr: false });
+const DecisionRunPanel = dynamic(() => import("./components/DecisionRunPanel"), { ssr: false });
+const ExecutionLedgerPanel = dynamic(() => import("./components/ExecutionLedgerPanel"), { ssr: false });
+const WatchSignalsPanel = dynamic(() => import("./components/WatchSignalsPanel"), { ssr: false });
+const InfoDigestsPanel = dynamic(() => import("./components/InfoDigestsPanel"), { ssr: false });
+const ReviewRecordsPanel = dynamic(() => import("./components/ReviewRecordsPanel"), { ssr: false });
+const MemoryRulesPanel = dynamic(() => import("./components/MemoryRulesPanel"), { ssr: false });
+const ReflectionFeedPanel = dynamic(() => import("./components/ReflectionFeedPanel"), { ssr: false });
+const StrategyHistoryPanel = dynamic(() => import("./components/StrategyHistoryPanel"), { ssr: false });
+const StrategyMemoPanel = dynamic(() => import("./components/StrategyMemoPanel"), { ssr: false });
+const StrategyBrainPanel = dynamic(() => import("./components/StrategyBrainPanel"), { ssr: false });
 import {
   buildWatchSignalPayload,
   filterInfoDigestsForRun,
@@ -51,6 +54,10 @@ import {
   buildStrategyExecutionRequestConfig,
   mapExecutionRecord,
 } from "./lib/strategyActionViewModel";
+import {
+  startBrainRunPoller,
+  type BrainRunPollerHandle,
+} from "./lib/brainRunPoller";
 import { buildPetConsoleViewModel } from "./lib/petConsoleViewModel";
 import { buildStrategyBrainViewModel } from "./lib/strategyBrainViewModel";
 import {
@@ -554,15 +561,22 @@ function buildStrategyPlanFromRaw(raw: Record<string, unknown>): TradePlanData |
     return null;
   }
 
+  // entry_price/take_profit 可能是数字或字符串（多档价格）
+  const toStringOrNull = (v: unknown): string | null => {
+    if (typeof v === "string") return v;
+    if (typeof v === "number") return String(v);
+    return null;
+  };
+
   return {
     stock_code: stockCode,
     stock_name: typeof raw.stock_name === "string" ? raw.stock_name : stockCode,
     current_price: toNumber(raw.current_price),
     direction: raw.direction === "sell" ? "sell" : "buy",
-    entry_price: toNumber(raw.entry_price),
+    entry_price: toStringOrNull(raw.entry_price),
     entry_method: typeof raw.entry_method === "string" ? raw.entry_method : null,
-    position_pct: toNumber(raw.position_pct),
-    take_profit: toNumber(raw.take_profit),
+    win_odds: typeof raw.win_odds === "string" ? raw.win_odds : null,
+    take_profit: toStringOrNull(raw.take_profit),
     take_profit_method:
       typeof raw.take_profit_method === "string" ? raw.take_profit_method : null,
     stop_loss: toNumber(raw.stop_loss),
@@ -783,6 +797,7 @@ export default function AgentPage() {
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [reflectionLoading, setReflectionLoading] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
   const [suiteRunningMode, setSuiteRunningMode] = useState<"default" | "smoke" | null>(null);
   const [suiteResult, setSuiteResult] = useState<AgentVerificationSuiteResult | null>(null);
   const [suiteError, setSuiteError] = useState<string | null>(null);
@@ -829,6 +844,16 @@ export default function AgentPage() {
   const [backtestSummary, setBacktestSummary] = useState<AgentBacktestSummary | null>(null);
   const [backtestDays, setBacktestDays] = useState<AgentBacktestDay[]>([]);
   const chatEntriesRef = useRef<AgentChatEntry[]>([]);
+  const brainRunPollerRef = useRef<BrainRunPollerHandle | null>(null);
+
+  const stopBrainRunPoller = useCallback(() => {
+    const poller = brainRunPollerRef.current;
+    if (!poller) {
+      return;
+    }
+    brainRunPollerRef.current = null;
+    poller.stop();
+  }, []);
 
   const fetchPortfolios = useCallback(async (preferredPortfolioId?: string | null) => {
     const raw = await fetchJson<unknown>(`${API_BASE}/api/v1/agent/portfolio`);
@@ -912,7 +937,7 @@ export default function AgentPage() {
         setLedgerOverview(null);
         setLedgerSource("unavailable");
         setLedgerError(
-          "执行台账暂不可用，`ledger/overview` 尚未就绪且 fallback 读取失败。"
+          "执行台账加载失败，请确认后端已启动"
         );
         return null;
       }
@@ -947,7 +972,7 @@ export default function AgentPage() {
       return normalized;
     } catch {
       setEquityTimeline(null);
-      setTimelineError("收益曲线接口暂不可用，`/api/v1/agent/timeline/equity` 读取失败。");
+      setTimelineError("收益曲线加载失败，请稍后重试");
       setReplayDate((current) => current || new Date().toISOString().slice(0, 10));
       return null;
     } finally {
@@ -970,7 +995,7 @@ export default function AgentPage() {
       return normalized;
     } catch {
       setReplaySnapshot(null);
-      setReplayError("历史回放接口暂不可用，`/api/v1/agent/timeline/replay` 读取失败。");
+      setReplayError("历史回放加载失败，请稍后重试");
       return null;
     } finally {
       setReplayLoading(false);
@@ -992,7 +1017,7 @@ export default function AgentPage() {
       return normalized;
     } catch {
       setReplayLearning(null);
-      setReplayLearningError("replay learning 接口暂不可用，`/api/v1/agent/timeline/replay-learning` 读取失败。");
+      setReplayLearningError("学习回放加载失败，请稍后重试");
       return null;
     } finally {
       setReplayLearningLoading(false);
@@ -1095,7 +1120,7 @@ export default function AgentPage() {
       setReviewStats(null);
       setWeeklySummaries([]);
       setReviewError(
-        "复盘读接口暂不可用，review records / stats / weekly summaries 尚未就绪。"
+        "复盘数据加载失败，请确认后端已启动"
       );
     } finally {
       setReviewLoading(false);
@@ -1103,20 +1128,21 @@ export default function AgentPage() {
   }, [portfolioId]);
 
   const fetchMemoryData = useCallback(async () => {
+    if (!portfolioId) return;
     setMemoryLoading(true);
     try {
       const raw = await fetchFirstAvailable<unknown>([
-        `${API_BASE}/api/v1/agent/memories?status=${memoryStatus}`,
+        `${API_BASE}/api/v1/agent/memories?status=${memoryStatus}&portfolio_id=${portfolioId}`,
       ]);
       setMemoryRules(normalizeMemoryRules(raw));
       setMemoryError(null);
     } catch {
       setMemoryRules([]);
-      setMemoryError("经验规则读接口暂不可用，memory rules 端点尚未就绪。");
+      setMemoryError("经验规则加载失败，请确认后端已启动");
     } finally {
       setMemoryLoading(false);
     }
-  }, [memoryStatus]);
+  }, [memoryStatus, portfolioId]);
 
   const fetchReflectionData = useCallback(async () => {
     if (!portfolioId) {
@@ -1124,7 +1150,7 @@ export default function AgentPage() {
     }
     setReflectionLoading(true);
     const [feedResult, historyResult] = await Promise.allSettled([
-      fetchJson<unknown>(`${API_BASE}/api/v1/agent/reflections`),
+      fetchJson<unknown>(`${API_BASE}/api/v1/agent/reflections?portfolio_id=${portfolioId}`),
       fetchJson<unknown>(`${API_BASE}/api/v1/agent/strategy/history?portfolio_id=${portfolioId}`),
     ]);
 
@@ -1133,7 +1159,7 @@ export default function AgentPage() {
       setReflectionError(null);
     } else {
       setReflectionFeed([]);
-      setReflectionError("反思 feed 接口暂不可用，`/api/v1/agent/reflections` 尚未就绪。");
+      setReflectionError("反思记录加载失败，请确认后端已启动");
     }
 
     if (historyResult.status === "fulfilled") {
@@ -1142,7 +1168,7 @@ export default function AgentPage() {
     } else {
       setStrategyHistory([]);
       setStrategyHistoryError(
-        "策略历史接口暂不可用，`/api/v1/agent/strategy/history` 尚未就绪。"
+        "策略历史加载失败，请确认后端已启动"
       );
     }
 
@@ -1166,7 +1192,7 @@ export default function AgentPage() {
     } else {
       setWatchSignals([]);
       setWatchSignalsError(
-        "观察信号接口暂不可用，`/api/v1/agent/watch-signals` 读取失败。"
+        "观察信号加载失败，请确认后端已启动"
       );
     }
 
@@ -1176,7 +1202,7 @@ export default function AgentPage() {
     } else {
       setInfoDigests([]);
       setInfoDigestsError(
-        "信息摘要接口暂不可用，`/api/v1/agent/info-digests` 读取失败。"
+        "信息摘要加载失败，请确认后端已启动"
       );
     }
 
@@ -1207,7 +1233,7 @@ export default function AgentPage() {
         return sessions;
       } catch {
         setChatSessions([]);
-        setSessionError("Agent chat session 列表暂不可用，`/api/v1/agent/chat/sessions` 尚未就绪。");
+        setSessionError("对话列表加载失败，请确认后端已启动");
         return [];
       } finally {
         setChatSessionsLoading(false);
@@ -1237,7 +1263,7 @@ export default function AgentPage() {
         chatEntriesRef.current = [];
         setChatEntries([]);
         setChatError(
-          "Agent chat 消息读取失败，`/api/v1/agent/chat/sessions/{session_id}/messages` 尚未就绪。"
+          "对话消息加载失败，请确认后端已启动"
         );
         return [];
       } finally {
@@ -1268,7 +1294,7 @@ export default function AgentPage() {
       return next;
     } catch {
       setExecutionActions({});
-      setExecutionActionsError("策略执行记录暂不可用，`/api/v1/agent/strategy-actions` 尚未就绪。");
+      setExecutionActionsError("策略执行记录加载失败，请确认后端已启动");
       return {};
     }
   }, []);
@@ -1324,7 +1350,7 @@ export default function AgentPage() {
       return next;
     } catch {
       setMemoStates({});
-      setMemoStatesError("策略备忘记录暂不可用，`/api/v1/agent/strategy-memos` 尚未就绪。");
+      setMemoStatesError("策略备忘加载失败，请确认后端已启动");
       setMemoInboxItems([]);
       setMemoInboxError("策略备忘列表读取失败。");
       return {};
@@ -1415,6 +1441,18 @@ export default function AgentPage() {
   }, [fetchChatSessions, portfolioId]);
 
   useEffect(() => {
+    stopBrainRunPoller();
+    setRunning(false);
+    setRunError(null);
+    setSuiteError(null);
+    setSuiteRunningMode(null);
+  }, [portfolioId, stopBrainRunPoller]);
+
+  useEffect(() => () => {
+    stopBrainRunPoller();
+  }, [stopBrainRunPoller]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const syncSessionPanels = async () => {
@@ -1445,8 +1483,9 @@ export default function AgentPage() {
   }, [activeSessionId, fetchExecutionActions, fetchMemoStates, fetchSessionMessages]);
 
   const fetchWatchlist = useCallback(async () => {
+    if (!portfolioId) return;
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist`);
+      const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist?portfolio_id=${portfolioId}`);
       if (!resp.ok) {
         setWatchlist([]);
         return;
@@ -1455,7 +1494,7 @@ export default function AgentPage() {
     } catch {
       setWatchlist([]);
     }
-  }, []);
+  }, [portfolioId]);
 
   useEffect(() => {
     fetchWatchlist();
@@ -1542,37 +1581,63 @@ export default function AgentPage() {
     if (!portfolioId || running) {
       return;
     }
+    stopBrainRunPoller();
     setRunning(true);
+    setRunError(null);
     try {
       const resp = await fetch(`${API_BASE}/api/v1/agent/brain/run?portfolio_id=${portfolioId}`, {
         method: "POST",
       });
       if (!resp.ok) {
-        setRunning(false);
-        return;
+        throw new Error(await readErrorMessage(resp, `HTTP ${resp.status}`));
       }
       const run = (await resp.json()) as BrainRun;
       setSelectedRun(run);
       setRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
-      const poll = setInterval(async () => {
-        const result = await fetch(`${API_BASE}/api/v1/agent/brain/runs/${run.id}`);
-        if (!result.ok) {
-          return;
-        }
-        const updated = (await result.json()) as BrainRun;
-        setSelectedRun(updated);
-        setRuns((current) => {
-          const next = current.filter((item) => item.id !== updated.id);
-          return [updated, ...next];
-        });
-        if (updated.status !== "running") {
-          clearInterval(poll);
+      const poller = startBrainRunPoller({
+        intervalMs: 3_000,
+        requestTimeoutMs: 15_000,
+        maxPollMs: 5 * 60 * 1_000,
+        maxConsecutiveErrors: 5,
+        loadRun: async (signal) => {
+          const result = await fetch(`${API_BASE}/api/v1/agent/brain/runs/${run.id}`, { signal });
+          if (!result.ok) {
+            throw new Error(await readErrorMessage(result, `HTTP ${result.status}`));
+          }
+          return (await result.json()) as BrainRun;
+        },
+        onUpdate: (updated) => {
+          setSelectedRun(updated);
+          setRuns((current) => {
+            const next = current.filter((item) => item.id !== updated.id);
+            return [updated, ...next];
+          });
+        },
+        onTerminal: async (updated) => {
           setRunning(false);
+          if (updated.status === "failed" && updated.error_message) {
+            setRunError(updated.error_message);
+          }
           await refreshConsole();
           await fetchWakeData();
+        },
+        onTimeout: () => {
+          setRunning(false);
+          setRunError("主脑运行超时，请检查服务是否稳定。");
+        },
+        onError: () => {
+          setRunning(false);
+          setRunError("主脑运行状态查询失败，请检查服务是否稳定。");
+        },
+      });
+      brainRunPollerRef.current = poller;
+      void poller.done.finally(() => {
+        if (brainRunPollerRef.current === poller) {
+          brainRunPollerRef.current = null;
         }
-      }, 3000);
-    } catch {
+      });
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : "主脑运行失败");
       setRunning(false);
     }
   };
@@ -1607,7 +1672,10 @@ export default function AgentPage() {
         if (!normalized) {
           throw new Error("训练结果解析失败");
         }
-        setSuiteResult(normalized);
+        setSuiteResult({
+          ...normalized,
+          requested_portfolio_id: portfolioId,
+        });
         const suiteBacktest = isRecord(normalized.backtest)
           ? normalizeBacktestSummary({
               ...normalized.backtest,
@@ -2060,10 +2128,10 @@ export default function AgentPage() {
   );
 
   const handleAddWatch = async () => {
-    if (!newCode.trim()) {
+    if (!newCode.trim() || !portfolioId) {
       return;
     }
-    await fetch(`${API_BASE}/api/v1/agent/watchlist`, {
+    await fetch(`${API_BASE}/api/v1/agent/watchlist?portfolio_id=${portfolioId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2119,11 +2187,17 @@ export default function AgentPage() {
     `风险 ${strategyBrain.snapshot.riskAlertCount} 项`,
   ].join(" · ");
   const petConsole = buildPetConsoleViewModel({
+    currentPortfolioId: portfolioId,
     activeRun,
     ledgerOverview,
     agentState,
     strategySummary,
-    suiteResult,
+    suiteResult:
+      suiteResult && portfolioId
+        ? (suiteResult.requested_portfolio_id ?? suiteResult.portfolio_id) === portfolioId
+          ? suiteResult
+          : null
+        : suiteResult,
   });
   const chatNotices = [sessionError, chatError, executionActionsError, memoStatesError].filter(
     (value): value is string => Boolean(value)
@@ -2162,6 +2236,26 @@ export default function AgentPage() {
                       </option>
                     ))}
                   </select>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!confirm(`确定删除账户「${portfolioId}」及其所有数据？此操作不可撤销。`)) return;
+                      try {
+                        const res = await fetch(`${API_BASE}/api/v1/agent/portfolio/${portfolioId}`, { method: "DELETE" });
+                        if (!res.ok) {
+                          alert(`删除失败: ${res.status}`);
+                          return;
+                        }
+                        window.location.reload();
+                      } catch {
+                        alert("删除失败，请确认后端已启动");
+                      }
+                    }}
+                    className="ml-1 rounded-full p-1 text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+                    title="删除此账户"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  </button>
                 </div>
               )}
               {activeRun && (
@@ -2218,6 +2312,12 @@ export default function AgentPage() {
               </button>
             ))}
           </div>
+
+          {runError && (
+            <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700">
+              {runError}
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-hidden">
@@ -2239,10 +2339,29 @@ export default function AgentPage() {
                     onClick={openCreatePortfolioDialog}
                     className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-medium text-white transition hover:bg-slate-800"
                   >
-                    创建虚拟账户
+                    自定义创建
                   </button>
-                  <span className="rounded-2xl border border-black/10 px-4 py-3 text-sm text-slate-500">
-                    默认推荐：`paper` + 1000000 初始资金
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const defaultDraft: CreatePortfolioDraft = { id: "paper", mode: "paper", initialCapital: "1000000" };
+                      const payloadResult = buildCreatePortfolioPayload(defaultDraft);
+                      if (!payloadResult.ok) return;
+                      try {
+                        await fetch(`${API_BASE}/api/v1/agent/portfolio`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(payloadResult.value),
+                        });
+                        window.location.reload();
+                      } catch {}
+                    }}
+                    className="rounded-2xl border border-slate-950 bg-white px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-slate-50"
+                  >
+                    一键创建默认账户
+                  </button>
+                  <span className="text-xs text-slate-400">
+                    默认：虚拟盘 + 100 万初始资金
                   </span>
                 </div>
               </div>
@@ -2273,7 +2392,7 @@ export default function AgentPage() {
                       </div>
                     </div>
 
-                    <div className="min-h-0 overflow-hidden rounded-[28px] border border-black/10 bg-[#10141d] p-4 shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
+                    <div className="min-h-[340px] flex-1 overflow-hidden rounded-[28px] border border-black/10 bg-[#10141d] p-4 shadow-[0_24px_80px_rgba(15,23,42,0.18)]">
                       <div className="h-full overflow-y-auto pr-1">
                         <StrategyBrainPanel
                           viewModel={strategyBrain}
@@ -2372,7 +2491,13 @@ export default function AgentPage() {
                 <div className="space-y-5">
                   <AgentTrainingPanel
                     runningMode={suiteRunningMode}
-                    result={suiteResult}
+                    result={
+                      suiteResult && portfolioId
+                        ? (suiteResult.requested_portfolio_id ?? suiteResult.portfolio_id) === portfolioId
+                          ? suiteResult
+                          : null
+                        : suiteResult
+                    }
                     error={suiteError}
                     onRunDefault={() => handleRunTrainingSuite("default")}
                     onRunSmoke={() => handleRunTrainingSuite("smoke")}

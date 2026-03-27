@@ -53,13 +53,13 @@ function ClarificationCard({
   // 切换选中状态（多选模式）
   const toggleOption = useCallback((option: ClarificationOption) => {
     if (!canSubmit || !multiSelect) return;
+    if (option.sub_choices && option.sub_choices.length > 0) {
+      // 有子选项：展开/折叠子选项面板（不直接选中）
+      setExpandedSubId(prev => prev === option.id ? null : option.id);
+      return;
+    }
     setSelectedMap(prev => {
       const next = new Map(prev);
-      if (option.sub_choices && option.sub_choices.length > 0) {
-        // 有子选项：展开/折叠子选项面板（不直接选中）
-        setExpandedSubId(prev2 => prev2 === option.id ? null : option.id);
-        return next;
-      }
       if (next.has(option.id)) {
         next.delete(option.id);
       } else {
@@ -194,7 +194,7 @@ function ClarificationCard({
               </button>
             )}
           </div>
-          <p className="mt-1 text-sm leading-relaxed text-[var(--text-secondary)]">
+          <p className="mt-1 text-sm leading-relaxed text-[var(--text-primary)]">
             {item.data.question_summary}
           </p>
           <div className="mt-3 grid gap-2">
@@ -214,40 +214,40 @@ function ClarificationCard({
                     className={`w-full rounded-xl border px-3 py-2.5 text-left transition-all duration-150 ${
                       isSelected
                         ? "border-transparent text-white"
-                        : "border-[var(--border)] hover:border-current"
+                        : "border-[var(--border)] bg-[var(--bg-primary)]/50 hover:border-[var(--border-hover)]"
                     } ${!canSubmit ? "opacity-70 cursor-default" : ""}`}
                     style={isSelected ? { backgroundColor: expertColor } : undefined}
                   >
                     <div className="flex items-center gap-2">
                       {multiSelect && canSubmit && (
                         <span className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[9px] ${
-                          isSelected ? "border-white/40 bg-white/20" : "border-[var(--border)]"
+                          isSelected ? "border-white/40 bg-white/20 text-white" : "border-[var(--text-tertiary)]"
                         }`}>
                           {isSelected && <Check size={10} />}
                         </span>
                       )}
                       <span
                         className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
-                          isSelected ? "bg-white/20" : ""
+                          isSelected ? "bg-white/20 text-white" : ""
                         }`}
-                        style={isSelected ? undefined : { backgroundColor: expertColor + "15", color: expertColor }}
+                        style={isSelected ? undefined : { backgroundColor: expertColor + "20", color: expertColor }}
                       >
                         {option.label}
                       </span>
-                      <span className="text-sm font-medium">{option.title}</span>
+                      <span className={`text-sm font-medium ${isSelected ? "text-white" : "text-[var(--text-primary)]"}`}>{option.title}</span>
                       {hasSubChoices && (
-                        <span className={`text-[10px] ${isSelected ? "text-white/60" : "text-[var(--text-tertiary)]"}`}>
+                        <span className={`text-[10px] ml-1 ${isSelected ? "text-white/60" : "text-[var(--text-secondary)]"}`}>
                           {isSubExpanded ? "▾" : "▸"} 展开选项
                         </span>
                       )}
-                      {isSelected && !hasSubChoices && <CheckCircle2 size={14} className="ml-auto" />}
+                      {isSelected && !hasSubChoices && <CheckCircle2 size={14} className="ml-auto text-white" />}
                       {isSelected && currentSubChoiceId && (
                         <span className="ml-auto text-xs text-white/80">
                           {selectedMap.get(option.id)?.sub_choice_text}
                         </span>
                       )}
                     </div>
-                    <p className={`mt-1 text-xs leading-relaxed ${isSelected ? "text-white/80" : "text-[var(--text-tertiary)]"}`}>
+                    <p className={`mt-1 text-xs leading-relaxed ${isSelected ? "text-white/80" : "text-[var(--text-secondary)]"}`}>
                       {option.description}
                     </p>
                   </button>
@@ -264,10 +264,10 @@ function ClarificationCard({
                               ? selectSubChoice(option, sc.id, sc.text)
                               : handleSingleSubChoice(option, sc.id, sc.text)
                             }
-                            className={`rounded-full border px-3 py-1 text-xs transition-all ${
+                            className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${
                               isSubSelected
                                 ? "border-transparent text-white"
-                                : "border-[var(--border)] hover:border-current text-[var(--text-secondary)]"
+                                : "border-[var(--border)] hover:border-[var(--border-hover)] text-[var(--text-primary)]"
                             }`}
                             style={isSubSelected ? { backgroundColor: expertColor } : undefined}
                           >
@@ -289,8 +289,8 @@ function ClarificationCard({
               disabled={selectedMap.size === 0}
               className={`mt-3 rounded-xl border px-4 py-2 text-sm font-medium transition-all ${
                 selectedMap.size > 0
-                  ? "text-white border-transparent"
-                  : "border-[var(--border)] text-[var(--text-tertiary)] cursor-not-allowed"
+                  ? "text-white border-transparent shadow-sm"
+                  : "border-[var(--border)] text-[var(--text-secondary)] cursor-not-allowed opacity-50"
               }`}
               style={selectedMap.size > 0 ? { backgroundColor: expertColor } : undefined}
             >
@@ -318,9 +318,9 @@ function ClarificationCard({
                   }))
             }
             disabled={!canSubmit}
-            className={`mt-3 inline-flex items-center rounded-full border px-3 py-1.5 text-xs transition-colors ${
-              !canSubmit ? "opacity-70 cursor-default" : "hover:border-current"
-            }`}
+            className={`mt-3 inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+              !canSubmit ? "opacity-50 cursor-default" : "hover:border-[var(--border-hover)]"
+            } ${item.status === "skipped" ? "" : "text-[var(--text-secondary)] border-[var(--border)]"}`}
             style={{
               borderColor: item.status === "skipped" ? expertColor : undefined,
               color: item.status === "skipped" ? expertColor : undefined,
@@ -494,12 +494,16 @@ export function MessageBubble({
                   <div key={i} className="my-3">
                     <TradePlanCard
                       plan={segment.plan}
+                      variant="dark"
                       onSave={async (plan) => {
-                        await fetch(`${API_BASE}/api/v1/agent/plans`, {
+                        const resp = await fetch(`${API_BASE}/api/v1/agent/plans`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify(plan),
                         });
+                        if (!resp.ok) {
+                          console.error("收藏失败:", resp.status, await resp.text());
+                        }
                       }}
                     />
                   </div>

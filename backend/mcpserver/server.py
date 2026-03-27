@@ -27,6 +27,7 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 
 from mcp.server.fastmcp import FastMCP, Context
+from engine.agent.verification import DEFAULT_VERIFY_TIMEOUT_SECONDS
 
 from .data_access import DataAccess
 from . import tools
@@ -183,7 +184,7 @@ async def verify_agent_cycle(
     include_review: bool = True,
     include_weekly: bool = False,
     require_trade: bool = False,
-    timeout_seconds: int = 30,
+    timeout_seconds: int = DEFAULT_VERIFY_TIMEOUT_SECONDS,
 ) -> str:
     """验证 Main Agent 一次真实轮回是否能跑通，并返回 pass/warn/fail 与关键证据。"""
     from . import agent_verification

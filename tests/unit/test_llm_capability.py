@@ -14,6 +14,21 @@ def run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
+def _make_async_iter(text: str):
+    """创建一个返回异步迭代器的 mock chat_stream"""
+    async def _stream(*args, **kwargs):
+        for char in text:
+            yield char
+    return _stream
+
+
+def _mock_provider_with_stream(text: str):
+    """创建 mock provider，chat_stream 返回逐字符异步迭代器"""
+    mock_provider = MagicMock()
+    mock_provider.chat_stream = MagicMock(side_effect=_make_async_iter(text))
+    return mock_provider
+
+
 # ── enabled=False 降级测试 ────────────────────────────────
 def test_disabled_complete():
     from llm.capability import LLMCapability
@@ -42,20 +57,17 @@ def test_disabled_extract():
 # ── enabled=True + mock provider ─────────────────────────
 def test_complete_calls_provider():
     from llm.capability import LLMCapability
-    mock_provider = MagicMock()
-    mock_provider.chat = AsyncMock(return_value="LLM回复")
+    mock_provider = _mock_provider_with_stream("LLM回复")
     cap = LLMCapability(provider=mock_provider)
     result = run(cap.complete("test prompt", system="sys"))
     assert result == "LLM回复"
-    mock_provider.chat.assert_called_once()
+    mock_provider.chat_stream.assert_called_once()
 
 
 def test_classify_parses_json():
     from llm.capability import LLMCapability
-    mock_provider = MagicMock()
-    mock_provider.chat = AsyncMock(
-        return_value='{"label": "positive", "score": 0.9, "reason": "利好"}'
-    )
+    text = '{"label": "positive", "score": 0.9, "reason": "利好"}'
+    mock_provider = _mock_provider_with_stream(text)
     cap = LLMCapability(provider=mock_provider)
     result = run(cap.classify("大涨", ["positive", "negative", "neutral"]))
     assert result["label"] == "positive"
@@ -65,8 +77,7 @@ def test_classify_parses_json():
 
 def test_classify_parse_error_fallback():
     from llm.capability import LLMCapability
-    mock_provider = MagicMock()
-    mock_provider.chat = AsyncMock(return_value="not json at all")
+    mock_provider = _mock_provider_with_stream("not json at all")
     cap = LLMCapability(provider=mock_provider)
     result = run(cap.classify("文本", ["positive", "negative", "neutral"]))
     assert result["label"] == "positive"
@@ -75,10 +86,8 @@ def test_classify_parse_error_fallback():
 
 def test_classify_invalid_label_fallback():
     from llm.capability import LLMCapability
-    mock_provider = MagicMock()
-    mock_provider.chat = AsyncMock(
-        return_value='{"label": "unknown_label", "score": 0.5, "reason": "test"}'
-    )
+    text = '{"label": "unknown_label", "score": 0.5, "reason": "test"}'
+    mock_provider = _mock_provider_with_stream(text)
     cap = LLMCapability(provider=mock_provider)
     result = run(cap.classify("文本", ["positive", "negative", "neutral"]))
     assert result["label"] == "positive"  # fallback to categories[0]
@@ -86,10 +95,8 @@ def test_classify_invalid_label_fallback():
 
 def test_extract_parses_json():
     from llm.capability import LLMCapability
-    mock_provider = MagicMock()
-    mock_provider.chat = AsyncMock(
-        return_value='{"impact": "positive", "magnitude": "high", "reasoning": "利好", "affected_factors": ["盈利"]}'
-    )
+    text = '{"impact": "positive", "magnitude": "high", "reasoning": "利好", "affected_factors": ["盈利"]}'
+    mock_provider = _mock_provider_with_stream(text)
     cap = LLMCapability(provider=mock_provider)
     result = run(cap.extract("事件", {"impact": "str", "magnitude": "str"}))
     assert result["impact"] == "positive"
@@ -98,10 +105,8 @@ def test_extract_parses_json():
 
 def test_classify_cache_hit_skips_provider():
     from llm.capability import LLMCapability
-    mock_provider = MagicMock()
-    mock_provider.chat = AsyncMock(
-        return_value='{"label": "positive", "score": 0.8, "reason": "ok"}'
-    )
+    text = '{"label": "positive", "score": 0.8, "reason": "ok"}'
+    mock_provider = _mock_provider_with_stream(text)
     mock_store = MagicMock()
     # 第一次 miss，第二次 hit
     cached_json = '{"label": "negative", "score": 0.6, "reason": "cached"}'
@@ -113,4 +118,4 @@ def test_classify_cache_hit_skips_provider():
     run(cap.classify("文本", ["positive", "negative", "neutral"]))
 
     # provider 只调了一次（第二次命中缓存）
-    assert mock_provider.chat.call_count == 1
+    assert mock_provider.chat_stream.call_count == 1

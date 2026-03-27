@@ -675,8 +675,8 @@ export default function ExecutionLedgerPanel({
                         <span className="text-xs text-gray-500">{plan.direction} / {plan.status}</span>
                       </div>
                       <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-gray-400">
-                        <div>入场: <span className="text-white">{formatNumber(plan.entry_price ?? null)}</span></div>
-                        <div>止盈: <span className="text-green-300">{formatNumber(plan.take_profit ?? null)}</span></div>
+                        <div>入场: <span className="text-white">{plan.entry_price ?? "--"}</span></div>
+                        <div>止盈: <span className="text-green-300">{plan.take_profit ?? "--"}</span></div>
                         <div>止损: <span className="text-red-300">{formatNumber(plan.stop_loss ?? null)}</span></div>
                       </div>
                     </div>

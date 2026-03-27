@@ -139,10 +139,11 @@ class TradePlan(BaseModel):
     stock_name: str
     current_price: float | None = None
     direction: Literal["buy", "sell"]
-    entry_price: float | None = None
+    entry_price: str | None = None       # 支持多档："15.2 / 14.5"
     entry_method: str | None = None
-    position_pct: float | None = None
-    take_profit: float | None = None
+    position_pct: float | None = None    # 旧字段，保留向后兼容
+    win_odds: str | None = None          # 胜率赔率估计
+    take_profit: str | None = None       # 支持多档："18.0 / 20.5"
     take_profit_method: str | None = None
     stop_loss: float | None = None
     stop_loss_method: str | None = None
@@ -163,10 +164,11 @@ class TradePlanInput(BaseModel):
     stock_name: str
     current_price: float | None = None
     direction: Literal["buy", "sell"]
-    entry_price: float | None = None
+    entry_price: str | None = None       # 支持多档："15.2 / 14.5"
     entry_method: str | None = None
-    position_pct: float | None = None
-    take_profit: float | None = None
+    position_pct: float | None = None    # 旧字段，保留向后兼容
+    win_odds: str | None = None          # 胜率赔率估计
+    take_profit: str | None = None       # 支持多档："18.0 / 20.5"
     take_profit_method: str | None = None
     stop_loss: float | None = None
     stop_loss_method: str | None = None

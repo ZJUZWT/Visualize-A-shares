@@ -84,6 +84,51 @@ class TestIndicators:
             assert resp.status_code == 404
 
 
+class TestFactorScores:
+    def test_get_factor_scores(self, client):
+        with patch("engine.quant.routes.get_quant_engine") as mock_get, \
+             patch("engine.quant.routes.get_data_engine") as mock_data:
+            from engine.quant.predictor import FactorDef
+            import pandas as pd
+
+            mock_qe = MagicMock()
+            mock_qe.get_factor_weights.return_value = ({"reversal": 0.15}, "default")
+            mock_qe.get_factor_defs.return_value = [
+                FactorDef("reversal", "pct_chg", 1, "price", 0.15, "反转因子"),
+                FactorDef("size_effect", "total_mv", -1, "value", 0.2, "市值因子"),
+            ]
+            mock_get.return_value = mock_qe
+
+            mock_de = MagicMock()
+            mock_de.get_snapshot.return_value = pd.DataFrame([
+                {"code": "000001", "pct_chg": 1.23, "total_mv": 456.7},
+            ])
+            mock_data.return_value = mock_de
+
+            resp = client.get("/api/v1/quant/factors/000001")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["code"] == "000001"
+            assert body["weight_source"] == "default"
+            assert body["factors"]["reversal"]["value"] == 1.23
+            assert body["factors"]["size_effect"]["direction"] == -1
+
+    def test_get_factor_scores_not_found(self, client):
+        with patch("engine.quant.routes.get_quant_engine") as mock_get, \
+             patch("engine.quant.routes.get_data_engine") as mock_data:
+            import pandas as pd
+
+            mock_get.return_value = MagicMock()
+            mock_de = MagicMock()
+            mock_de.get_snapshot.return_value = pd.DataFrame([
+                {"code": "000001", "pct_chg": 1.23},
+            ])
+            mock_data.return_value = mock_de
+
+            resp = client.get("/api/v1/quant/factors/999999")
+            assert resp.status_code == 404
+
+
 class TestBacktest:
     def test_run_backtest(self, client):
         with patch("engine.quant.routes.get_quant_engine") as mock_get:

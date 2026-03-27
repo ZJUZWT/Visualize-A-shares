@@ -151,6 +151,50 @@ class TestAgentVerificationHarness:
         assert result["brain_run_status"] == "completed"
         assert any(check["name"] == "has_candidates" and check["status"] == "warn" for check in result["checks"])
 
+    def test_verify_cycle_clamps_brain_candidate_config_for_smoke_run(self):
+        from engine.agent.verification import AgentVerificationHarness
+
+        class FakeAgentBrain:
+            last_config = None
+
+            def __init__(self, portfolio_id: str):
+                self.portfolio_id = portfolio_id
+
+            async def _select_candidates(self, config: dict):
+                FakeAgentBrain.last_config = dict(config)
+                return [{"stock_code": "600519"}]
+
+            async def execute(self, run_id: str):
+                candidates = await self._select_candidates({"max_candidates": 30, "quant_top_n": 20})
+                await self_ref.svc.update_brain_run(
+                    run_id,
+                    {
+                        "status": "completed",
+                        "candidates": candidates,
+                        "analysis_results": candidates,
+                        "decisions": [{"stock_code": "600519", "action": "hold"}],
+                        "plan_ids": [],
+                        "trade_ids": [],
+                        "state_before": {"position_level": 0.2},
+                        "state_after": {"position_level": 0.2},
+                        "execution_summary": {
+                            "candidate_count": len(candidates),
+                            "analysis_count": len(candidates),
+                            "decision_count": 1,
+                            "plan_count": 0,
+                            "trade_count": 0,
+                        },
+                    },
+                )
+
+        self_ref = self
+        with patch("engine.agent.verification.AgentBrain", FakeAgentBrain):
+            harness = AgentVerificationHarness(service=self.svc, db=self.db)
+            run(harness.verify_cycle("live", include_review=False))
+
+        assert FakeAgentBrain.last_config["max_candidates"] == 1
+        assert FakeAgentBrain.last_config["quant_top_n"] == 1
+
     def test_verify_cycle_warns_when_cycle_completes_without_evolution_evidence(self):
         from engine.agent.verification import AgentVerificationHarness
 
@@ -408,7 +452,11 @@ class TestAgentVerificationHarness:
 
         assert result["verification_status"] == "fail"
         assert result["failed_stage"] == "brain_execute"
-        assert result["brain_run_status"] == "running"
+        assert result["brain_run_status"] == "failed"
+        timed_out_run = run(self.svc.get_brain_run(result["run_id"]))
+        assert timed_out_run["status"] == "failed"
+        assert timed_out_run["current_step"] is None
+        assert "timeout" in (timed_out_run["error_message"] or "").lower()
 
     def test_verify_cycle_fails_when_state_after_missing(self):
         from engine.agent.verification import AgentVerificationHarness

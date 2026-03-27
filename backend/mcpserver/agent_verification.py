@@ -5,7 +5,11 @@ import json
 from typing import Any
 
 from engine.agent.db import AgentDB
-from engine.agent.verification import AgentVerificationHarness
+from engine.agent.verification import AgentVerificationHarness, DEFAULT_VERIFY_TIMEOUT_SECONDS
+
+from .agent_http import get_agent_json
+from .agent_http import post_agent_json
+
 
 def _get_harness() -> AgentVerificationHarness:
     try:
@@ -15,6 +19,22 @@ def _get_harness() -> AgentVerificationHarness:
             raise
         AgentDB.init_instance()
     return AgentVerificationHarness()
+
+
+async def _get_json(
+    path: str,
+    params: dict[str, Any] | None = None,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    return await get_agent_json(path, params=params, timeout=timeout)
+
+
+async def _post_json(
+    path: str,
+    payload: dict[str, Any],
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    return await post_agent_json(path, payload=payload, timeout=timeout)
 
 
 def _fmt_value(value: Any) -> str:
@@ -305,21 +325,30 @@ def _build_demo_cycle_summary(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _verification_http_timeout(timeout_seconds: int | float) -> float:
+    # Leave a small transport buffer beyond the requested backend timeout.
+    return max(float(timeout_seconds) + 5.0, 30.0)
+
+
 async def verify_agent_cycle(
     portfolio_id: str,
     as_of_date: str | None = None,
     include_review: bool = True,
     include_weekly: bool = False,
     require_trade: bool = False,
-    timeout_seconds: int = 30,
+    timeout_seconds: int = DEFAULT_VERIFY_TIMEOUT_SECONDS,
 ) -> str:
-    result = await _get_harness().verify_cycle(
-        portfolio_id=portfolio_id,
-        as_of_date=as_of_date,
-        include_review=include_review,
-        include_weekly=include_weekly,
-        require_trade=require_trade,
-        timeout_seconds=timeout_seconds,
+    result = await _post_json(
+        "/api/v1/agent/verification/run",
+        {
+            "portfolio_id": portfolio_id,
+            "as_of_date": as_of_date,
+            "include_review": include_review,
+            "include_weekly": include_weekly,
+            "require_trade": require_trade,
+            "timeout_seconds": timeout_seconds,
+        },
+        timeout=_verification_http_timeout(timeout_seconds),
     )
     return _render_verification_result(result)
 
@@ -328,9 +357,12 @@ async def inspect_agent_snapshot(
     portfolio_id: str,
     run_id: str | None = None,
 ) -> str:
-    snapshot = await _get_harness().inspect_snapshot(
-        portfolio_id=portfolio_id,
-        run_id=run_id,
+    snapshot = await _get_json(
+        "/api/v1/agent/verification/snapshot",
+        params={
+            "portfolio_id": portfolio_id,
+            **({"run_id": run_id} if run_id else {}),
+        },
     )
     return _render_snapshot(snapshot)
 
@@ -338,7 +370,10 @@ async def inspect_agent_snapshot(
 async def prepare_demo_agent_portfolio(
     scenario_id: str = "demo-evolution",
 ) -> str:
-    seed_summary = await _get_harness().prepare_demo_portfolio(scenario_id=scenario_id)
+    seed_summary = await _post_json(
+        "/api/v1/agent/demo/prepare",
+        {"scenario_id": scenario_id},
+    )
     return _render_prepare_summary(seed_summary)
 
 
@@ -346,9 +381,13 @@ async def verify_demo_agent_cycle(
     scenario_id: str = "demo-evolution",
     timeout_seconds: int = 30,
 ) -> str:
-    result = await _get_harness().verify_demo_cycle(
-        scenario_id=scenario_id,
-        timeout_seconds=timeout_seconds,
+    result = await _post_json(
+        "/api/v1/agent/demo/verify",
+        {
+            "scenario_id": scenario_id,
+            "timeout_seconds": timeout_seconds,
+        },
+        timeout=float(timeout_seconds),
     )
     return _render_verification_result(result)
 
@@ -357,9 +396,13 @@ async def get_demo_agent_cycle_summary(
     scenario_id: str = "demo-evolution",
     timeout_seconds: int = 30,
 ) -> str:
-    result = await _get_harness().verify_demo_cycle(
-        scenario_id=scenario_id,
-        timeout_seconds=timeout_seconds,
+    result = await _post_json(
+        "/api/v1/agent/demo/verify",
+        {
+            "scenario_id": scenario_id,
+            "timeout_seconds": timeout_seconds,
+        },
+        timeout=float(timeout_seconds),
     )
     summary = _build_demo_cycle_summary(result)
     return json.dumps(summary, ensure_ascii=False, indent=2)

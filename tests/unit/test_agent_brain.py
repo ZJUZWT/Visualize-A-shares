@@ -891,6 +891,43 @@ class TestBrainDecisionRuns:
         assert final_update["execution_summary"]["plan_count"] == 0
         assert final_update["execution_summary"]["trade_count"] == 0
 
+    def test_execute_marks_run_failed_when_cancelled(self):
+        from engine.agent.brain import AgentBrain
+
+        class FakeService:
+            def __init__(self):
+                self.updates = []
+
+            async def get_agent_state(self, portfolio_id):
+                return {"portfolio_id": portfolio_id, "position_level": "low"}
+
+            async def get_brain_config(self):
+                return {"single_position_pct": 0.15, "max_position_count": 10}
+
+            async def update_brain_run(self, run_id, updates):
+                self.updates.append((run_id, updates))
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain.portfolio_id = "p1"
+        brain.service = FakeService()
+
+        async def fake_scan_watch_signals():
+            return []
+
+        async def fake_select_candidates(config):
+            raise asyncio.CancelledError()
+
+        brain._scan_watch_signals = fake_scan_watch_signals
+        brain._select_candidates = fake_select_candidates
+
+        with pytest.raises(asyncio.CancelledError):
+            run(brain.execute("run-cancelled"))
+
+        final_update = brain.service.updates[-1][1]
+        assert final_update["status"] == "failed"
+        assert final_update["current_step"] is None
+        assert "取消" in (final_update["error_message"] or "")
+
     def test_make_decisions_injects_active_rules_into_prompt(self):
         from engine.agent.brain import AgentBrain
 

@@ -11,9 +11,14 @@ from engine.agent.review import ReviewEngine
 from engine.agent.service import AgentService
 from engine.agent.validator import TradeValidator
 
+DEFAULT_VERIFY_TIMEOUT_SECONDS = 45
+
 
 class AgentVerificationHarness:
     """Run a minimal end-to-end verification pass for a portfolio."""
+
+    _VERIFY_MAX_CANDIDATES = 1
+    _VERIFY_QUANT_TOP_N = 1
 
     def __init__(
         self,
@@ -163,6 +168,22 @@ class AgentVerificationHarness:
         diff["signals"] = signals
         return diff
 
+    def _prepare_verification_brain(self, brain: Any) -> Any:
+        original_select = getattr(brain, "_select_candidates", None)
+        if original_select is None:
+            return brain
+
+        async def _limited_select(config: dict) -> list[dict]:
+            limited_config = dict(config or {})
+            max_candidates = int(limited_config.get("max_candidates") or self._VERIFY_MAX_CANDIDATES)
+            quant_top_n = int(limited_config.get("quant_top_n") or self._VERIFY_QUANT_TOP_N)
+            limited_config["max_candidates"] = min(max_candidates, self._VERIFY_MAX_CANDIDATES)
+            limited_config["quant_top_n"] = min(quant_top_n, self._VERIFY_QUANT_TOP_N)
+            return await original_select(limited_config)
+
+        brain._select_candidates = _limited_select
+        return brain
+
     async def _collect_snapshot(
         self,
         portfolio_id: str,
@@ -296,7 +317,7 @@ class AgentVerificationHarness:
         include_review: bool = True,
         include_weekly: bool = False,
         require_trade: bool = False,
-        timeout_seconds: int = 30,
+        timeout_seconds: int = DEFAULT_VERIFY_TIMEOUT_SECONDS,
         brain_factory: Callable[[str], Any] | None = None,
     ) -> dict[str, Any]:
         stages: list[dict[str, Any]] = []
@@ -340,12 +361,23 @@ class AgentVerificationHarness:
         evidence["brain_run_created"] = run_record
         checks.append({"name": "brain_run_created", "status": "pass"})
         brain = brain_factory(portfolio_id) if brain_factory else AgentBrain(portfolio_id)
+        brain = self._prepare_verification_brain(brain)
         try:
             await asyncio.wait_for(brain.execute(run_id), timeout=timeout_seconds)
         except asyncio.TimeoutError:
             failed_stage = "brain_execute"
             checks.append({"name": "brain_run_completed", "status": "fail", "detail": "timeout"})
             timed_out_run = await self.service.get_brain_run(run_id)
+            if timed_out_run.get("status") == "running":
+                await self.service.update_brain_run(
+                    run_id,
+                    {
+                        "status": "failed",
+                        "current_step": None,
+                        "error_message": f"verification timeout after {timeout_seconds}s",
+                    },
+                )
+                timed_out_run = await self.service.get_brain_run(run_id)
             evidence["brain_run"] = timed_out_run
             self._record_stage(stages, name="brain_execute", status="fail", detail="timeout")
             return self._build_result(

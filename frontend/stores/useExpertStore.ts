@@ -44,6 +44,10 @@ interface ExpertStore {
   error: string | null;
   /** 多轮渐进模式开关 */
   deepThink: boolean;
+  /** 澄清开关（AI 是否先询问分析方向） */
+  useClarification: boolean;
+  /** 策略卡片开关（AI 是否生成交易计划卡片） */
+  useTradePlan: boolean;
   /** 每个专家的 session 列表 */
   sessions: Record<ExpertType, Session[]>;
   /** 每个专家当前激活的 session ID */
@@ -69,6 +73,10 @@ interface ExpertStore {
   reset: () => void;
   /** 切换多轮渐进模式 */
   toggleDeepThink: () => void;
+  /** 切换澄清开关 */
+  toggleClarification: () => void;
+  /** 切换策略卡片开关 */
+  toggleTradePlan: () => void;
   /** 加载专家配置 */
   fetchProfiles: () => Promise<void>;
   /** 加载 session 列表 */
@@ -401,6 +409,8 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   status: "idle",
   error: null,
   deepThink: false,
+  useClarification: true,
+  useTradePlan: false,
   sessions: { ...EMPTY_SESSIONS },
   activeSessions: { ...EMPTY_ACTIVE },
   pendingClarifications: { ...EMPTY_PENDING },
@@ -450,6 +460,14 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
 
   toggleDeepThink: () => {
     set((s) => ({ deepThink: !s.deepThink }));
+  },
+
+  toggleClarification: () => {
+    set((s) => ({ useClarification: !s.useClarification }));
+  },
+
+  toggleTradePlan: () => {
+    set((s) => ({ useTradePlan: !s.useTradePlan }));
   },
 
   fetchProfiles: async () => {
@@ -659,7 +677,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   },
 
   sendMessage: async (text: string) => {
-    const { activeExpert, activeSessions, pendingClarifications, deepThink } = get();
+    const { activeExpert, activeSessions, pendingClarifications, deepThink, useClarification, useTradePlan } = get();
     const expertType = activeExpert; // 闭包捕获，防止中途切走后写错专家
     if (pendingClarifications[expertType]) return;
 
@@ -673,7 +691,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       sessionId = await get().createSession(expertType);
     }
 
-    const shouldClarify = deepThink && CLARIFICATION_EXPERTS.has(expertType);
+    const shouldClarify = useClarification && CLARIFICATION_EXPERTS.has(expertType);
     setExpertStatus(set, expertType, shouldClarify ? "clarifying" : "thinking");
 
     const userMsg: ExpertMessage = {
@@ -807,6 +825,8 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         message: text,
         session_id: sessionId,
         deep_think: deepThink,
+        use_clarification: useClarification,
+        enable_trade_plan: useTradePlan,
       },
       set,
       get,
@@ -820,7 +840,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
 
   submitClarifications: async (selections: ClarificationSelection[]) => {
     if (selections.length === 0) return;
-    const { activeExpert, pendingClarifications, deepThink } = get();
+    const { activeExpert, pendingClarifications, deepThink, useTradePlan } = get();
     const expertType = activeExpert;
     const pending = pendingClarifications[expertType];
     if (!pending) return;
@@ -901,6 +921,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           message: pending.originalMessage,
           session_id: pending.sessionId,
           deep_think: deepThink,
+          enable_trade_plan: useTradePlan,
           clarification_chain: allRoundSelections,
           // 向后兼容：也发送最后一轮的 clarification_selection
           clarification_selection: firstSel,
@@ -959,6 +980,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
             message: pending.originalMessage,
             session_id: pending.sessionId,
             deep_think: deepThink,
+            enable_trade_plan: useTradePlan,
             clarification_chain: allRoundSelections,
             clarification_selection: firstSel,
           },

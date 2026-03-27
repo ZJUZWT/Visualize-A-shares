@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { BrainRun, PetConsoleViewModel } from "../types";
 
 interface AgentPetStageProps {
@@ -6,56 +7,117 @@ interface AgentPetStageProps {
   suiteRunningMode: "default" | "smoke" | null;
 }
 
-const PIXEL_FRAMES: Record<string, string[]> = {
+/* ── 每个 mood 两帧，交替播放 ── */
+const PIXEL_FRAMES: Record<string, string[][]> = {
   idle: [
-    "0001111000",
-    "0012222100",
-    "0121221210",
-    "0122222210",
-    "0123333210",
-    "0012332100",
-    "0001221000",
-    "0010000100",
+    [
+      "0001111000",
+      "0012222100",
+      "0121221210",
+      "0122222210",
+      "0123333210",
+      "0012332100",
+      "0001221000",
+      "0010000100",
+    ],
+    [
+      "0001111000",
+      "0012222100",
+      "0121221210",
+      "0122222210",
+      "0123333210",
+      "0012332100",
+      "0001221000",
+      "0100000010",
+    ],
   ],
   thinking: [
-    "0001111000",
-    "0012222100",
-    "0121221210",
-    "0122442210",
-    "0123333210",
-    "0012332100",
-    "0001221000",
-    "0010001100",
+    [
+      "0001111000",
+      "0012222100",
+      "0121221210",
+      "0122442210",
+      "0123333210",
+      "0012332100",
+      "0001221000",
+      "0010001100",
+    ],
+    [
+      "0001111000",
+      "0012222100",
+      "0121441210",
+      "0122222210",
+      "0123333210",
+      "0012332100",
+      "0001221000",
+      "0011000100",
+    ],
   ],
   training: [
-    "0001111000",
-    "0012222100",
-    "0121221210",
-    "0122552210",
-    "0123333210",
-    "0012332100",
-    "0001221000",
-    "0011010100",
+    [
+      "0001111000",
+      "0012222100",
+      "0121221210",
+      "0122552210",
+      "0123333210",
+      "0012332100",
+      "0001221000",
+      "0011010100",
+    ],
+    [
+      "0001111000",
+      "0012222100",
+      "0121551210",
+      "0122222210",
+      "0123333210",
+      "0012332100",
+      "0001221000",
+      "0010101100",
+    ],
   ],
   battle: [
-    "0001111000",
-    "0012222100",
-    "0121221210",
-    "0122662210",
-    "0123333210",
-    "0012332100",
-    "0001221000",
-    "0011111100",
+    [
+      "0001111000",
+      "0012222100",
+      "0121221210",
+      "0122662210",
+      "0123333210",
+      "0012332100",
+      "0001221000",
+      "0011111100",
+    ],
+    [
+      "0001111000",
+      "0012222100",
+      "0121661210",
+      "0122222210",
+      "0123333210",
+      "0012332100",
+      "0011221100",
+      "0010000100",
+    ],
   ],
   drawdown: [
-    "0001111000",
-    "0012222100",
-    "0121221210",
-    "0122772210",
-    "0123333210",
-    "0012332100",
-    "0001221000",
-    "0010001000",
+    [
+      "0001111000",
+      "0012222100",
+      "0121221210",
+      "0122772210",
+      "0123333210",
+      "0012332100",
+      "0001221000",
+      "0010001000",
+    ],
+    [
+      "0001111000",
+      "0012222100",
+      "0121771210",
+      "0122222210",
+      "0123333210",
+      "0012332100",
+      "0001221000",
+      "0000100100",
+    ],
   ],
 };
 
@@ -68,6 +130,15 @@ const PIXEL_COLORS: Record<string, string> = {
   "5": "#90be6d",
   "6": "#f94144",
   "7": "#577590",
+};
+
+/* 不同 mood 的动画速度 (ms) */
+const FRAME_INTERVAL: Record<string, number> = {
+  idle: 1200,
+  thinking: 600,
+  training: 400,
+  battle: 300,
+  drawdown: 1600,
 };
 
 function moodAccent(mood: PetConsoleViewModel["pet"]["mood"]) {
@@ -85,8 +156,20 @@ function moodAccent(mood: PetConsoleViewModel["pet"]["mood"]) {
   }
 }
 
-function renderPixelSprite(mood: PetConsoleViewModel["pet"]["mood"]) {
-  const frame = PIXEL_FRAMES[mood];
+function PixelSprite({ mood }: { mood: PetConsoleViewModel["pet"]["mood"] }) {
+  const [frameIndex, setFrameIndex] = useState(0);
+
+  useEffect(() => {
+    const interval = FRAME_INTERVAL[mood] ?? 1200;
+    const timer = setInterval(() => {
+      setFrameIndex((prev) => (prev + 1) % 2);
+    }, interval);
+    return () => clearInterval(timer);
+  }, [mood]);
+
+  const frames = PIXEL_FRAMES[mood] ?? PIXEL_FRAMES.idle;
+  const frame = frames[frameIndex] ?? frames[0];
+
   return (
     <div
       className="grid gap-[3px] rounded-[28px] border border-black/10 bg-[#f6f1e8]/80 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]"
@@ -96,7 +179,7 @@ function renderPixelSprite(mood: PetConsoleViewModel["pet"]["mood"]) {
         row.split("").map((cell, cellIndex) => (
           <span
             key={`${rowIndex}-${cellIndex}`}
-            className="h-4 w-4 rounded-[4px]"
+            className="h-4 w-4 rounded-[4px] transition-colors duration-300"
             style={{ backgroundColor: PIXEL_COLORS[cell] }}
           />
         ))
@@ -142,7 +225,7 @@ export default function AgentPetStage({
       <div className="mt-5 grid gap-5 xl:grid-cols-[220px_minmax(0,1fr)]">
         <div className={`rounded-[30px] bg-gradient-to-br ${moodAccent(viewModel.pet.mood)} p-4`}>
           <div className="flex min-h-[240px] items-center justify-center rounded-[24px] border border-black/10 bg-white/45">
-            {renderPixelSprite(viewModel.pet.mood)}
+            <PixelSprite mood={viewModel.pet.mood} />
           </div>
         </div>
 

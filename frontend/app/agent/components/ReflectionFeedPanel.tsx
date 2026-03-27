@@ -35,7 +35,7 @@ export default function ReflectionFeedPanel({
       <div>
         <h2 className="text-sm font-medium text-gray-200">反思记录</h2>
         <p className="mt-1 text-xs text-gray-500">
-          来自 `/api/v1/agent/reflections` 的反思 feed，按时间倒序展示。
+          每次运行后的复盘与反思，按时间倒序展示
         </p>
       </div>
 

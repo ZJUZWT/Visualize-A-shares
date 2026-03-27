@@ -86,12 +86,12 @@ export default function AgentStrategyActionCard({
               现价 <span className="text-white">{plan.current_price ?? "--"}</span>
             </div>
             <div>
-              建议价 <span className="text-white">{plan.entry_price ?? "--"}</span>
+              建议价 <span className="text-cyan-400">{plan.entry_price ?? "--"}</span>
             </div>
             <div>
-              仓位{" "}
-              <span className="text-white">
-                {plan.position_pct === null ? "--" : `${(plan.position_pct * 100).toFixed(0)}%`}
+              胜率赔率{" "}
+              <span className="text-amber-400">
+                {plan.win_odds ?? "--"}
               </span>
             </div>
             {plan.entry_method && <div className="text-xs text-gray-400">{plan.entry_method}</div>}

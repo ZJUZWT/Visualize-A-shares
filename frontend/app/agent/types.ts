@@ -18,6 +18,7 @@ export interface AgentVerificationSuiteResult {
   overall_status: "pass" | "warn" | "fail";
   scenario_id: string | null;
   portfolio_id: string | null;
+  requested_portfolio_id?: string | null;
   seed_summary: Record<string, unknown>;
   demo_verification: Record<string, unknown>;
   backtest: Record<string, unknown>;
@@ -72,6 +73,7 @@ export interface BrainRun {
   portfolio_id: string;
   run_type: string;
   status: string;
+  current_step: string | null;
   candidates: AgentCandidate[] | null;
   analysis_results: AgentAnalysisResult[] | null;
   decisions: AgentDecision[] | null;
@@ -566,14 +568,14 @@ export type WakeDigestMode = "selected_run" | "recent";
 export type AgentConsoleTab = "runs" | "wake" | "reviews" | "memory" | "reflection";
 
 export function buildAgentStrategyKey(plan: TradePlanData): string {
-  const numericPart = (value: number | null) => (value === null ? "" : value.toFixed(4));
+  const stringPart = (value: number | string | null) => (value === null ? "" : String(value));
 
   return [
     plan.stock_code.trim().toUpperCase(),
     plan.direction,
-    numericPart(plan.entry_price),
-    numericPart(plan.take_profit),
-    numericPart(plan.stop_loss),
+    stringPart(plan.entry_price),
+    stringPart(plan.take_profit),
+    stringPart(plan.stop_loss),
     (plan.valid_until || "").trim(),
   ].join("|");
 }

@@ -30,6 +30,10 @@ export const useSchedulerStore = create<SchedulerStore>((set, get) => ({
     set({ loading: true });
     try {
       const res = await fetch(`${API_BASE}/api/v1/expert/tasks`);
+      if (!res.ok) {
+        set({ tasks: [] });
+        return;
+      }
       const data = await res.json();
       set({ tasks: Array.isArray(data) ? data : [] });
     } catch (e) {
@@ -46,6 +50,10 @@ export const useSchedulerStore = create<SchedulerStore>((set, get) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
       });
+      if (!res.ok) {
+        toast.error(`创建失败: ${res.status}`);
+        return null;
+      }
       const task = await res.json();
       if (task.error) {
         toast.error(`创建失败: ${task.error}`);
@@ -94,6 +102,10 @@ export const useSchedulerStore = create<SchedulerStore>((set, get) => ({
     toast.info("⏰ 正在执行任务...");
     try {
       const res = await fetch(`${API_BASE}/api/v1/expert/tasks/${id}/run`, { method: "POST" });
+      if (!res.ok) {
+        toast.error(`执行失败: ${res.status}`);
+        return;
+      }
       const data = await res.json();
       if (data.ok) {
         toast.success("✅ 任务执行完成，可在对话中查看结果");

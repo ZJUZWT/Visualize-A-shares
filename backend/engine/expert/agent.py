@@ -272,10 +272,12 @@ class ExpertAgent:
         tool_results: list[dict],
         history: list[dict] | None = None,
         persona: str = "rag",
+        enable_trade_plan: bool = False,
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复，yield (token, full_text)"""
         async for token, full_text in self._reply_stream(
-            message, nodes, memories, tool_results, history or [], persona=persona
+            message, nodes, memories, tool_results, history or [],
+            persona=persona, enable_trade_plan=enable_trade_plan,
         ):
             yield token, full_text
 
@@ -591,6 +593,7 @@ class ExpertAgent:
         deep_think: bool = False, max_rounds: int = 3,
         clarification_selection: ClarificationSelection | dict | None = None,
         clarification_chain: list[ClarificationRoundSelection | dict] | None = None,
+        enable_trade_plan: bool = False,
     ) -> AsyncGenerator[dict, None]:
         """完整对话流程，yield 结构化事件 dict
 
@@ -746,7 +749,8 @@ class ExpertAgent:
             logger.debug(f"开始 _reply_stream, tool_results={len(tool_results)}条, "
                          f"expert={len([r for r in tool_results if r.get('is_expert')])}条")
             async for token, full_text in self.generate_reply_stream(
-                analysis_message, recalled_nodes, memories, tool_results, conv_history, persona=persona
+                analysis_message, recalled_nodes, memories, tool_results, conv_history,
+                persona=persona, enable_trade_plan=enable_trade_plan,
             ):
                 expert_reply = full_text
                 yield {"event": "reply_token", "data": {"token": token}}
@@ -1585,6 +1589,7 @@ class ExpertAgent:
         tool_results: list[dict],
         history: list[dict] | None = None,
         persona: str = "rag",
+        enable_trade_plan: bool = False,
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复（含 <think> 标签过滤），yield (token, accumulated_text)"""
         from llm.providers import ChatMessage
@@ -1661,8 +1666,14 @@ class ExpertAgent:
             "不受模型训练截止日期限制。绝对不要提及「知识截止」「训练数据截止」等字眼。"
         )
 
-        # 注入交易计划格式约定（使 RAG/短线专家也能生成策略卡片）
-        system += TRADE_PLAN_PROMPT
+        # 注入交易计划格式约定（仅当用户开启策略卡片开关时）
+        trade_plan_reminder = ""
+        if enable_trade_plan:
+            system += TRADE_PLAN_PROMPT
+            trade_plan_reminder = (
+                "\n\n📌 提醒：用户已开启「策略卡片」功能。如果你的分析涉及具体股票且有操作建议，"
+                "请务必在回复末尾用【交易计划】...【/交易计划】格式输出交易计划卡片。"
+            )
 
         # 构建消息列表（含对话历史）
         messages = [ChatMessage("system", system)]
@@ -1670,7 +1681,7 @@ class ExpertAgent:
             role = "assistant" if h["role"] == "expert" else h["role"]
             content = h.get("content", "")
             messages.append(ChatMessage(role, content))
-        messages.append(ChatMessage("user", message))
+        messages.append(ChatMessage("user", message + trade_plan_reminder))
 
         # 上下文窗口保护
         msg_dicts = [{"role": m.role, "content": m.content} for m in messages]

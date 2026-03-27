@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { useExpertStore } from "@/stores/useExpertStore";
-import { ArrowUp, Square, Download, BrainCircuit } from "lucide-react";
+import { ArrowUp, Square, Download, BrainCircuit, MessageSquareMore, FileBarChart } from "lucide-react";
 
 interface InputBarProps {
   onExport?: () => void;
@@ -12,7 +12,10 @@ export function InputBar({ onExport }: InputBarProps) {
   const [input, setInput] = useState("");
   const {
     sendMessage, stopStreaming, status, error, activeExpert,
-    profiles, chatHistories, deepThink, toggleDeepThink, pendingClarifications,
+    profiles, chatHistories, deepThink, toggleDeepThink,
+    useClarification, toggleClarification,
+    useTradePlan, toggleTradePlan,
+    pendingClarifications,
   } = useExpertStore();
   const isThinking = status === "thinking";
   const pendingClarification = pendingClarifications[activeExpert];
@@ -102,6 +105,38 @@ export function InputBar({ onExport }: InputBarProps) {
           <span>深度</span>
         </button>
 
+        {/* 澄清开关 */}
+        <button
+          onClick={toggleClarification}
+          className={`shrink-0 h-8 px-2 rounded-xl flex items-center gap-1 text-[10px] font-medium
+                     transition-all duration-150 border
+                     ${useClarification
+                       ? "border-current bg-current/10 text-opacity-100"
+                       : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-primary)]"
+                     }`}
+          style={useClarification ? { color, borderColor: color + "40", backgroundColor: color + "10" } : undefined}
+          title={useClarification ? "澄清已开启：AI 会先确认分析方向" : "点击开启澄清：AI 先询问再分析，更精准"}
+        >
+          <MessageSquareMore size={13} />
+          <span>澄清</span>
+        </button>
+
+        {/* 策略卡片开关 */}
+        <button
+          onClick={toggleTradePlan}
+          className={`shrink-0 h-8 px-2 rounded-xl flex items-center gap-1 text-[10px] font-medium
+                     transition-all duration-150 border
+                     ${useTradePlan
+                       ? "border-current bg-current/10 text-opacity-100"
+                       : "border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-primary)]"
+                     }`}
+          style={useTradePlan ? { color, borderColor: color + "40", backgroundColor: color + "10" } : undefined}
+          title={useTradePlan ? "策略卡片已开启：AI 会在分析具体股票时生成交易计划" : "点击开启策略卡片：AI 分析具体股票时可生成交易计划"}
+        >
+          <FileBarChart size={13} />
+          <span>策略</span>
+        </button>
+
         <textarea
           ref={textareaRef}
           value={input}
@@ -164,7 +199,21 @@ export function InputBar({ onExport }: InputBarProps) {
         {deepThink && (
           <span className="inline-flex items-center gap-1 mr-1" style={{ color }}>
             <BrainCircuit size={10} />
-            深度思考已开启
+            深度思考
+            <span className="text-[var(--text-tertiary)]">·</span>
+          </span>
+        )}
+        {useClarification && (
+          <span className="inline-flex items-center gap-1 mr-1" style={{ color }}>
+            <MessageSquareMore size={10} />
+            澄清
+            <span className="text-[var(--text-tertiary)]">·</span>
+          </span>
+        )}
+        {useTradePlan && (
+          <span className="inline-flex items-center gap-1 mr-1" style={{ color }}>
+            <FileBarChart size={10} />
+            策略卡片
             <span className="text-[var(--text-tertiary)]">·</span>
           </span>
         )}

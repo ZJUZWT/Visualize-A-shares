@@ -198,6 +198,7 @@ class ExpertChatRequest(BaseModel):
     clarification_selection: ClarificationSelection | None = None  # 向后兼容：单轮选择
     clarification_chain: list[ClarificationRoundSelection] | None = None  # 多轮澄清链
     use_clarification: bool = True
+    enable_trade_plan: bool = False    # 是否启用策略卡片（交易计划）生成
 
 
 class SessionCreateRequest(BaseModel):

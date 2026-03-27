@@ -30,7 +30,7 @@ class LLMCapability:
     # ── 公开接口 ───────────────────────────────────────────
 
     async def complete(self, prompt: str, system: str = "", cache_key: str | None = None) -> str:
-        """无状态文本补全（带可选缓存）"""
+        """无状态文本补全（带可选缓存）— 使用流式收集保持链路活跃"""
         if not self.enabled:
             return ""
         key = cache_key or self._cache_key(prompt)
@@ -42,7 +42,11 @@ class LLMCapability:
             messages.append(ChatMessage("system", system))
         messages.append(ChatMessage("user", prompt))
         try:
-            result = await self._provider.chat(messages)
+            # 流式收集：保持链路活跃，避免 wall-clock 超时
+            chunks: list[str] = []
+            async for token in self._provider.chat_stream(messages):
+                chunks.append(token)
+            result = "".join(chunks)
         except Exception as e:
             logger.warning(f"LLMCapability.complete 调用失败: {e}")
             return ""

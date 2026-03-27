@@ -54,6 +54,7 @@ test("buildPetConsoleViewModel maps smoke suite result into training summary", (
       overall_status: "warn",
       scenario_id: "demo-evolution",
       portfolio_id: "demo-evolution",
+      requested_portfolio_id: "demo",
       seed_summary: {},
       demo_verification: {
         verification_status: "pass",
@@ -84,8 +85,125 @@ test("buildPetConsoleViewModel maps smoke suite result into training summary", (
   assert.match(viewModel.training.summary, /reviews 4/i);
 });
 
+test("buildPetConsoleViewModel keeps active brain run above stale suite result", () => {
+  const viewModel = buildPetConsoleViewModel({
+    currentPortfolioId: "demo",
+    activeRun: {
+      id: "run-2",
+      portfolio_id: "demo",
+      run_type: "manual",
+      status: "running",
+      current_step: null,
+      candidates: null,
+      analysis_results: null,
+      decisions: null,
+      plan_ids: null,
+      trade_ids: null,
+      thinking_process: null,
+      state_before: null,
+      state_after: null,
+      execution_summary: null,
+      error_message: null,
+      llm_tokens_used: 0,
+      started_at: "2026-03-23T10:20:00",
+      completed_at: null,
+    },
+    ledgerOverview: null,
+    agentState: null,
+    strategySummary: null,
+    suiteResult: {
+      mode: "smoke",
+      overall_status: "warn",
+      scenario_id: "demo-evolution",
+      portfolio_id: "demo-evolution",
+      requested_portfolio_id: "demo",
+      seed_summary: {},
+      demo_verification: {
+        verification_status: "pass",
+        run_id: "verify-1",
+      },
+      backtest: {
+        status: "completed",
+        run_id: "bt-1",
+        summary: {
+          trade_count: 1,
+          review_count: 4,
+          memory_added: 0,
+          memory_updated: 0,
+          memory_retired: 0,
+        },
+      },
+      evidence: {
+        verification_run_id: "verify-1",
+        backtest_run_id: "bt-1",
+      },
+      next_actions: ["backtest weak signal: no memory movement"],
+    },
+  });
+
+  assert.equal(viewModel.pet.mood, "thinking");
+  assert.equal(viewModel.training.modeLabel, "Smoke");
+  assert.equal(viewModel.training.statusTone, "warn");
+});
+
+test("buildPetConsoleViewModel ignores suite result from another portfolio", () => {
+  const viewModel = buildPetConsoleViewModel({
+    currentPortfolioId: "paper-2",
+    activeRun: null,
+    ledgerOverview: {
+      portfolio_id: "paper-2",
+      account: {
+        cash_balance: 1000000,
+        total_asset: 1000000,
+        total_pnl: 0,
+        total_pnl_pct: 0,
+        position_count: 0,
+        pending_plan_count: 0,
+        trade_count: 0,
+      },
+      positions: [],
+      pending_plans: [],
+      recent_trades: [],
+    },
+    agentState: {
+      portfolio_id: "paper-2",
+      market_view: { stance: "neutral" },
+      position_level: "0.25",
+      sector_preferences: [],
+      risk_alerts: [],
+      source_run_id: null,
+      created_at: null,
+      updated_at: null,
+    },
+    strategySummary: "P2 strategy",
+    suiteResult: {
+      mode: "smoke",
+      overall_status: "warn",
+      scenario_id: "demo-evolution",
+      portfolio_id: "demo-evolution",
+      seed_summary: {},
+      demo_verification: {},
+      backtest: {
+        status: "completed",
+        run_id: "bt-1",
+        summary: {
+          trade_count: 1,
+          review_count: 4,
+        },
+      },
+      evidence: {},
+      next_actions: [],
+    },
+  });
+
+  assert.equal(viewModel.pet.mood, "idle");
+  assert.equal(viewModel.training.statusTone, "idle");
+  assert.match(viewModel.training.summary, /还没有训练结果/);
+});
+
 test("buildPetConsoleViewModel maps open positions into battle readiness", () => {
   const viewModel = buildPetConsoleViewModel({
+    currentPortfolioId: "demo",
     activeRun: null,
     ledgerOverview: {
       portfolio_id: "demo",
@@ -127,6 +245,7 @@ test("buildPetConsoleViewModel maps open positions into battle readiness", () =>
 
 test("buildPetConsoleViewModel maps negative pnl into drawdown mood", () => {
   const viewModel = buildPetConsoleViewModel({
+    currentPortfolioId: "demo",
     activeRun: null,
     ledgerOverview: {
       portfolio_id: "demo",

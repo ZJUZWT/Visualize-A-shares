@@ -7,10 +7,10 @@ export interface TradePlanData {
   stock_name: string;
   current_price: number | null;
   direction: "buy" | "sell";
-  entry_price: number | null;
+  entry_price: string | null;       // 可能有多档："15.2 / 14.5"
   entry_method: string | null;
-  position_pct: number | null;
-  take_profit: number | null;
+  win_odds: string | null;           // 胜率赔率估计
+  take_profit: string | null;        // 可能有多档："18.0 / 20.5"
   take_profit_method: string | null;
   stop_loss: number | null;
   stop_loss_method: string | null;
@@ -44,24 +44,15 @@ function parseSinglePlan(block: string): TradePlanData | null {
   const stock_code = parts[0] || "";
   const stock_name = parts.slice(1).join(" ") || stock_code;
 
-  // 解析仓位百分比（"10%" → 0.1）
-  let position_pct: number | null = null;
-  if (raw["仓位建议"]) {
-    const pctMatch = raw["仓位建议"].match(/([\d.]+)/);
-    if (pctMatch) {
-      position_pct = parseFloat(pctMatch[1]) / 100;
-    }
-  }
-
   return {
     stock_code,
     stock_name,
     current_price: raw["当前价格"] ? parseFloat2(raw["当前价格"]) : null,
     direction: raw["方向"] === "卖出" ? "sell" : "buy",
-    entry_price: raw["建议价格"] ? parseFloat2(raw["建议价格"]) : null,
+    entry_price: raw["建议价格"] || null,
     entry_method: raw["买入方式"] || null,
-    position_pct,
-    take_profit: raw["止盈目标"] ? parseFloat2(raw["止盈目标"]) : null,
+    win_odds: raw["胜率赔率"] || null,
+    take_profit: raw["止盈目标"] || null,
     take_profit_method: raw["止盈方式"] || null,
     stop_loss: raw["止损价格"] ? parseFloat2(raw["止损价格"]) : null,
     stop_loss_method: raw["止损方式"] || null,

@@ -29,31 +29,38 @@ ExpertType = Literal["data", "quant", "info", "industry", "rag", "short_term"]
 # ── 交易计划输出格式约定 ──
 TRADE_PLAN_PROMPT = """
 
-## 交易计划输出规则
+## 交易计划输出规则（用户已开启策略卡片功能）
 
-当你认为应该给出具体的股票操作建议时，请在回复末尾用以下固定格式输出交易计划。
-注意：只有当你有足够信心给出完整操作方案时才输出，不要在随意讨论中输出。
+当你的分析涉及**具体股票**且有明确的操作建议（买入/卖出/观望）时，**必须**在回复末尾用以下固定格式输出交易计划卡片。
+前端会自动解析这个格式并渲染为可视化卡片，所以格式必须严格遵守。
 
-格式（必须严格遵守，前端会解析）：
+**触发条件**（满足任一即应输出）：
+- 用户询问某只具体股票是否值得买入/卖出
+- 你推荐了具体的股票标的
+- 你对某只股票给出了明确的看多/看空判断
+- 用户要求给出操作建议
+
+格式（必须严格遵守，【交易计划】和【/交易计划】是固定标记）：
 
 【交易计划】
 标的：{代码} {名称}
-当前价格：{现价}
+当前价格：{现价，必须使用工具返回的真实行情数据，不可编造}
 方向：{买入/卖出}
-建议价格：{目标进场价}
+建议价格：{目标进场价，如有多个档位用"/"分隔，如 "15.2 / 14.5 / 13.8"}
 买入方式：{分批策略描述}
-仓位建议：{占总仓位百分比}
-止盈目标：{止盈价}
+止盈目标：{止盈价，如有多个档位用"/"分隔，如 "18.0 / 20.5"}
 止盈方式：{止盈执行策略}
 止损价格：{止损价}
 止损方式：{止损执行策略}
+胜率赔率：{你对这笔交易的胜率和赔率估计，如 "胜率约55%，赔率比约2.3:1"}
 理由：{核心逻辑}
 风险提示：{主要风险}
 失效条件：{什么情况下应该放弃这个计划}
 有效期：{YYYY-MM 或具体日期}
 【/交易计划】
 
-标的、方向、建议价格、止损价格、理由为必填。其余字段根据情况填写。
+标的、方向、建议价格、止损价格、胜率赔率、理由为必填。其余字段根据情况填写。
+如果涉及多只股票，可以输出多个【交易计划】...【/交易计划】块。
 """
 
 EXPERT_PROFILES: dict[str, dict] = {
@@ -388,6 +395,7 @@ class EngineExpert:
     async def chat(
         self, message: str, history: list[dict] | None = None,
         deep_think: bool = False, max_rounds: int = 3,
+        enable_trade_plan: bool = False,
     ) -> AsyncGenerator[dict, None]:
         """流式对话，yield SSE 事件
 
@@ -579,7 +587,8 @@ class EngineExpert:
 
         full_text = ""
         async for token, accumulated in self._reply_stream(
-            message, tool_results, history=history, validation_summary=validation_summary
+            message, tool_results, history=history, validation_summary=validation_summary,
+            enable_trade_plan=enable_trade_plan,
         ):
             full_text = accumulated
             yield {"event": "reply_token", "data": {"token": token}}
@@ -615,7 +624,8 @@ class EngineExpert:
             )
             try:
                 retry_text = await self._retry_reply_non_stream(
-                    message, tool_results, history=history, validation_summary=validation_summary
+                    message, tool_results, history=history, validation_summary=validation_summary,
+                    enable_trade_plan=enable_trade_plan,
                 )
                 if retry_text and len(retry_text.strip()) > len(full_text.strip()):
                     # 用新回复替换旧的
@@ -1231,6 +1241,7 @@ class EngineExpert:
         self, message: str, tool_results: list[str],
         history: list[dict] | None = None,
         validation_summary: str = "",
+        enable_trade_plan: bool = False,
     ) -> str:
         """非流式重新生成回复（当流式回复被 think 标签吞掉时的回退方案）
 
@@ -1266,8 +1277,14 @@ class EngineExpert:
                 "并坦诚指出哪些方面超出了你的工具能力。"
                 "绝对不要尝试调用任何工具或输出工具调用格式，直接给出文字分析即可。"
             )
-        # ── 交易计划格式约定 ──
-        system += TRADE_PLAN_PROMPT
+        # ── 交易计划格式约定（仅当用户开启策略卡片开关时） ──
+        trade_plan_reminder = ""
+        if enable_trade_plan:
+            system += TRADE_PLAN_PROMPT
+            trade_plan_reminder = (
+                "\n\n📌 提醒：用户已开启「策略卡片」功能。如果你的分析涉及具体股票且有操作建议，"
+                "请务必在回复末尾用【交易计划】...【/交易计划】格式输出交易计划卡片。"
+            )
         # ── 注入数据质量警告 ──
         if validation_summary:
             system += validation_summary
@@ -1279,7 +1296,7 @@ class EngineExpert:
             role = "assistant" if h["role"] == "expert" else h["role"]
             content = h.get("content", "")
             messages.append(ChatMessage(role, content))
-        messages.append(ChatMessage("user", message))
+        messages.append(ChatMessage("user", message + trade_plan_reminder))
 
         result = await self._llm.chat(messages)
 
@@ -1376,6 +1393,7 @@ class EngineExpert:
         self, message: str, tool_results: list[str],
         history: list[dict] | None = None,
         validation_summary: str = "",
+        enable_trade_plan: bool = False,
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复（自动过滤 <think> / <minimax:*> 标签内容）"""
         from llm.providers import ChatMessage
@@ -1404,8 +1422,14 @@ class EngineExpert:
                 "并坦诚指出哪些方面超出了你的工具能力。"
                 "绝对不要尝试调用任何工具或输出工具调用格式，直接给出文字分析即可。"
             )
-        # ── 交易计划格式约定 ──
-        system += TRADE_PLAN_PROMPT
+        # ── 交易计划格式约定（仅当用户开启策略卡片开关时） ──
+        trade_plan_reminder = ""
+        if enable_trade_plan:
+            system += TRADE_PLAN_PROMPT
+            trade_plan_reminder = (
+                "\n\n📌 提醒：用户已开启「策略卡片」功能。如果你的分析涉及具体股票且有操作建议，"
+                "请务必在回复末尾用【交易计划】...【/交易计划】格式输出交易计划卡片。"
+            )
         # ── 注入数据质量警告 ──
         if validation_summary:
             system += validation_summary
@@ -1418,7 +1442,7 @@ class EngineExpert:
             role = "assistant" if h["role"] == "expert" else h["role"]
             content = h.get("content", "")
             messages.append(ChatMessage(role, content))
-        messages.append(ChatMessage("user", message))
+        messages.append(ChatMessage("user", message + trade_plan_reminder))
 
         accumulated = ""
         in_skip = False          # 跳过区域

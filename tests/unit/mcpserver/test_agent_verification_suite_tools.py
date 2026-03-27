@@ -20,7 +20,43 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_run_demo_agent_verification_suite_returns_pass_json(monkeypatch):
+async def test_run_demo_agent_verification_suite_uses_online_http_bridge(monkeypatch):
+    suite = _import_backend_module("mcpserver.agent_verification_suite")
+
+    async def fake_post_json(path: str, payload: dict, timeout: float = 120.0):
+        assert path == "/api/v1/agent/verification-suite/run"
+        assert payload == {
+            "scenario_id": "demo-evolution",
+            "backtest_start_date": None,
+            "backtest_end_date": None,
+            "timeout_seconds": 30,
+            "execution_price_mode": "next_open",
+            "smoke_mode": False,
+        }
+        return {
+            "mode": "default",
+            "overall_status": "pass",
+            "scenario_id": "demo-evolution",
+            "portfolio_id": "demo-evolution",
+            "seed_summary": {},
+            "demo_verification": {"verification_status": "pass", "run_id": "verify-1"},
+            "backtest": {"status": "completed", "run_id": "bt-1"},
+            "evidence": {"verification_run_id": "verify-1", "backtest_run_id": "bt-1"},
+            "next_actions": [],
+        }
+
+    monkeypatch.setattr(suite, "_post_json", fake_post_json)
+
+    text = await suite.run_demo_agent_verification_suite()
+    data = json.loads(text)
+
+    assert data["mode"] == "default"
+    assert data["overall_status"] == "pass"
+    assert data["evidence"]["verification_run_id"] == "verify-1"
+
+
+@pytest.mark.asyncio
+async def test_run_demo_agent_verification_suite_local_returns_pass_json(monkeypatch):
     suite = _import_backend_module("mcpserver.agent_verification_suite")
 
     class FakeHarness:
@@ -77,7 +113,7 @@ async def test_run_demo_agent_verification_suite_returns_pass_json(monkeypatch):
     monkeypatch.setattr(suite, "_get_harness", lambda: FakeHarness())
     monkeypatch.setattr(suite, "_get_engine", lambda: FakeEngine())
 
-    text = await suite.run_demo_agent_verification_suite()
+    text = await suite._run_demo_agent_verification_suite_local()
     data = json.loads(text)
 
     assert data["mode"] == "default"
@@ -91,7 +127,7 @@ async def test_run_demo_agent_verification_suite_returns_pass_json(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_demo_agent_verification_suite_warns_on_weak_backtest_signals(monkeypatch):
+async def test_run_demo_agent_verification_suite_local_warns_on_weak_backtest_signals(monkeypatch):
     suite = _import_backend_module("mcpserver.agent_verification_suite")
 
     class FakeHarness:
@@ -137,7 +173,7 @@ async def test_run_demo_agent_verification_suite_warns_on_weak_backtest_signals(
     monkeypatch.setattr(suite, "_get_harness", lambda: FakeHarness())
     monkeypatch.setattr(suite, "_get_engine", lambda: FakeEngine())
 
-    text = await suite.run_demo_agent_verification_suite()
+    text = await suite._run_demo_agent_verification_suite_local()
     data = json.loads(text)
 
     assert data["overall_status"] == "warn"
@@ -146,7 +182,7 @@ async def test_run_demo_agent_verification_suite_warns_on_weak_backtest_signals(
 
 
 @pytest.mark.asyncio
-async def test_run_demo_agent_verification_suite_smoke_mode_uses_smoke_defaults(monkeypatch):
+async def test_run_demo_agent_verification_suite_local_smoke_mode_uses_smoke_defaults(monkeypatch):
     suite = _import_backend_module("mcpserver.agent_verification_suite")
 
     class FakeHarness:
@@ -194,7 +230,7 @@ async def test_run_demo_agent_verification_suite_smoke_mode_uses_smoke_defaults(
     monkeypatch.setattr(suite, "_get_harness", lambda: FakeHarness())
     monkeypatch.setattr(suite, "_get_engine", lambda: FakeEngine())
 
-    text = await suite.run_demo_agent_verification_suite(smoke_mode=True)
+    text = await suite._run_demo_agent_verification_suite_local(smoke_mode=True)
     data = json.loads(text)
 
     assert data["mode"] == "smoke"
@@ -203,7 +239,7 @@ async def test_run_demo_agent_verification_suite_smoke_mode_uses_smoke_defaults(
 
 
 @pytest.mark.asyncio
-async def test_run_demo_agent_verification_suite_fails_and_skips_backtest_when_demo_fails(monkeypatch):
+async def test_run_demo_agent_verification_suite_local_fails_and_skips_backtest_when_demo_fails(monkeypatch):
     suite = _import_backend_module("mcpserver.agent_verification_suite")
 
     class FakeHarness:
@@ -230,7 +266,7 @@ async def test_run_demo_agent_verification_suite_fails_and_skips_backtest_when_d
     monkeypatch.setattr(suite, "_get_harness", lambda: FakeHarness())
     monkeypatch.setattr(suite, "_get_engine", lambda: FakeEngine())
 
-    text = await suite.run_demo_agent_verification_suite()
+    text = await suite._run_demo_agent_verification_suite_local()
     data = json.loads(text)
 
     assert data["overall_status"] == "fail"
@@ -239,7 +275,7 @@ async def test_run_demo_agent_verification_suite_fails_and_skips_backtest_when_d
 
 
 @pytest.mark.asyncio
-async def test_run_demo_agent_verification_suite_preserves_verification_evidence_when_backtest_fails(monkeypatch):
+async def test_run_demo_agent_verification_suite_local_preserves_verification_evidence_when_backtest_fails(monkeypatch):
     suite = _import_backend_module("mcpserver.agent_verification_suite")
 
     class FakeHarness:
@@ -274,7 +310,7 @@ async def test_run_demo_agent_verification_suite_preserves_verification_evidence
     monkeypatch.setattr(suite, "_get_harness", lambda: FakeHarness())
     monkeypatch.setattr(suite, "_get_engine", lambda: FakeEngine())
 
-    text = await suite.run_demo_agent_verification_suite()
+    text = await suite._run_demo_agent_verification_suite_local()
     data = json.loads(text)
 
     assert data["overall_status"] == "fail"

@@ -72,7 +72,7 @@ class AgentDB:
 
     _instance: AgentDB | None = None
     _conn: duckdb.DuckDBPyConnection
-    _write_lock: asyncio.Lock
+    _write_lock: asyncio.Lock | None
 
     @classmethod
     def get_instance(cls) -> AgentDB:
@@ -93,11 +93,17 @@ class AgentDB:
             if not _is_wal_replay_error(error, AGENT_DB_PATH) or not _quarantine_wal_file(AGENT_DB_PATH):
                 raise
             inst._conn = duckdb.connect(str(AGENT_DB_PATH))
-        inst._write_lock = asyncio.Lock()
+        inst._write_lock = None  # 延迟到首次使用时创建，避免事件循环不匹配
         inst._init_tables()
         cls._instance = inst
         logger.info(f"AgentDB 初始化完成: {AGENT_DB_PATH}")
         return inst
+
+    def _get_write_lock(self) -> asyncio.Lock:
+        """延迟创建连接锁，确保绑定到当前事件循环"""
+        if self._write_lock is None:
+            self._write_lock = asyncio.Lock()
+        return self._write_lock
 
     def _init_tables(self):
         """建表（幂等）"""
@@ -208,17 +214,18 @@ class AgentDB:
                 stock_name VARCHAR NOT NULL,
                 current_price DOUBLE,
                 direction VARCHAR NOT NULL,
-                entry_price DOUBLE,
+                entry_price VARCHAR,
                 entry_method TEXT,
                 position_pct DOUBLE,
-                take_profit DOUBLE,
+                win_odds VARCHAR,
+                take_profit VARCHAR,
                 take_profit_method TEXT,
                 stop_loss DOUBLE,
                 stop_loss_method TEXT,
                 reasoning TEXT NOT NULL,
                 risk_note TEXT,
                 invalidation TEXT,
-                valid_until DATE,
+                valid_until VARCHAR,
                 status VARCHAR DEFAULT 'pending',
                 source_type VARCHAR DEFAULT 'expert',
                 source_conversation_id VARCHAR,
@@ -282,6 +289,10 @@ class AgentDB:
                 started_at TIMESTAMP DEFAULT now(),
                 completed_at TIMESTAMP
             )
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.brain_runs
+            ADD COLUMN IF NOT EXISTS current_step VARCHAR
         """)
         self._conn.execute("""
             ALTER TABLE agent.brain_runs
@@ -438,6 +449,10 @@ class AgentDB:
             ADD COLUMN IF NOT EXISTS info_review_details JSON
         """)
         self._conn.execute("""
+            ALTER TABLE agent.daily_reviews
+            ADD COLUMN IF NOT EXISTS brain_run_id VARCHAR
+        """)
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS agent.weekly_reflections (
                 id VARCHAR PRIMARY KEY,
                 week_start DATE NOT NULL,
@@ -510,9 +525,47 @@ class AgentDB:
             ALTER TABLE agent.backtest_days
             ADD COLUMN IF NOT EXISTS memory_delta JSON
         """)
+        # 迁移: valid_until DATE → VARCHAR（LLM 生成的有效期格式不可控）
+        try:
+            col_type = self._conn.execute(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_schema='agent' AND table_name='trade_plans' AND column_name='valid_until'"
+            ).fetchone()
+            if col_type and col_type[0].upper() == "DATE":
+                self._conn.execute("ALTER TABLE agent.trade_plans ALTER COLUMN valid_until TYPE VARCHAR")
+                logger.info("✅ trade_plans.valid_until 已从 DATE 迁移为 VARCHAR")
+        except Exception as e:
+            logger.debug(f"valid_until 迁移检查跳过: {e}")
+
+        # 迁移: entry_price/take_profit DOUBLE → VARCHAR（支持多档价格如 "15.2 / 14.5"）
+        for col in ("entry_price", "take_profit"):
+            try:
+                col_type = self._conn.execute(
+                    "SELECT data_type FROM information_schema.columns "
+                    "WHERE table_schema='agent' AND table_name='trade_plans' AND column_name=?",
+                    [col],
+                ).fetchone()
+                if col_type and col_type[0].upper() in ("DOUBLE", "FLOAT"):
+                    self._conn.execute(f"ALTER TABLE agent.trade_plans ALTER COLUMN {col} TYPE VARCHAR")
+                    logger.info(f"✅ trade_plans.{col} 已从 DOUBLE 迁移为 VARCHAR")
+            except Exception as e:
+                logger.debug(f"{col} 迁移检查跳过: {e}")
+
+        # 新增 win_odds 字段（胜率赔率估计）
+        self._conn.execute("""
+            ALTER TABLE agent.trade_plans
+            ADD COLUMN IF NOT EXISTS win_odds VARCHAR
+        """)
+
+        # watchlist 新增 portfolio_id 字段（按宠物隔离关注列表）
+        self._conn.execute("""
+            ALTER TABLE agent.watchlist
+            ADD COLUMN IF NOT EXISTS portfolio_id VARCHAR
+        """)
 
     async def execute_read(self, sql: str, params=None) -> list[dict]:
-        return await asyncio.to_thread(self._sync_read, sql, params)
+        async with self._get_write_lock():
+            return await asyncio.to_thread(self._sync_read, sql, params)
 
     def _sync_read(self, sql: str, params=None) -> list[dict]:
         if params:
@@ -537,7 +590,7 @@ class AgentDB:
         return records
 
     async def execute_write(self, sql: str, params=None):
-        async with self._write_lock:
+        async with self._get_write_lock():
             await asyncio.to_thread(self._sync_write, sql, params)
 
     def _sync_write(self, sql: str, params=None):
@@ -547,7 +600,7 @@ class AgentDB:
             self._conn.execute(sql)
 
     async def execute_transaction(self, queries: list[tuple[str, list]]):
-        async with self._write_lock:
+        async with self._get_write_lock():
             await asyncio.to_thread(self._sync_transaction, queries)
 
     def _sync_transaction(self, queries: list[tuple[str, list]]):

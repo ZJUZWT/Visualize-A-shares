@@ -162,6 +162,7 @@ function normalizeBrainRun(raw: unknown): BrainRun | null {
     portfolio_id: toStringOrNull(data?.portfolio_id) ?? "",
     run_type: toStringOrNull(data?.run_type) ?? "",
     status: toStringOrNull(data?.status) ?? "",
+    current_step: toStringOrNull(data?.current_step) ?? null,
     candidates: Array.isArray(data?.candidates) ? (data?.candidates as BrainRun["candidates"]) : null,
     analysis_results: Array.isArray(data?.analysis_results) ? (data?.analysis_results as BrainRun["analysis_results"]) : null,
     decisions: Array.isArray(data?.decisions) ? (data?.decisions as BrainRun["decisions"]) : null,

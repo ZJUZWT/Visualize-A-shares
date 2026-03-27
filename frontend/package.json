@@ -5,7 +5,7 @@
   "type": "module",
   "description": "StockScape — A股 AI 投研平台",
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "next dev --turbopack --port 3000",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

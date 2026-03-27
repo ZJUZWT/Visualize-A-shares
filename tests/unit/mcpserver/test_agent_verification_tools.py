@@ -22,8 +22,11 @@ import pytest
 async def test_verify_agent_cycle_tool_formats_result(monkeypatch):
     agent_verification = _import_backend_module("mcpserver.agent_verification")
 
-    async def fake_verify_cycle(**kwargs):
-        assert kwargs["portfolio_id"] == "live"
+    async def fake_post_json(path: str, payload: dict, timeout: float = 30.0):
+        assert path == "/api/v1/agent/verification/run"
+        assert payload["portfolio_id"] == "live"
+        assert payload["timeout_seconds"] == 45
+        assert timeout == 50.0
         return {
             "verification_status": "warn",
             "portfolio_id": "live",
@@ -58,11 +61,7 @@ async def test_verify_agent_cycle_tool_formats_result(monkeypatch):
             "next_actions": ["inspect_market_inputs"],
         }
 
-    class FakeHarness:
-        async def verify_cycle(self, **kwargs):
-            return await fake_verify_cycle(**kwargs)
-
-    monkeypatch.setattr(agent_verification, "_get_harness", lambda: FakeHarness())
+    monkeypatch.setattr(agent_verification, "_post_json", fake_post_json)
 
     text = await agent_verification.verify_agent_cycle("live")
 
@@ -76,42 +75,25 @@ async def test_verify_agent_cycle_tool_formats_result(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_verify_agent_cycle_recreates_harness_per_call(monkeypatch):
+async def test_verify_agent_cycle_surfaces_online_service_error(monkeypatch):
     agent_verification = _import_backend_module("mcpserver.agent_verification")
 
-    class FakeHarness:
-        instances = 0
+    async def fake_post_json(path: str, payload: dict, timeout: float = 30.0):
+        raise ValueError("Agent service unavailable: health check failed")
 
-        def __init__(self):
-            FakeHarness.instances += 1
+    monkeypatch.setattr(agent_verification, "_post_json", fake_post_json)
 
-        async def verify_cycle(self, **kwargs):
-            return {
-                "verification_status": "pass",
-                "portfolio_id": kwargs["portfolio_id"],
-                "run_id": "run-static",
-                "brain_run_status": "completed",
-                "failed_stage": None,
-                "checks": [],
-                "evidence": {},
-                "next_actions": [],
-            }
-
-    monkeypatch.setattr(agent_verification, "AgentVerificationHarness", FakeHarness)
-    monkeypatch.setattr(agent_verification.AgentDB, "get_instance", staticmethod(lambda: object()))
-
-    await agent_verification.verify_agent_cycle("live")
-    await agent_verification.verify_agent_cycle("live")
-
-    assert FakeHarness.instances == 2
+    with pytest.raises(ValueError, match="Agent service unavailable"):
+        await agent_verification.verify_agent_cycle("live")
 
 
 @pytest.mark.asyncio
 async def test_inspect_agent_snapshot_tool_formats_sections(monkeypatch):
     agent_verification = _import_backend_module("mcpserver.agent_verification")
 
-    async def fake_inspect_snapshot(**kwargs):
-        assert kwargs["portfolio_id"] == "live"
+    async def fake_get_json(path: str, params: dict | None = None, timeout: float = 30.0):
+        assert path == "/api/v1/agent/verification/snapshot"
+        assert params == {"portfolio_id": "live"}
         return {
             "portfolio_id": "live",
             "state": {"market_view": "neutral", "position_level": 0.3},
@@ -132,11 +114,7 @@ async def test_inspect_agent_snapshot_tool_formats_sections(monkeypatch):
             "memories": [{"rule_text": "不要追高", "confidence": 0.8}],
         }
 
-    class FakeHarness:
-        async def inspect_snapshot(self, **kwargs):
-            return await fake_inspect_snapshot(**kwargs)
-
-    monkeypatch.setattr(agent_verification, "_get_harness", lambda: FakeHarness())
+    monkeypatch.setattr(agent_verification, "_get_json", fake_get_json)
 
     text = await agent_verification.inspect_agent_snapshot("live")
 
@@ -152,23 +130,23 @@ async def test_inspect_agent_snapshot_tool_formats_sections(monkeypatch):
 async def test_prepare_demo_agent_portfolio_formats_seed_summary(monkeypatch):
     agent_verification = _import_backend_module("mcpserver.agent_verification")
 
-    class FakeHarness:
-        async def prepare_demo_portfolio(self, scenario_id: str):
-            assert scenario_id == "demo-evolution"
-            return {
-                "scenario_id": "demo-evolution",
-                "portfolio_id": "demo-evolution",
-                "as_of_date": "2042-01-10",
-                "week_start": "2042-01-05",
-                "seed_run_id": "demo-seed:demo-evolution",
-                "seeded_counts": {
-                    "watchlist_items": 2,
-                    "baseline_review_records": 2,
-                    "baseline_memories": 1,
-                },
-            }
+    async def fake_post_json(path: str, payload: dict, timeout: float = 30.0):
+        assert path == "/api/v1/agent/demo/prepare"
+        assert payload == {"scenario_id": "demo-evolution"}
+        return {
+            "scenario_id": "demo-evolution",
+            "portfolio_id": "demo-evolution",
+            "as_of_date": "2042-01-10",
+            "week_start": "2042-01-05",
+            "seed_run_id": "demo-seed:demo-evolution",
+            "seeded_counts": {
+                "watchlist_items": 2,
+                "baseline_review_records": 2,
+                "baseline_memories": 1,
+            },
+        }
 
-    monkeypatch.setattr(agent_verification, "_get_harness", lambda: FakeHarness())
+    monkeypatch.setattr(agent_verification, "_post_json", fake_post_json)
 
     text = await agent_verification.prepare_demo_agent_portfolio("demo-evolution")
 
@@ -181,38 +159,37 @@ async def test_prepare_demo_agent_portfolio_formats_seed_summary(monkeypatch):
 async def test_verify_demo_agent_cycle_formats_seed_and_verification(monkeypatch):
     agent_verification = _import_backend_module("mcpserver.agent_verification")
 
-    class FakeHarness:
-        async def verify_demo_cycle(self, scenario_id: str, timeout_seconds: int = 30):
-            assert scenario_id == "demo-evolution"
-            assert timeout_seconds == 30
-            return {
-                "verification_status": "pass",
+    async def fake_post_json(path: str, payload: dict, timeout: float = 30.0):
+        assert path == "/api/v1/agent/demo/verify"
+        assert payload == {"scenario_id": "demo-evolution", "timeout_seconds": 30}
+        return {
+            "verification_status": "pass",
+            "portfolio_id": "demo-evolution",
+            "run_id": "run-demo",
+            "brain_run_status": "completed",
+            "failed_stage": None,
+            "stages": [{"name": "brain_execute", "status": "pass"}],
+            "checks": [{"name": "brain_run_completed", "status": "pass"}],
+            "evolution_diff": {
+                "review_records_delta": 1,
+                "daily_reviews_delta": 1,
+                "memories_retired": 1,
+                "weekly_reflections_delta": 1,
+                "weekly_summaries_delta": 1,
+                "signals": ["review_records_delta", "memories_retired"],
+            },
+            "evidence": {},
+            "next_actions": [],
+            "seed_summary": {
+                "scenario_id": "demo-evolution",
                 "portfolio_id": "demo-evolution",
-                "run_id": "run-demo",
-                "brain_run_status": "completed",
-                "failed_stage": None,
-                "stages": [{"name": "brain_execute", "status": "pass"}],
-                "checks": [{"name": "brain_run_completed", "status": "pass"}],
-                "evolution_diff": {
-                    "review_records_delta": 1,
-                    "daily_reviews_delta": 1,
-                    "memories_retired": 1,
-                    "weekly_reflections_delta": 1,
-                    "weekly_summaries_delta": 1,
-                    "signals": ["review_records_delta", "memories_retired"],
-                },
-                "evidence": {},
-                "next_actions": [],
-                "seed_summary": {
-                    "scenario_id": "demo-evolution",
-                    "portfolio_id": "demo-evolution",
-                    "as_of_date": "2042-01-10",
-                    "week_start": "2042-01-05",
-                    "seeded_counts": {"baseline_review_records": 2},
-                },
-            }
+                "as_of_date": "2042-01-10",
+                "week_start": "2042-01-05",
+                "seeded_counts": {"baseline_review_records": 2},
+            },
+        }
 
-    monkeypatch.setattr(agent_verification, "_get_harness", lambda: FakeHarness())
+    monkeypatch.setattr(agent_verification, "_post_json", fake_post_json)
 
     text = await agent_verification.verify_demo_agent_cycle("demo-evolution")
 
@@ -232,37 +209,36 @@ async def test_verify_demo_agent_cycle_formats_seed_and_verification(monkeypatch
 async def test_get_demo_agent_cycle_summary_returns_compact_json(monkeypatch):
     agent_verification = _import_backend_module("mcpserver.agent_verification")
 
-    class FakeHarness:
-        async def verify_demo_cycle(self, scenario_id: str, timeout_seconds: int = 30):
-            assert scenario_id == "demo-evolution"
-            assert timeout_seconds == 30
-            return {
-                "verification_status": "pass",
+    async def fake_post_json(path: str, payload: dict, timeout: float = 30.0):
+        assert path == "/api/v1/agent/demo/verify"
+        assert payload == {"scenario_id": "demo-evolution", "timeout_seconds": 30}
+        return {
+            "verification_status": "pass",
+            "portfolio_id": "demo-evolution",
+            "run_id": "run-demo",
+            "brain_run_status": "completed",
+            "failed_stage": None,
+            "evolution_diff": {
+                "review_records_delta": 1,
+                "daily_reviews_delta": 1,
+                "weekly_reflections_delta": 1,
+                "weekly_summaries_delta": 1,
+                "memories_added": 1,
+                "memories_updated": 1,
+                "memories_retired": 1,
+            },
+            "review_result": {
+                "review_type": "weekly",
+                "summary_id": "summary-1",
+                "reflection_id": "reflection-1",
+            },
+            "seed_summary": {
+                "scenario_id": "demo-evolution",
                 "portfolio_id": "demo-evolution",
-                "run_id": "run-demo",
-                "brain_run_status": "completed",
-                "failed_stage": None,
-                "evolution_diff": {
-                    "review_records_delta": 1,
-                    "daily_reviews_delta": 1,
-                    "weekly_reflections_delta": 1,
-                    "weekly_summaries_delta": 1,
-                    "memories_added": 1,
-                    "memories_updated": 1,
-                    "memories_retired": 1,
-                },
-                "review_result": {
-                    "review_type": "weekly",
-                    "summary_id": "summary-1",
-                    "reflection_id": "reflection-1",
-                },
-                "seed_summary": {
-                    "scenario_id": "demo-evolution",
-                    "portfolio_id": "demo-evolution",
-                },
-            }
+            },
+        }
 
-    monkeypatch.setattr(agent_verification, "_get_harness", lambda: FakeHarness())
+    monkeypatch.setattr(agent_verification, "_post_json", fake_post_json)
 
     text = await agent_verification.get_demo_agent_cycle_summary("demo-evolution")
     data = json.loads(text)
@@ -276,30 +252,3 @@ async def test_get_demo_agent_cycle_summary_returns_compact_json(monkeypatch):
     assert data["review_effect"]["review_type"] == "weekly"
     assert data["review_effect"]["summary_written"] is True
     assert data["review_effect"]["reflection_written"] is True
-
-
-def test_get_harness_initializes_agent_db_on_demand(monkeypatch):
-    agent_verification = _import_backend_module("mcpserver.agent_verification")
-
-    calls: list[str] = []
-
-    class FakeHarness:
-        def __init__(self):
-            calls.append("harness")
-
-    def fake_get_instance():
-        calls.append("get_instance")
-        raise RuntimeError("AgentDB not initialized. Call init_instance() first.")
-
-    def fake_init_instance():
-        calls.append("init_instance")
-        return object()
-
-    monkeypatch.setattr(agent_verification, "AgentVerificationHarness", FakeHarness)
-    monkeypatch.setattr(agent_verification.AgentDB, "get_instance", staticmethod(fake_get_instance))
-    monkeypatch.setattr(agent_verification.AgentDB, "init_instance", staticmethod(fake_init_instance))
-
-    harness = agent_verification._get_harness()
-
-    assert isinstance(harness, FakeHarness)
-    assert calls == ["get_instance", "init_instance", "harness"]

@@ -7,6 +7,7 @@ import type {
 } from "../types";
 
 interface BuildPetConsoleViewModelInput {
+  currentPortfolioId?: string | null;
   activeRun: BrainRun | null;
   ledgerOverview: LedgerOverview | null;
   agentState: AgentState | null;
@@ -28,18 +29,18 @@ function toNumber(value: unknown): number | null {
 }
 
 function resolvePetMood(input: BuildPetConsoleViewModelInput): PetConsoleViewModel["pet"]["mood"] {
-  const suiteStatus = input.suiteResult?.overall_status ?? null;
+  const suiteStatus = resolveApplicableSuiteResult(input)?.overall_status ?? null;
   const activeRunStatus = input.activeRun?.status ?? null;
   const totalPnlPct = input.ledgerOverview?.account.total_pnl_pct ?? null;
   const hasBattleExposure =
     (input.ledgerOverview?.positions.length ?? 0) > 0
     || (input.ledgerOverview?.pending_plans.length ?? 0) > 0;
 
-  if (suiteStatus) {
-    return "training";
-  }
   if (activeRunStatus === "running") {
     return "thinking";
+  }
+  if (suiteStatus) {
+    return "training";
   }
   if ((toNumber(totalPnlPct) ?? 0) < 0) {
     return "drawdown";
@@ -48,6 +49,22 @@ function resolvePetMood(input: BuildPetConsoleViewModelInput): PetConsoleViewMod
     return "battle";
   }
   return "idle";
+}
+
+function resolveApplicableSuiteResult(
+  input: BuildPetConsoleViewModelInput,
+): AgentVerificationSuiteResult | null {
+  if (!input.suiteResult) {
+    return null;
+  }
+
+  if (!input.currentPortfolioId) {
+    return input.suiteResult;
+  }
+
+  const suiteScopePortfolioId =
+    input.suiteResult.requested_portfolio_id ?? input.suiteResult.portfolio_id;
+  return suiteScopePortfolioId === input.currentPortfolioId ? input.suiteResult : null;
 }
 
 function buildPetCopy(
@@ -135,9 +152,10 @@ export function buildPetConsoleViewModel(
   input: BuildPetConsoleViewModelInput,
 ): PetConsoleViewModel {
   const petMood = resolvePetMood(input);
+  const suiteResult = resolveApplicableSuiteResult(input);
   return {
     pet: buildPetCopy(petMood, input.strategySummary),
-    training: summarizeTrainingSuite(input.suiteResult),
+    training: summarizeTrainingSuite(suiteResult),
     battle: summarizeBattle(input.ledgerOverview, input.agentState),
   };
 }

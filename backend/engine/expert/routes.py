@@ -414,6 +414,7 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
             async for event in expert.chat(
                 req.message, history=history,
                 deep_think=req.deep_think, max_rounds=req.max_rounds,
+                enable_trade_plan=req.enable_trade_plan,
             ):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":
@@ -489,6 +490,7 @@ async def expert_chat(req: ExpertChatRequest):
 
 async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
     """RAG 专家对话"""
+    logger.info(f"📋 _rag_chat: deep_think={req.deep_think}, enable_trade_plan={req.enable_trade_plan}, use_clarification={req.use_clarification}")
     agent = get_expert_agent()
     session_id = req.session_id or ""
     history = _get_session_history(session_id) if session_id else []
@@ -504,6 +506,7 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
                 deep_think=req.deep_think, max_rounds=req.max_rounds,
                 clarification_selection=req.clarification_selection,
                 clarification_chain=req.clarification_chain,
+                enable_trade_plan=req.enable_trade_plan,
             ):
                 evt_type = event["event"]
                 if evt_type == "reply_complete":

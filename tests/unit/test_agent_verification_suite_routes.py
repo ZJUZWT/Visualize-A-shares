@@ -55,10 +55,8 @@ class TestAgentVerificationSuiteRoutes:
             )
 
         with patch(
-            "engine.agent.routes._get_verification_suite_module",
-            return_value=SimpleNamespace(
-                run_demo_agent_verification_suite=fake_run_demo_agent_verification_suite
-            ),
+            "engine.agent.routes._get_verification_suite_runner",
+            return_value=fake_run_demo_agent_verification_suite,
         ):
             response = self.client.post(
                 "/api/v1/agent/verification-suite/run",
@@ -79,10 +77,8 @@ class TestAgentVerificationSuiteRoutes:
             raise ValueError("bad verification suite request")
 
         with patch(
-            "engine.agent.routes._get_verification_suite_module",
-            return_value=SimpleNamespace(
-                run_demo_agent_verification_suite=fake_run_demo_agent_verification_suite
-            ),
+            "engine.agent.routes._get_verification_suite_runner",
+            return_value=fake_run_demo_agent_verification_suite,
         ):
             response = self.client.post(
                 "/api/v1/agent/verification-suite/run",

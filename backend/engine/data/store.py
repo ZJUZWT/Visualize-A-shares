@@ -9,6 +9,7 @@ DuckDB 持久化存储层
 
 from pathlib import Path
 from typing import Optional
+import threading
 
 import duckdb
 import pandas as pd
@@ -17,25 +18,116 @@ from loguru import logger
 from config import DB_PATH
 
 
+class _ThreadSafeConnection:
+    """包装 DuckDB 连接，所有操作自动加 threading.Lock。
+
+    DuckDB 的 cursor 实际上共享 connection 内部状态，
+    因此不仅 execute 需要加锁，execute().fetchdf() 整个链也需要在锁内完成。
+    这里通过返回一个 _LockedCursor 让 fetch 操作在锁释放前完成。
+    """
+
+    __slots__ = ("_raw", "_lock")
+
+    def __init__(self, conn: duckdb.DuckDBPyConnection):
+        object.__setattr__(self, "_raw", conn)
+        object.__setattr__(self, "_lock", threading.RLock())
+
+    def execute(self, *args, **kwargs):
+        self._lock.acquire()
+        try:
+            cursor = self._raw.execute(*args, **kwargs)
+            return _LockedCursor(cursor, self._lock)
+        except BaseException:
+            self._lock.release()
+            raise
+
+    def close(self):
+        with self._lock:
+            return self._raw.close()
+
+    def begin(self):
+        with self._lock:
+            return self._raw.begin()
+
+    def commit(self):
+        with self._lock:
+            return self._raw.commit()
+
+    def rollback(self):
+        with self._lock:
+            return self._raw.rollback()
+
+    def __getattr__(self, name):
+        attr = getattr(self._raw, name)
+        if callable(attr):
+            def _locked(*args, **kwargs):
+                with self._lock:
+                    return attr(*args, **kwargs)
+            return _locked
+        return attr
+
+
+class _LockedCursor:
+    """持有锁的 cursor 代理。
+
+    当调用 fetchall/fetchdf/fetchone/fetchnumpy 等终结方法时自动释放锁；
+    若 cursor 被丢弃，通过 __del__ 释放锁，避免死锁。
+    """
+
+    _TERMINAL = frozenset({"fetchall", "fetchdf", "fetchone", "fetchnumpy", "df", "fetch_arrow_table"})
+
+    __slots__ = ("_cursor", "_lock", "_released")
+
+    def __init__(self, cursor, lock: threading.RLock):
+        self._cursor = cursor
+        self._lock = lock
+        self._released = False
+
+    def _release(self):
+        if not self._released:
+            self._released = True
+            self._lock.release()
+
+    def __getattr__(self, name):
+        attr = getattr(self._cursor, name)
+        if name in self._TERMINAL:
+            def _fetch_and_release(*args, **kwargs):
+                try:
+                    return attr(*args, **kwargs)
+                finally:
+                    self._release()
+            return _fetch_and_release
+        return attr
+
+    def __del__(self):
+        self._release()
+
+    # 支持链式属性访问（如 cursor.description）
+    @property
+    def description(self):
+        return self._cursor.description
+
+
 class DuckDBStore:
     """DuckDB 嵌入式分析数据库"""
 
     def __init__(self, db_path: Path = DB_PATH):
         self._db_path = db_path
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # 尝试连接，如果文件锁冲突则使用备用路径
         try:
-            self._conn = duckdb.connect(str(db_path))
+            raw_conn = duckdb.connect(str(db_path))
         except Exception as e:
             if "lock" in str(e).lower():
                 alt_path = db_path.parent / "stockterrain_v2.duckdb"
                 logger.warning(f"DuckDB 文件锁冲突，使用备用路径: {alt_path}")
-                self._conn = duckdb.connect(str(alt_path))
+                raw_conn = duckdb.connect(str(alt_path))
                 self._db_path = alt_path
             else:
                 raise
-        
+        self._conn = _ThreadSafeConnection(raw_conn)
+
         self._init_tables()
         logger.info(f"DuckDB 初始化完成: {self._db_path}")
 

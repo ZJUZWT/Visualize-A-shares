@@ -65,6 +65,46 @@ async def get_factor_defs():
     ]
 
 
+@router.get("/factors/{code}")
+async def get_factor_scores(
+    code: str = PathParam(..., pattern=r"^\d{6}$"),
+):
+    """获取单只股票的多因子评分明细"""
+    qe = get_quant_engine()
+    de = get_data_engine()
+
+    snapshot = await asyncio.to_thread(de.get_snapshot)
+    if snapshot is None or snapshot.empty:
+        raise HTTPException(status_code=404, detail="快照数据为空")
+    if "code" not in snapshot.columns:
+        raise HTTPException(status_code=500, detail="快照缺少 code 列")
+
+    row = snapshot[snapshot["code"].astype(str) == code]
+    if row.empty:
+        raise HTTPException(status_code=404, detail=f"股票 {code} 不在快照中")
+
+    weights, weight_source = qe.get_factor_weights()
+    stock = row.iloc[0]
+    factors = {}
+    for fdef in qe.get_factor_defs():
+        source_col = fdef.source_col
+        if not source_col or source_col.startswith("_"):
+            continue
+        raw_value = stock.get(source_col)
+        factors[fdef.name] = {
+            "value": float(raw_value) if raw_value is not None and str(raw_value).lower() != "nan" else None,
+            "direction": fdef.direction,
+            "weight": weights.get(fdef.name, fdef.default_weight),
+            "desc": fdef.desc,
+        }
+
+    return {
+        "code": code,
+        "weight_source": weight_source,
+        "factors": factors,
+    }
+
+
 @router.post("/factor/backtest")
 async def run_backtest(
     rolling_window: int = Query(default=20, ge=3, le=60),

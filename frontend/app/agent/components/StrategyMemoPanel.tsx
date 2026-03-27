@@ -93,11 +93,9 @@ export default function StrategyMemoPanel({
                       进场: <span className="text-white">{plan?.entry_price ?? "--"}</span>
                     </div>
                     <div>
-                      仓位:{" "}
-                      <span className="text-white">
-                        {plan?.position_pct === null || plan?.position_pct === undefined
-                          ? "--"
-                          : `${(plan.position_pct * 100).toFixed(0)}%`}
+                      胜率赔率:{" "}
+                      <span className="text-amber-400">
+                        {plan?.win_odds ?? "--"}
                       </span>
                     </div>
                     <div>

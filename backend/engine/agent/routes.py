@@ -7,12 +7,14 @@ import json
 from datetime import date
 
 from fastapi import APIRouter, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel
 from pydantic import ValidationError
 
 from engine.agent.backtest import AgentBacktestEngine
 from engine.agent.chat_routes import create_agent_chat_router
 from engine.agent.db import AgentDB
+from engine.agent.verification import AgentVerificationHarness, DEFAULT_VERIFY_TIMEOUT_SECONDS
 from engine.agent.models import (
     StrategyMemoInput,
     StrategyMemoUpdate,
@@ -63,6 +65,24 @@ class RunVerificationSuiteRequest(BaseModel):
     smoke_mode: bool = False
 
 
+class RunAgentVerificationRequest(BaseModel):
+    portfolio_id: str
+    as_of_date: str | None = None
+    include_review: bool = True
+    include_weekly: bool = False
+    require_trade: bool = False
+    timeout_seconds: int = DEFAULT_VERIFY_TIMEOUT_SECONDS
+
+
+class PrepareDemoAgentRequest(BaseModel):
+    scenario_id: str = "demo-evolution"
+
+
+class VerifyDemoAgentRequest(BaseModel):
+    scenario_id: str = "demo-evolution"
+    timeout_seconds: int = 30
+
+
 def _http_status_for_value_error(error: ValueError) -> int:
     return 404 if "不存在" in str(error) else 400
 
@@ -71,6 +91,14 @@ def _get_verification_suite_module():
     from mcpserver import agent_verification_suite
 
     return agent_verification_suite
+
+
+def _get_verification_harness() -> AgentVerificationHarness:
+    return AgentVerificationHarness()
+
+
+def _get_verification_suite_runner():
+    return _get_verification_suite_module()._run_demo_agent_verification_suite_local
 
 
 # ── 路由工厂 ──────────────────────────────────────────
@@ -111,6 +139,15 @@ def create_agent_router() -> APIRouter:
         svc = _get_service()
         try:
             return await svc.get_portfolio(portfolio_id)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+    @router.delete("/portfolio/{portfolio_id}")
+    async def delete_portfolio(portfolio_id: str):
+        svc = _get_service()
+        try:
+            await svc.delete_portfolio(portfolio_id)
+            return {"ok": True}
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
@@ -225,14 +262,14 @@ def create_agent_router() -> APIRouter:
     # ── Watchlist ──
 
     @router.post("/watchlist")
-    async def add_watchlist(req: WatchlistInput):
+    async def add_watchlist(req: WatchlistInput, portfolio_id: str | None = Query(None)):
         svc = _get_service()
-        return await svc.add_watchlist(req)
+        return await svc.add_watchlist(req, portfolio_id=portfolio_id)
 
     @router.get("/watchlist")
-    async def list_watchlist():
+    async def list_watchlist(portfolio_id: str | None = Query(None)):
         svc = _get_service()
-        return await svc.list_watchlist()
+        return await svc.list_watchlist(portfolio_id=portfolio_id)
 
     @router.delete("/watchlist/{item_id}")
     async def remove_watchlist(item_id: str):
@@ -431,16 +468,17 @@ def create_agent_router() -> APIRouter:
     @router.get("/memories")
     async def get_memories(
         status: str = Query("active", pattern="^(active|retired|all)$"),
+        portfolio_id: str | None = Query(None),
     ):
         svc = _get_service()
-        return await svc.list_memories(status=status)
+        return await svc.list_memories(status=status, portfolio_id=portfolio_id)
 
     @router.post("/verification-suite/run")
     async def run_verification_suite(req: RunVerificationSuiteRequest):
-        agent_verification_suite = _get_verification_suite_module()
+        run_suite = _get_verification_suite_runner()
 
         try:
-            result = await agent_verification_suite.run_demo_agent_verification_suite(
+            result = await run_suite(
                 scenario_id=req.scenario_id,
                 backtest_start_date=req.backtest_start_date,
                 backtest_end_date=req.backtest_end_date,
@@ -449,6 +487,51 @@ def create_agent_router() -> APIRouter:
                 smoke_mode=req.smoke_mode,
             )
             return json.loads(result)
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
+
+    @router.post("/verification/run")
+    async def run_agent_verification(req: RunAgentVerificationRequest):
+        harness = _get_verification_harness()
+        try:
+            return await harness.verify_cycle(
+                portfolio_id=req.portfolio_id,
+                as_of_date=req.as_of_date,
+                include_review=req.include_review,
+                include_weekly=req.include_weekly,
+                require_trade=req.require_trade,
+                timeout_seconds=req.timeout_seconds,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
+
+    @router.get("/verification/snapshot")
+    async def get_agent_verification_snapshot(
+        portfolio_id: str,
+        run_id: str | None = Query(None),
+    ):
+        harness = _get_verification_harness()
+        try:
+            return await harness.inspect_snapshot(portfolio_id=portfolio_id, run_id=run_id)
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
+
+    @router.post("/demo/prepare")
+    async def prepare_demo_agent(req: PrepareDemoAgentRequest):
+        harness = _get_verification_harness()
+        try:
+            return await harness.prepare_demo_portfolio(scenario_id=req.scenario_id)
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
+
+    @router.post("/demo/verify")
+    async def verify_demo_agent(req: VerifyDemoAgentRequest):
+        harness = _get_verification_harness()
+        try:
+            return await harness.verify_demo_cycle(
+                scenario_id=req.scenario_id,
+                timeout_seconds=req.timeout_seconds,
+            )
         except ValueError as e:
             raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
 
@@ -498,10 +581,11 @@ def create_agent_router() -> APIRouter:
 
     @router.get("/reflections")
     async def get_reflections(
+        portfolio_id: str | None = Query(None),
         limit: int = Query(20, ge=1, le=200),
     ):
         svc = _get_service()
-        return await svc.list_reflections(limit=limit)
+        return await svc.list_reflections(limit=limit, portfolio_id=portfolio_id)
 
     # ── Brain ──
 
@@ -537,7 +621,23 @@ def create_agent_router() -> APIRouter:
         import asyncio
         from engine.agent.brain import AgentBrain
         brain = AgentBrain(portfolio_id)
-        asyncio.create_task(brain.execute(run_record["id"]))
+        run_id = run_record["id"]
+
+        async def _safe_execute():
+            try:
+                await brain.execute(run_id)
+            except Exception as exc:
+                logger.error(f"🧠 Brain 后台任务异常 (run_id={run_id}): {exc}")
+                try:
+                    await svc.update_brain_run(run_id, {
+                        "status": "failed",
+                        "current_step": None,
+                        "error_message": f"后台任务异常: {exc}",
+                    })
+                except Exception as db_exc:
+                    logger.error(f"🧠 更新失败状态也失败: {db_exc}")
+
+        asyncio.create_task(_safe_execute())
         return run_record
 
     return router

@@ -73,13 +73,15 @@ def test_llm_cache_in_classify(tmp_path):
     store = DuckDBStore(db_path=db_path)
 
     mock_provider = MagicMock()
-    mock_provider.chat = AsyncMock(
-        return_value='{"label":"positive","score":0.9,"reason":"利好"}'
-    )
+    llm_text = '{"label":"positive","score":0.9,"reason":"利好"}'
+    async def _stream(*args, **kwargs):
+        for char in llm_text:
+            yield char
+    mock_provider.chat_stream = MagicMock(side_effect=_stream)
     cap = LLMCapability(provider=mock_provider, cache_store=store)
 
     run(cap.classify("大涨利好消息", ["positive", "negative", "neutral"]))
     run(cap.classify("大涨利好消息", ["positive", "negative", "neutral"]))
 
-    assert mock_provider.chat.call_count == 1
+    assert mock_provider.chat_stream.call_count == 1
     store.close()
