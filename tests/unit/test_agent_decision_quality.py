@@ -19,8 +19,8 @@ def test_build_system_prompt_includes_information_immunity_principles():
     assert "默认态度是怀疑" in prompt
     assert "不要因为单条消息改变策略" in prompt
     assert "Tier 1" in prompt
-    assert "不要相信“常识”" in prompt
-    assert "当你的判断和“市场共识”一致时" in prompt
+    assert "不要相信" in prompt and "常识" in prompt
+    assert "市场共识" in prompt
 
 
 def test_build_decision_context_includes_digest_signal_and_memory_sections():

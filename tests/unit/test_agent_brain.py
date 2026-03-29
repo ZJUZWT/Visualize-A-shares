@@ -482,7 +482,6 @@ class TestBrainDecisionRuns:
         class FakeLLM:
             def __init__(self):
                 self.messages = None
-                self.config = types.SimpleNamespace(max_tokens=2048)
 
             async def chat_stream(self, messages):
                 self.messages = messages
@@ -563,9 +562,6 @@ class TestBrainDecisionRuns:
                 self.updates.append((run_id, updates))
 
         class FakeLLM:
-            def __init__(self):
-                self.config = types.SimpleNamespace(max_tokens=2048)
-
             async def chat_stream(self, messages):
                 yield """{
                   "assessment": {"market_posture": "neutral", "evidence_quality": "mixed"},
@@ -659,9 +655,6 @@ class TestBrainDecisionRuns:
                 self.updates.append((run_id, updates))
 
         class FakeLLM:
-            def __init__(self):
-                self.config = types.SimpleNamespace(max_tokens=2048)
-
             async def chat_stream(self, messages):
                 yield """{
                   "assessment": {"market_posture": "neutral", "evidence_quality": "weak"},
@@ -867,9 +860,6 @@ class TestBrainDecisionRuns:
                 }
 
         class FakeLLM:
-            def __init__(self):
-                self.config = types.SimpleNamespace(max_tokens=2048)
-
             async def chat_stream(self, messages):
                 yield """{
                   "assessment": {"market_posture": "neutral", "evidence_quality": "weak"},
@@ -984,7 +974,6 @@ class TestBrainDecisionRuns:
         class FakeLLM:
             def __init__(self):
                 self.messages = None
-                self.config = types.SimpleNamespace(max_tokens=2048)
 
             async def chat_stream(self, messages):
                 self.messages = messages
@@ -1170,7 +1159,6 @@ class TestBrainRuntime:
         class FakeQualityLLM:
             def __init__(self):
                 self.messages = None
-                self.config = types.SimpleNamespace(max_tokens=2048)
 
             async def chat_stream(self, messages):
                 self.messages = messages

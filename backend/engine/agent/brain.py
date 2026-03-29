@@ -479,9 +479,6 @@ class AgentBrain:
         from llm.providers import ChatMessage
 
         llm = self._get_quality_llm()
-        # 决策需要更大的输出空间（默认 2048 容易被 think 标签耗尽）
-        original_max_tokens = llm.config.max_tokens
-        llm.config.max_tokens = max(original_max_tokens, 4096)
         memory_rules = await self._get_active_rules()
         current_digests = getattr(self, "_current_digests", [])
         current_triggered_signals = getattr(self, "_current_triggered_signals", [])
@@ -508,7 +505,6 @@ class AgentBrain:
         async for token in llm.chat_stream(messages):
             chunks.append(token)
         raw = "".join(chunks)
-        llm.config.max_tokens = original_max_tokens  # 恢复
 
         parsed_payload = parse_decision_payload(raw)
         gate_result = gate_decisions(
