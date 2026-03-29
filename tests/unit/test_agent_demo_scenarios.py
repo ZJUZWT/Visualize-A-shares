@@ -64,6 +64,7 @@ class TestDemoAgentScenarioSeeder:
         assert portfolio["config"]["mode"] == "training"
         assert state["market_view"]["stance"] == "risk-off"
         assert len(watchlist_rows) == 2
+        assert {row["portfolio_id"] for row in watchlist_rows} == {summary["portfolio_id"]}
         assert len(memory_rows) == 1
         assert memory_rows[0]["status"] == "active"
         assert len(review_rows) == 2

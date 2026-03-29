@@ -277,6 +277,72 @@ class TestAgentBacktestRun:
             )
         )
 
+    def test_start_run_copies_source_context_needed_for_agent_execution(self):
+        from engine.agent.backtest import AgentBacktestEngine
+        from engine.agent.models import WatchlistInput
+
+        self._seed_source_trade()
+        source_position = run(self.svc.get_positions("live", "open"))[0]
+        run(
+            self.svc.create_strategy(
+                "live",
+                source_position["id"],
+                {
+                    "take_profit": 120.0,
+                    "stop_loss": 95.0,
+                    "reasoning": "source strategy",
+                    "details": {"source": "test"},
+                },
+            )
+        )
+        run(
+            self.svc.add_watchlist(
+                WatchlistInput(
+                    stock_code="600519",
+                    stock_name="贵州茅台",
+                    reason="source watch",
+                ),
+                portfolio_id="live",
+            )
+        )
+        run(
+            self.svc.update_agent_state(
+                "live",
+                {
+                    "market_view": {"stance": "risk-on"},
+                    "position_level": 0.35,
+                    "sector_preferences": ["consumer"],
+                    "risk_alerts": ["unit-test"],
+                },
+            )
+        )
+
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        run_record = run(
+            engine.start_run(
+                portfolio_id="live",
+                start_date="2026-03-18",
+                end_date="2026-03-20",
+            )
+        )
+
+        backtest_portfolio_id = run_record["backtest_portfolio_id"]
+        backtest_positions = run(self.svc.get_positions(backtest_portfolio_id, "open"))
+        backtest_watchlist = run(self.svc.list_watchlist(portfolio_id=backtest_portfolio_id))
+        backtest_state = run(self.svc.get_agent_state(backtest_portfolio_id))
+        backtest_strategies = run(
+            self.svc.get_strategy(backtest_portfolio_id, backtest_positions[0]["id"])
+        )
+
+        assert len(backtest_positions) == 1
+        assert backtest_positions[0]["stock_code"] == "600519"
+        assert len(backtest_watchlist) == 1
+        assert backtest_watchlist[0]["stock_code"] == "600519"
+        assert backtest_state["market_view"] == {"stance": "risk-on"}
+        assert float(backtest_state["position_level"]) == 0.35
+        assert len(backtest_strategies) == 1
+        assert backtest_strategies[0]["take_profit"] == 120.0
+
     def test_run_backtest_writes_daily_rows_for_each_trade_day(self):
         from engine.agent.backtest import AgentBacktestEngine
 
@@ -533,6 +599,65 @@ class TestAgentBacktestRun:
         assert rows == []
         assert result["days"] == []
 
+    def test_run_backtest_uses_watchlist_symbols_when_source_has_no_positions_or_trades(self):
+        from engine.agent.backtest import AgentBacktestEngine
+        from engine.agent.models import WatchlistInput
+
+        class FakeAgentBrain:
+            def __init__(self, portfolio_id: str):
+                self.portfolio_id = portfolio_id
+
+            async def execute(self, run_id: str):
+                await self_ref.svc.update_brain_run(
+                    run_id,
+                    {
+                        "status": "completed",
+                        "decisions": [],
+                    },
+                )
+
+        run(
+            self.svc.add_watchlist(
+                WatchlistInput(
+                    stock_code="600519",
+                    stock_name="贵州茅台",
+                    reason="watchlist-only backtest",
+                ),
+                portfolio_id="live",
+            )
+        )
+
+        self_ref = self
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        with patch("engine.agent.backtest.AgentBrain", FakeAgentBrain), patch(
+            "engine.agent.backtest.get_data_engine",
+            return_value=FakeDataEngine(self._history_by_code()),
+        ):
+            result = run(
+                engine.run_backtest(
+                    portfolio_id="live",
+                    start_date="2026-03-18",
+                    end_date="2026-03-20",
+                )
+            )
+
+        rows = run(
+            self.db.execute_read(
+                "SELECT trade_date FROM agent.backtest_days WHERE run_id = ? ORDER BY trade_date",
+                [result["id"]],
+            )
+        )
+        assert [row["trade_date"] for row in rows] == [
+            "2026-03-18",
+            "2026-03-19",
+            "2026-03-20",
+        ]
+        assert [item["date"] for item in result["days"]] == [
+            "2026-03-18",
+            "2026-03-19",
+            "2026-03-20",
+        ]
+
     def test_run_backtest_brain_run_tracks_executed_plan_and_trade_ids(self):
         from engine.agent.backtest import AgentBacktestEngine
 
@@ -741,6 +866,65 @@ class TestAgentBacktestRun:
         indicators = json.loads(analysis["indicators"])
         assert indicators["as_of_date"] == "2026-03-20"
         assert quant_requests[-1]["end"] == "2026-03-20"
+
+    def test_historical_market_context_quant_screen_uses_snapshot_as_of(self):
+        from engine.agent.backtest import AgentBacktestEngine
+        from engine.agent.brain import AgentBrain
+        from engine.quant.predictor import PredictionResult
+
+        class FakeDataEngineWithSnapshotAsOf:
+            def __init__(self):
+                self.snapshot_as_of_requests = []
+
+            def get_snapshot(self):
+                return pd.DataFrame([{"code": "FUTURE", "pct_chg": 99.0}])
+
+            def get_snapshot_as_of(self, as_of_date: str):
+                self.snapshot_as_of_requests.append(as_of_date)
+                return pd.DataFrame(
+                    [
+                        {
+                            "code": "600519",
+                            "name": "贵州茅台",
+                            "date": as_of_date,
+                            "price": 1805.0,
+                            "pct_chg": 0.8,
+                            "volume": 12345,
+                            "amount": 2.2e7,
+                            "turnover_rate": 0.3,
+                        }
+                    ]
+                )
+
+        class FakeQuantEngine:
+            def __init__(self):
+                self.last_snapshot = None
+
+            def predict(self, snapshot_df, cluster_labels=None, daily_df_map=None):
+                self.last_snapshot = snapshot_df.copy()
+                return PredictionResult(predictions={"600519": 0.9123}, total_count=len(snapshot_df))
+
+        fake_engine = FakeDataEngineWithSnapshotAsOf()
+        fake_quant = FakeQuantEngine()
+        engine = AgentBacktestEngine(db=self.db, service=self.svc)
+        brain = AgentBrain("live")
+
+        with patch("engine.agent.backtest.get_data_engine", return_value=fake_engine), patch(
+            "engine.quant.get_quant_engine",
+            return_value=fake_quant,
+        ):
+            with engine._with_historical_market_context("2026-03-20"):
+                candidates = run(brain._quant_screen(20))
+
+        assert fake_engine.snapshot_as_of_requests == ["2026-03-20"]
+        assert list(fake_quant.last_snapshot["code"]) == ["600519"]
+        assert candidates == [
+            {
+                "stock_code": "600519",
+                "score": 0.9123,
+                "stock_name": "贵州茅台",
+            }
+        ]
 
     def test_backtest_records_review_and_memory_deltas(self):
         from engine.agent.backtest import AgentBacktestEngine

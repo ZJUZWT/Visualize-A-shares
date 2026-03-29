@@ -37,6 +37,17 @@ def _empty_payload() -> dict[str, Any]:
 
 def _strip_fenced_json(raw: str) -> str:
     text = raw.strip()
+    # 跳过 <think>...</think> 思考块
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1].strip()
+    elif text.startswith("<think>"):
+        # 没有闭合的 think 块，尝试找最后一个 JSON 对象
+        import re
+        json_matches = list(re.finditer(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text))
+        if json_matches:
+            text = json_matches[-1].group()
+        else:
+            return text
     if "```json" in text:
         return text.split("```json", 1)[1].split("```", 1)[0].strip()
     if text.startswith("```") and text.count("```") >= 2:
@@ -72,7 +83,11 @@ def build_system_prompt() -> str:
 - 量化综合评分排名靠前的标的，如果技术指标（RSI、MACD、布林带）形成共振确认，可以给出小仓位试探性买入决策。
 - 量化决策应使用 short_term 持仓类型，设置较紧的止损（3%-5%），仓位控制在单票 5%-8%。
 - 空仓时不要过度保守——如果量化系统已经筛选出高评分标的且技术面支持，应该主动出击，至少选出 1-3 只给出决策。
-- 如果所有候选都来自量化筛选，不要因为"缺少基本面数据"就全部放弃，量化+技术面是完整的交易框架。"""
+- 如果所有候选都来自量化筛选，不要因为"缺少基本面数据"就全部放弃，量化+技术面是完整的交易框架。
+
+重要输出规则：
+- 禁止使用 <think> 标签或任何思考过程标记，直接输出 JSON。
+- 不要输出任何解释性文字，只输出一个合法的 JSON 对象。"""
 
 
 def build_output_contract() -> str:
@@ -251,7 +266,7 @@ def parse_decision_payload(raw: str) -> dict[str, Any]:
     }
 
 
-def gate_decisions(payload: dict[str, Any], min_confidence: float = 0.65) -> GateResult:
+def gate_decisions(payload: dict[str, Any], min_confidence: float = 0.50) -> GateResult:
     assessment = payload.get("assessment") if isinstance(payload.get("assessment"), dict) else {}
     self_critique = _as_list_of_strings(payload.get("self_critique"))
     follow_up_questions = _as_list_of_strings(payload.get("follow_up_questions"))

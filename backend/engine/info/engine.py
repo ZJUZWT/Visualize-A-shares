@@ -40,7 +40,7 @@ class InfoEngine:
             logger.info(f"⏱️ InfoEngine.get_news({code}) 缓存命中 耗时 {elapsed:.1f}s, {len(cached)} 条")
             return cached
 
-        raw_df = self._data.get_news(code, limit)
+        raw_df = await asyncio.to_thread(self._data.get_news, code, limit)
         if raw_df.empty:
             return []
 
@@ -92,7 +92,7 @@ class InfoEngine:
             logger.info(f"⏱️ InfoEngine.get_announcements({code}) 缓存命中 耗时 {elapsed:.1f}s, {len(cached)} 条")
             return cached
 
-        raw_df = self._data.get_announcements(code, limit)
+        raw_df = await asyncio.to_thread(self._data.get_announcements, code, limit)
         if raw_df.empty:
             return []
 

@@ -650,6 +650,61 @@ class TestAgentVerificationHarness:
             for check in result["checks"]
         )
 
+    def test_verify_cycle_require_trade_fails_when_run_has_no_decision_plan_trade(self):
+        from engine.agent.verification import AgentVerificationHarness
+
+        class FakeAgentBrain:
+            def __init__(self, portfolio_id: str):
+                self.portfolio_id = portfolio_id
+
+            async def execute(self, run_id: str):
+                await self_ref.svc.update_brain_run(
+                    run_id,
+                    {
+                        "status": "completed",
+                        "candidates": [{"stock_code": "600519"}],
+                        "analysis_results": [{"stock_code": "600519"}],
+                        "decisions": [],
+                        "plan_ids": [],
+                        "trade_ids": [],
+                        "state_before": {"position_level": 0.2},
+                        "state_after": {"position_level": 0.2},
+                        "execution_summary": {
+                            "candidate_count": 1,
+                            "analysis_count": 1,
+                            "decision_count": 0,
+                            "plan_count": 0,
+                            "trade_count": 0,
+                        },
+                    },
+                )
+
+        self_ref = self
+        with patch("engine.agent.verification.AgentBrain", FakeAgentBrain):
+            harness = AgentVerificationHarness(service=self.svc, db=self.db)
+            result = run(
+                harness.verify_cycle(
+                    "live",
+                    include_review=False,
+                    require_trade=True,
+                )
+            )
+
+        assert result["verification_status"] == "fail"
+        assert result["failed_stage"] == "invariant_check"
+        assert any(
+            check["name"] == "has_decisions" and check["status"] == "fail"
+            for check in result["checks"]
+        )
+        assert any(
+            check["name"] == "has_plans" and check["status"] == "fail"
+            for check in result["checks"]
+        )
+        assert any(
+            check["name"] == "has_trades" and check["status"] == "fail"
+            for check in result["checks"]
+        )
+
     def test_verify_cycle_skips_review_when_invariants_fail(self):
         from engine.agent.verification import AgentVerificationHarness
 

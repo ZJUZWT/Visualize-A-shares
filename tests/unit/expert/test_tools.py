@@ -1,8 +1,11 @@
 """工具层测试"""
 
-import pytest
+import asyncio
+import time
 from unittest.mock import Mock, MagicMock
+
 import pandas as pd
+import pytest
 
 from engine.expert.tools import ExpertTools
 from engine.expert.schemas import ToolCall
@@ -79,3 +82,26 @@ def test_execute_unknown_engine(expert_tools):
 
     assert "error" in result
     assert "Unknown engine" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_data_engine_does_not_block_event_loop(expert_tools):
+    """异步 execute(data) 应把阻塞数据调用移出 event loop。"""
+
+    def blocking_call(action, params):
+        time.sleep(0.05)
+        return {"code": params["code"], "history": []}
+
+    expert_tools._call_data_engine = blocking_call
+
+    started = time.monotonic()
+    task = asyncio.create_task(
+        expert_tools.execute("data", "get_daily_history", {"code": "600519", "days": 30})
+    )
+
+    await asyncio.sleep(0.01)
+    elapsed = time.monotonic() - started
+    result = await task
+
+    assert elapsed < 0.04
+    assert "600519" in result

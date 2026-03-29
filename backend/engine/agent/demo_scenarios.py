@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from engine.agent.db import AgentDB
-from engine.agent.models import TradeInput
+from engine.agent.models import TradeInput, TradePlanInput
 from engine.agent.service import AgentService
 from engine.agent.validator import TradeValidator
 
@@ -59,6 +59,23 @@ class DemoAgentScenarioSeeder:
 
             async def execute(self, run_id: str):
                 state_before = await service.get_agent_state(self.portfolio_id)
+                plan = await service.create_plan(
+                    TradePlanInput(
+                        stock_code="600519",
+                        stock_name="贵州茅台",
+                        current_price=1800.0,
+                        direction="buy",
+                        entry_price="1800.0",
+                        position_pct=0.18,
+                        take_profit="1888.0",
+                        stop_loss=1740.0,
+                        reasoning="demo verification plan",
+                        risk_note="demo scenario risk",
+                        invalidation="scenario invalidation",
+                        source_type="agent",
+                    ),
+                    source_run_id=run_id,
+                )
                 trade = await service.execute_trade(
                     self.portfolio_id,
                     TradeInput(
@@ -76,7 +93,9 @@ class DemoAgentScenarioSeeder:
                     ),
                     trade_date=scenario["as_of_date"],
                     source_run_id=run_id,
+                    source_plan_id=plan["id"],
                 )
+                await service.update_plan(plan["id"], {"status": "executing"})
                 position = trade["position"] or {}
                 trade_row = trade["trade"] or {}
                 if position.get("id"):
@@ -131,7 +150,7 @@ class DemoAgentScenarioSeeder:
                                 "reason": "demo verification entry",
                             }
                         ],
-                        "plan_ids": [],
+                        "plan_ids": [plan["id"]],
                         "trade_ids": [trade_row.get("id")] if trade_row.get("id") else [],
                         "state_before": state_before,
                         "state_after": state_after,
@@ -139,7 +158,7 @@ class DemoAgentScenarioSeeder:
                             "candidate_count": 1,
                             "analysis_count": 1,
                             "decision_count": 1,
-                            "plan_count": 0,
+                            "plan_count": 1,
                             "trade_count": 1 if trade_row.get("id") else 0,
                             "elapsed_seconds": 0.01,
                         },
@@ -259,6 +278,7 @@ class DemoAgentScenarioSeeder:
                 "贵州茅台",
                 "demo baseline watch",
                 "demo-seed",
+                scenario["portfolio_id"],
                 scenario["run_started_at"],
             ],
             [
@@ -267,14 +287,15 @@ class DemoAgentScenarioSeeder:
                 "中国平安",
                 "demo baseline watch",
                 "demo-seed",
+                scenario["portfolio_id"],
                 scenario["run_started_at"],
             ],
         ]
         for row in rows:
             await self.db.execute_write(
                 """
-                INSERT INTO agent.watchlist (id, stock_code, stock_name, reason, added_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO agent.watchlist (id, stock_code, stock_name, reason, added_by, portfolio_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 row,
             )

@@ -10,6 +10,7 @@ DuckDB 持久化存储层
 from pathlib import Path
 from typing import Optional
 import threading
+import uuid
 
 import duckdb
 import pandas as pd
@@ -433,6 +434,32 @@ class DuckDBStore:
             except Exception as e:
                 logger.warning(f"迁移 info.{table} UNIQUE 约束失败(非致命): {e}")
 
+    def _execute_with_frame(
+        self,
+        frame: pd.DataFrame,
+        sql: str,
+        *,
+        relation_alias: str = "df",
+    ) -> None:
+        """将 pandas DataFrame 注册为临时 relation 后执行 SQL。"""
+        if frame.empty:
+            return
+
+        relation_name = f"tmp_{relation_alias}_{uuid.uuid4().hex}"
+        qualified = f'"{relation_name}"'
+        sql_text = (
+            sql.replace(f"{relation_alias}.", f"{qualified}.")
+            .replace(f"FROM {relation_alias}", f"FROM {qualified}")
+        )
+        self._conn.register(relation_name, frame)
+        try:
+            self._conn.execute(sql_text)
+        finally:
+            try:
+                self._conn.unregister(relation_name)
+            except Exception:
+                logger.debug(f"临时 relation 注销失败: {relation_name}")
+
     def save_snapshot(self, df: pd.DataFrame):
         """保存实时行情快照（UPSERT）并同时存入每日历史"""
         if df.empty:
@@ -452,9 +479,10 @@ class DuckDBStore:
         select_cols = ", ".join(f'df."{c}"' for c in snapshot_cols)
 
         self._conn.execute(
-            f"CREATE OR REPLACE TEMP TABLE tmp_snapshot AS SELECT * FROM stock_snapshot WHERE 1=0"
+            "CREATE OR REPLACE TEMP TABLE tmp_snapshot AS SELECT * FROM stock_snapshot WHERE 1=0"
         )
-        self._conn.execute(
+        self._execute_with_frame(
+            df,
             f"INSERT INTO tmp_snapshot ({insert_cols}, updated_at) "
             f"SELECT {select_cols}, CURRENT_TIMESTAMP FROM df"
         )
@@ -466,13 +494,16 @@ class DuckDBStore:
 
         # 同时存入每日历史表
         try:
-            self._conn.execute("""
+            self._execute_with_frame(
+                df,
+                """
                 INSERT OR REPLACE INTO stock_snapshot_daily
                 SELECT code, name, CURRENT_DATE, price, pct_chg,
                        volume, amount, turnover_rate, pe_ttm, pb,
                        total_mv, circ_mv
                 FROM df
-            """)
+                """,
+            )
             logger.info(f"快照保存: {len(df)} 条 (含每日历史)")
         except Exception as e:
             logger.warning(f"每日快照写入失败(非致命): {e}")
@@ -494,6 +525,33 @@ class DuckDBStore:
         try:
             return self._conn.execute(
                 "SELECT * FROM stock_snapshot_daily WHERE date = ? ORDER BY code",
+                [date],
+            ).fetchdf()
+        except Exception:
+            return pd.DataFrame()
+
+    def get_snapshot_as_of(self, date: str) -> pd.DataFrame:
+        """获取某个历史日期可用于截面预测的市场快照"""
+        snapshot = self.get_snapshot_daily(date)
+        if snapshot is not None and not snapshot.empty:
+            return snapshot
+
+        try:
+            return self._conn.execute(
+                """
+                SELECT
+                    code,
+                    code AS name,
+                    date,
+                    close AS price,
+                    pct_chg,
+                    volume,
+                    amount,
+                    turnover_rate
+                FROM stock_daily
+                WHERE date = ?
+                ORDER BY code
+                """,
                 [date],
             ).fetchdf()
         except Exception:
@@ -540,13 +598,17 @@ class DuckDBStore:
                 snap["total_mv"] = pd.to_numeric(day_df.get("total_mv", 0), errors="coerce").fillna(0)
                 snap["circ_mv"] = pd.to_numeric(day_df.get("circ_mv", 0), errors="coerce").fillna(0)
 
-                self._conn.execute("""
+                self._execute_with_frame(
+                    snap,
+                    """
                     INSERT OR REPLACE INTO stock_snapshot_daily
                     SELECT code, name, date::DATE, price, pct_chg,
                            volume, amount, turnover_rate, pe_ttm, pb,
                            total_mv, circ_mv
                     FROM snap
-                """)
+                    """,
+                    relation_alias="snap",
+                )
                 total += len(snap)
             except Exception as e:
                 logger.warning(f"写入快照 {date_str} 失败: {e}")
@@ -558,24 +620,27 @@ class DuckDBStore:
         """保存日线数据（追加去重）"""
         if df.empty:
             return
-        self._conn.execute("""
+        self._execute_with_frame(
+            df,
+            """
             INSERT OR REPLACE INTO stock_daily
             SELECT code, date, open, high, low, close, 
                    volume, amount, pct_chg, turnover_rate
             FROM df
-        """)
+            """,
+        )
 
     def save_features(self, df: pd.DataFrame):
         """保存特征数据"""
         if df.empty:
             return
-        self._conn.execute("INSERT OR REPLACE INTO stock_features SELECT * FROM df")
+        self._execute_with_frame(df, "INSERT OR REPLACE INTO stock_features SELECT * FROM df")
 
     def save_cluster_results(self, df: pd.DataFrame):
         """保存聚类+降维结果"""
         if df.empty:
             return
-        self._conn.execute("INSERT OR REPLACE INTO cluster_results SELECT * FROM df")
+        self._execute_with_frame(df, "INSERT OR REPLACE INTO cluster_results SELECT * FROM df")
 
     def get_snapshot(self) -> pd.DataFrame:
         """获取最新快照"""
@@ -637,12 +702,15 @@ class DuckDBStore:
         for col in ["pct_chg", "turnover_rate"]:
             if col not in df.columns:
                 df[col] = None
-        self._conn.execute(f"""
+        self._execute_with_frame(
+            df,
+            f"""
             INSERT OR REPLACE INTO {table}
             SELECT code, datetime, open, high, low, close,
                    volume, amount, pct_chg, turnover_rate
             FROM df
-        """)
+            """,
+        )
         logger.debug(f"K线保存: {len(df)} 条 → {table}")
 
     def get_kline(
@@ -735,8 +803,9 @@ class DuckDBStore:
         for c in cols:
             if c not in df.columns:
                 df[c] = None
-        self._conn.execute(
-            f"INSERT OR REPLACE INTO sector.board_daily SELECT {', '.join(cols)} FROM df"
+        self._execute_with_frame(
+            df,
+            f"INSERT OR REPLACE INTO sector.board_daily SELECT {', '.join(cols)} FROM df",
         )
         logger.info(f"保存板块日行情: {len(df)} 条")
 
@@ -755,8 +824,9 @@ class DuckDBStore:
         for c in cols:
             if c not in df.columns:
                 df[c] = None
-        self._conn.execute(
-            f"INSERT OR REPLACE INTO sector.fund_flow_daily SELECT {', '.join(cols)} FROM df"
+        self._execute_with_frame(
+            df,
+            f"INSERT OR REPLACE INTO sector.fund_flow_daily SELECT {', '.join(cols)} FROM df",
         )
         logger.info(f"保存板块资金流向: {len(df)} 条")
 

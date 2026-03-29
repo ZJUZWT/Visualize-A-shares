@@ -430,11 +430,49 @@ class AgentVerificationHarness:
         else:
             checks.append({"name": "has_candidates", "status": "warn", "detail": 0})
 
-        trade_count = len(run.get("trade_ids") or [])
-        if require_trade and trade_count == 0:
-            checks.append({"name": "has_trades", "status": "fail", "detail": 0})
+        execution_summary = run.get("execution_summary") or {}
+        decision_count = int(execution_summary.get("decision_count") or len(run.get("decisions") or []))
+        plan_count = int(execution_summary.get("plan_count") or len(run.get("plan_ids") or []))
+        trade_count = int(execution_summary.get("trade_count") or len(run.get("trade_ids") or []))
+
+        if require_trade:
+            checks.append(
+                {
+                    "name": "has_decisions",
+                    "status": "pass" if decision_count > 0 else "fail",
+                    "detail": decision_count,
+                }
+            )
+            checks.append(
+                {
+                    "name": "has_plans",
+                    "status": "pass" if plan_count > 0 else "fail",
+                    "detail": plan_count,
+                }
+            )
+            checks.append(
+                {
+                    "name": "has_trades",
+                    "status": "pass" if trade_count > 0 else "fail",
+                    "detail": trade_count,
+                }
+            )
+
+        if require_trade and (decision_count == 0 or plan_count == 0 or trade_count == 0):
+            failed_checks = []
+            if decision_count == 0:
+                failed_checks.append("decision_count=0")
+            if plan_count == 0:
+                failed_checks.append("plan_count=0")
+            if trade_count == 0:
+                failed_checks.append("trade_count=0")
             failed_stage = "invariant_check"
-            self._record_stage(stages, name="invariant_check", status="fail", detail="require_trade")
+            self._record_stage(
+                stages,
+                name="invariant_check",
+                status="fail",
+                detail="require_trade",
+            )
             return self._build_result(
                 verification_status="fail",
                 portfolio_id=portfolio_id,
@@ -445,7 +483,7 @@ class AgentVerificationHarness:
                 checks=checks,
                 evidence=evidence,
                 evolution_diff=evolution_diff,
-                next_actions=["inspect_decision_gating_and_market_data"],
+                next_actions=["inspect_decision_gating_and_market_data", *failed_checks],
                 include_weekly=include_weekly,
             )
 

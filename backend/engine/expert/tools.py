@@ -31,14 +31,14 @@ class ExpertTools:
         logger.debug(f"执行工具调用: {engine}.{action} with {params}")
         try:
             if engine == "data":
-                result = self._call_data_engine(action, params)
+                result = await asyncio.to_thread(self._call_data_engine, action, params)
             elif engine == "quant":
                 result = await self._call_quant_engine(action, params)
             elif engine == "cluster":
-                result = self._call_cluster_engine(action, params)
+                result = await asyncio.to_thread(self._call_cluster_engine, action, params)
             elif engine == "industry":
                 if action == "bridge_market_assets":
-                    result = self._call_bridge_market_assets(params)
+                    result = await asyncio.to_thread(self._call_bridge_market_assets, params)
                 else:
                     result = {"error": f"Unknown industry action: {action}"}
             elif engine == "expert":

@@ -442,6 +442,31 @@ class TestBrainCandidates:
         assert "601888" in codes
         assert codes.count("600519") == 1
 
+    def test_merge_candidates_filters_blocked_non_position_symbols(self):
+        from engine.agent.brain import AgentBrain
+
+        brain = AgentBrain.__new__(AgentBrain)
+        watchlist = [
+            {"stock_code": "688048", "stock_name": "长光华芯"},
+            {"stock_code": "600519", "stock_name": "贵州茅台"},
+        ]
+        quant_top = [
+            {"stock_code": "300750", "stock_name": "宁德时代", "score": 0.91},
+            {"stock_code": "002594", "stock_name": "比亚迪", "score": 0.86},
+        ]
+        positions = [
+            {"stock_code": "688353", "stock_name": "华盛锂电"},
+        ]
+
+        result = brain._merge_candidates(watchlist, quant_top, positions, max_n=30)
+        codes = [c["stock_code"] for c in result]
+
+        assert "688353" in codes
+        assert "600519" in codes
+        assert "002594" in codes
+        assert "688048" not in codes
+        assert "300750" not in codes
+
 
 class TestBrainDecisionRuns:
     def test_make_decisions_injects_digest_summary_into_prompt(self):
@@ -457,6 +482,7 @@ class TestBrainDecisionRuns:
         class FakeLLM:
             def __init__(self):
                 self.messages = None
+                self.config = types.SimpleNamespace(max_tokens=2048)
 
             async def chat_stream(self, messages):
                 self.messages = messages
@@ -537,6 +563,9 @@ class TestBrainDecisionRuns:
                 self.updates.append((run_id, updates))
 
         class FakeLLM:
+            def __init__(self):
+                self.config = types.SimpleNamespace(max_tokens=2048)
+
             async def chat_stream(self, messages):
                 yield """{
                   "assessment": {"market_posture": "neutral", "evidence_quality": "mixed"},
@@ -630,6 +659,9 @@ class TestBrainDecisionRuns:
                 self.updates.append((run_id, updates))
 
         class FakeLLM:
+            def __init__(self):
+                self.config = types.SimpleNamespace(max_tokens=2048)
+
             async def chat_stream(self, messages):
                 yield """{
                   "assessment": {"market_posture": "neutral", "evidence_quality": "weak"},
@@ -835,6 +867,9 @@ class TestBrainDecisionRuns:
                 }
 
         class FakeLLM:
+            def __init__(self):
+                self.config = types.SimpleNamespace(max_tokens=2048)
+
             async def chat_stream(self, messages):
                 yield """{
                   "assessment": {"market_posture": "neutral", "evidence_quality": "weak"},
@@ -949,6 +984,7 @@ class TestBrainDecisionRuns:
         class FakeLLM:
             def __init__(self):
                 self.messages = None
+                self.config = types.SimpleNamespace(max_tokens=2048)
 
             async def chat_stream(self, messages):
                 self.messages = messages
@@ -1103,6 +1139,29 @@ class TestBrainRuntime:
         assert analysis["daily"] == "data.get_daily_history:600519"
         assert analysis["indicators"] == "quant.get_technical_indicators:600519"
 
+    def test_analyze_candidates_times_out_stuck_candidate(self):
+        from engine.agent.brain import AgentBrain
+
+        brain = AgentBrain.__new__(AgentBrain)
+        brain._ANALYZE_TIMEOUT_SECONDS = 0.01
+
+        async def fake_analyze_single(code: str) -> dict:
+            await asyncio.sleep(0.02)
+            return {"stock_code": code, "daily": "late"}
+
+        brain._analyze_single = fake_analyze_single
+
+        result = run(
+            brain._analyze_candidates(
+                [{"stock_code": "600519", "stock_name": "贵州茅台", "source": "watchlist"}],
+                {},
+            )
+        )
+
+        assert len(result) == 1
+        assert result[0]["stock_code"] == "600519"
+        assert "timeout" in result[0]["error"]
+
     def test_make_decisions_uses_quality_tier_llm(self):
         from engine.agent.brain import AgentBrain
 
@@ -1111,6 +1170,7 @@ class TestBrainRuntime:
         class FakeQualityLLM:
             def __init__(self):
                 self.messages = None
+                self.config = types.SimpleNamespace(max_tokens=2048)
 
             async def chat_stream(self, messages):
                 self.messages = messages

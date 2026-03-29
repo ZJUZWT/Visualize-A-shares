@@ -52,6 +52,10 @@ class DataEngine:
         """获取 DuckDB 中最新快照（本地查询）"""
         return self._store.get_snapshot()
 
+    def get_snapshot_as_of(self, as_of_date: str) -> pd.DataFrame:
+        """获取某个历史日期可用于截面预测的市场快照"""
+        return self._store.get_snapshot_as_of(as_of_date)
+
     def save_snapshot(self, df: pd.DataFrame):
         """保存行情快照到 DuckDB"""
         self._store.save_snapshot(df)

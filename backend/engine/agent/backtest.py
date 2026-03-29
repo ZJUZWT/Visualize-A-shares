@@ -32,6 +32,166 @@ class AgentBacktestEngine:
         self.db = db or AgentDB.get_instance()
         self.service = service or AgentService(db=self.db, validator=TradeValidator())
 
+    async def _clone_source_context(
+        self,
+        source_portfolio_id: str,
+        backtest_portfolio_id: str,
+    ) -> None:
+        state = await self.service.get_agent_state(source_portfolio_id)
+        await self.service.update_agent_state(
+            backtest_portfolio_id,
+            {
+                "market_view": state.get("market_view"),
+                "position_level": state.get("position_level"),
+                "sector_preferences": state.get("sector_preferences"),
+                "risk_alerts": state.get("risk_alerts"),
+            },
+            source_run_id=state.get("source_run_id"),
+        )
+
+        watchlist_rows = await self.service.list_watchlist(portfolio_id=source_portfolio_id)
+        for row in watchlist_rows:
+            await self.db.execute_write(
+                """
+                INSERT INTO agent.watchlist (id, stock_code, stock_name, reason, added_by, portfolio_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    str(uuid.uuid4()),
+                    row["stock_code"],
+                    row.get("stock_name"),
+                    row.get("reason"),
+                    row.get("added_by") or "manual",
+                    backtest_portfolio_id,
+                    row.get("created_at") or datetime.now().isoformat(),
+                ],
+            )
+
+        signal_rows = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.watch_signals
+            WHERE portfolio_id = ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            [source_portfolio_id],
+        )
+        for row in signal_rows:
+            trigger_evidence = row.get("trigger_evidence")
+            if isinstance(trigger_evidence, (dict, list)):
+                trigger_evidence = json.dumps(trigger_evidence, ensure_ascii=False)
+            keywords = row.get("keywords")
+            if isinstance(keywords, list):
+                keywords = json.dumps(keywords, ensure_ascii=False)
+            await self.db.execute_write(
+                """
+                INSERT INTO agent.watch_signals (
+                    id, portfolio_id, stock_code, sector, signal_description,
+                    check_engine, keywords, if_triggered, cycle_context, status,
+                    trigger_evidence, source_run_id, created_at, updated_at, triggered_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    str(uuid.uuid4()),
+                    backtest_portfolio_id,
+                    row.get("stock_code"),
+                    row.get("sector"),
+                    row.get("signal_description"),
+                    row.get("check_engine"),
+                    keywords,
+                    row.get("if_triggered"),
+                    row.get("cycle_context"),
+                    row.get("status"),
+                    trigger_evidence,
+                    row.get("source_run_id"),
+                    row.get("created_at") or datetime.now().isoformat(),
+                    row.get("updated_at") or datetime.now().isoformat(),
+                    row.get("triggered_at"),
+                ],
+            )
+
+        position_rows = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.positions
+            WHERE portfolio_id = ? AND status = 'open'
+            ORDER BY created_at ASC, entry_date ASC, id ASC
+            """,
+            [source_portfolio_id],
+        )
+        position_id_map: dict[str, str] = {}
+        for row in position_rows:
+            new_position_id = str(uuid.uuid4())
+            position_id_map[row["id"]] = new_position_id
+            await self.db.execute_write(
+                """
+                INSERT INTO agent.positions (
+                    id, portfolio_id, stock_code, stock_name, direction, holding_type,
+                    entry_price, current_qty, cost_basis, entry_date, entry_reason,
+                    status, closed_at, closed_reason, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    new_position_id,
+                    backtest_portfolio_id,
+                    row["stock_code"],
+                    row.get("stock_name"),
+                    row.get("direction", "long"),
+                    row.get("holding_type"),
+                    row.get("entry_price"),
+                    row.get("current_qty"),
+                    row.get("cost_basis"),
+                    row.get("entry_date"),
+                    row.get("entry_reason"),
+                    row.get("status", "open"),
+                    row.get("closed_at"),
+                    row.get("closed_reason"),
+                    row.get("created_at") or datetime.now().isoformat(),
+                ],
+            )
+
+        if not position_id_map:
+            return
+
+        placeholders = ", ".join("?" for _ in position_id_map)
+        strategy_rows = await self.db.execute_read(
+            f"""
+            SELECT *
+            FROM agent.position_strategies
+            WHERE position_id IN ({placeholders})
+            ORDER BY created_at ASC, id ASC
+            """,
+            list(position_id_map.keys()),
+        )
+        for row in strategy_rows:
+            details = row.get("details")
+            if isinstance(details, (dict, list)):
+                details = json.dumps(details, ensure_ascii=False)
+            await self.db.execute_write(
+                """
+                INSERT INTO agent.position_strategies (
+                    id, position_id, holding_type, take_profit, stop_loss,
+                    reasoning, details, version, source_run_id, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    str(uuid.uuid4()),
+                    position_id_map[row["position_id"]],
+                    row.get("holding_type"),
+                    row.get("take_profit"),
+                    row.get("stop_loss"),
+                    row.get("reasoning"),
+                    details,
+                    row.get("version", 1),
+                    row.get("source_run_id"),
+                    row.get("created_at") or datetime.now().isoformat(),
+                    row.get("updated_at") or datetime.now().isoformat(),
+                ],
+            )
+
     async def start_run(
         self,
         portfolio_id: str,
@@ -96,6 +256,7 @@ class AgentBacktestEngine:
                 ),
             ]
         )
+        await self._clone_source_context(portfolio_id, backtest_portfolio_id)
 
         rows = await self.db.execute_read(
             "SELECT * FROM agent.backtest_runs WHERE id = ?",
@@ -168,9 +329,25 @@ class AgentBacktestEngine:
             """,
             [portfolio_id],
         )
+        watchlist_rows = await self.db.execute_read(
+            """
+            SELECT DISTINCT stock_code
+            FROM agent.watchlist
+            WHERE portfolio_id = ?
+            """,
+            [portfolio_id],
+        )
+        signal_rows = await self.db.execute_read(
+            """
+            SELECT DISTINCT stock_code
+            FROM agent.watch_signals
+            WHERE portfolio_id = ?
+            """,
+            [portfolio_id],
+        )
         codes = {
             row["stock_code"]
-            for row in [*position_rows, *trade_rows]
+            for row in [*position_rows, *trade_rows, *watchlist_rows, *signal_rows]
             if row.get("stock_code")
         }
         if not codes:
@@ -212,7 +389,14 @@ class AgentBacktestEngine:
                 return self._engine.get_daily_history(code, start, clamped_end)
 
             def get_snapshot(self):
-                # Current snapshot leaks future context during backtest; disable it.
+                if hasattr(self._engine, "get_snapshot_as_of"):
+                    return self._engine.get_snapshot_as_of(self._frozen_end)
+
+                store = getattr(self._engine, "store", None)
+                if store is not None and hasattr(store, "get_snapshot_as_of"):
+                    return store.get_snapshot_as_of(self._frozen_end)
+
+                # Current snapshot leaks future context during backtest; fallback to empty.
                 try:
                     import pandas as pd
 

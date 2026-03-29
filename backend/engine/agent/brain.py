@@ -36,6 +36,8 @@ from engine.agent.validator import TradeValidator
 class AgentBrain:
     """Agent 决策大脑"""
 
+    _ANALYZE_TIMEOUT_SECONDS = 45.0
+
     def __init__(self, portfolio_id: str):
         self.portfolio_id = portfolio_id
         self.db = AgentDB.get_instance()
@@ -222,27 +224,38 @@ class AgentBrain:
         # 关注列表
         for w in watchlist:
             code = w["stock_code"]
+            stock_name = w.get("stock_name", code)
+            if not self._is_candidate_tradable(code, stock_name):
+                continue
             if code not in seen:
                 seen.add(code)
                 result.append({
                     "stock_code": code,
-                    "stock_name": w.get("stock_name", code),
+                    "stock_name": stock_name,
                     "source": "watchlist",
                 })
 
         # 量化筛选
         for q in quant_top:
             code = q["stock_code"]
+            stock_name = q.get("stock_name", code)
+            if not self._is_candidate_tradable(code, stock_name):
+                continue
             if code not in seen:
                 seen.add(code)
                 result.append({
                     "stock_code": code,
-                    "stock_name": q.get("stock_name", code),
+                    "stock_name": stock_name,
                     "source": "quant",
                     "score": q.get("score"),
                 })
 
         return result[:max_n]
+
+    def _is_candidate_tradable(self, stock_code: str, stock_name: str | None = None) -> bool:
+        validator = getattr(getattr(self, "service", None), "validator", None) or TradeValidator()
+        ok, _ = validator.validate_code(stock_code, stock_name or stock_code)
+        return ok
 
     async def _quant_screen(self, top_n: int = 20) -> list[dict]:
         """量化筛选 — 调用 QuantEngine 因子打分"""
@@ -287,12 +300,18 @@ class AgentBrain:
     async def _analyze_candidates(self, candidates: list[dict], config: dict) -> list[dict]:
         """对每个候选标的调用专家工具层获取数据（并发）"""
         sem = asyncio.Semaphore(6)
+        per_candidate_timeout = float(
+            config.get("analyze_timeout_seconds", getattr(self, "_ANALYZE_TIMEOUT_SECONDS", 45.0))
+        )
 
         async def _analyze_one(c: dict) -> dict:
             code = c["stock_code"]
             async with sem:
                 try:
-                    analysis = await self._analyze_single(code)
+                    analysis = await asyncio.wait_for(
+                        self._analyze_single(code),
+                        timeout=per_candidate_timeout,
+                    )
                     analysis["stock_code"] = code
                     analysis["stock_name"] = c.get("stock_name", code)
                     analysis["source"] = c.get("source", "unknown")
@@ -300,6 +319,16 @@ class AgentBrain:
                     if c.get("score") is not None:
                         analysis["quant_score"] = c["score"]
                     return analysis
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"🧠 分析 {code} 超时 ({per_candidate_timeout:.1f}s)，跳过该标的"
+                    )
+                    return {
+                        "stock_code": code,
+                        "stock_name": c.get("stock_name", code),
+                        "source": c.get("source", "unknown"),
+                        "error": f"analysis timeout after {per_candidate_timeout:.1f}s",
+                    }
                 except Exception as e:
                     logger.warning(f"🧠 分析 {code} 失败: {e}")
                     return {
@@ -332,10 +361,13 @@ class AgentBrain:
             stock_code = hit.get("stock_code")
             if not stock_code or stock_code in seen:
                 continue
+            stock_name = hit.get("stock_name", stock_code)
+            if not self._is_candidate_tradable(stock_code, stock_name):
+                continue
             seen.add(stock_code)
             merged.append({
                 "stock_code": stock_code,
-                "stock_name": hit.get("stock_name", stock_code),
+                "stock_name": stock_name,
                 "source": "watch_signal",
             })
         return merged
@@ -447,6 +479,9 @@ class AgentBrain:
         from llm.providers import ChatMessage
 
         llm = self._get_quality_llm()
+        # 决策需要更大的输出空间（默认 2048 容易被 think 标签耗尽）
+        original_max_tokens = llm.config.max_tokens
+        llm.config.max_tokens = max(original_max_tokens, 4096)
         memory_rules = await self._get_active_rules()
         current_digests = getattr(self, "_current_digests", [])
         current_triggered_signals = getattr(self, "_current_triggered_signals", [])
@@ -473,6 +508,7 @@ class AgentBrain:
         async for token in llm.chat_stream(messages):
             chunks.append(token)
         raw = "".join(chunks)
+        llm.config.max_tokens = original_max_tokens  # 恢复
 
         parsed_payload = parse_decision_payload(raw)
         gate_result = gate_decisions(
