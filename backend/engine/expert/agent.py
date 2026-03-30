@@ -561,6 +561,7 @@ class ExpertAgent:
             needs_more=True,
             round=current_round,
             max_rounds=max_rounds,
+            multi_select=True,
         )
 
     async def _self_critique(
