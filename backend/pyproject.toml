@@ -35,6 +35,9 @@ dependencies = [
     # 图结构
     "networkx>=3.0",
 
+    # 向量数据库
+    "chromadb>=0.5.0",
+
     # 工具
     "pydantic>=2.9.0",
     "loguru>=0.7.0",
