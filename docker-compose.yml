@@ -26,9 +26,10 @@ services:
       args:
         NEXT_PUBLIC_API_BASE: ""
     ports:
-      - "8001:3000"
+      - "8001:8001"
     depends_on:
       backend:
         condition: service_healthy
     environment:
       - NEXT_PUBLIC_API_BASE=
+      - PORT=8001

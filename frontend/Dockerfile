@@ -23,7 +23,7 @@ FROM node:20-slim AS runtime
 WORKDIR /app/frontend
 
 ENV NODE_ENV=production \
-    PORT=3000 \
+    PORT=8001 \
     HOSTNAME=0.0.0.0
 
 COPY --from=builder /app/frontend/package.json ./package.json
@@ -33,5 +33,5 @@ COPY --from=builder /app/frontend/.next ./.next
 COPY --from=builder /app/frontend/public ./public
 COPY --from=builder /app/frontend/next.config.ts ./next.config.ts
 
-EXPOSE 3000
-CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0", "--port", "3000"]
+EXPOSE 8001
+CMD ["npm", "run", "start"]
