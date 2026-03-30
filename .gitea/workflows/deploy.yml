@@ -1,0 +1,36 @@
+# Gitea Actions — 自动构建部署
+# 触发条件：main 分支有 push（Gitea 从 GitHub 镜像同步也算 push）
+#
+# 前提：
+# 1. Runner 能访问 docker（挂载 /var/run/docker.sock 或宿主机 runner）
+# 2. 仓库代码在 runner 上有持久化路径（DEPLOY_PATH secret）
+#
+# Secrets 需要在 Gitea 仓库 Settings → Secrets 里配置：
+# - DEPLOY_PATH: 项目部署路径，如 C:\stockscape 或 /opt/stockscape
+
+name: Deploy StockScape
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy with Docker Compose
+        run: |
+          echo "🚀 开始构建和部署..."
+          docker compose -f docker-compose.yml down --remove-orphans || true
+          docker compose -f docker-compose.yml up -d --build
+          echo "✅ 部署完成"
+
+      - name: Health check
+        run: |
+          echo "⏳ 等待服务启动..."
+          sleep 15
+          curl -f http://localhost:8000/api/v1/health && echo "✅ 后端正常" || echo "❌ 后端异常"
+          curl -f http://localhost:3000 && echo "✅ 前端正常" || echo "❌ 前端异常"

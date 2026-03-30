@@ -1,0 +1,13 @@
+.git
+.github
+.gitea
+.claude
+node_modules
+.next
+.env
+.env.*
+Dockerfile
+.dockerignore
+docs/
+tests/
+*.md
