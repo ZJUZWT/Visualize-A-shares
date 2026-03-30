@@ -1,12 +1,14 @@
 # Gitea Actions — 自动构建部署
 # 触发条件：main 分支有 push（Gitea 从 GitHub 镜像同步也算 push）
 #
-# 前提：
-# 1. Runner 能访问 docker（挂载 /var/run/docker.sock 或宿主机 runner）
-# 2. 仓库代码在 runner 上有持久化路径（DEPLOY_PATH secret）
+# 使用方式：
+# 1. 服务器上手动 clone 一份到固定路径：
+#    git clone http://localhost:3001/用户名/仓库.git C:\stockscape
+# 2. 在 Gitea 仓库 Settings → Actions → Secrets 里配置：
+#    DEPLOY_PATH = C:\stockscape（或 /opt/stockscape）
+#    GITEA_URL = http://localhost:3001（Gitea 地址）
 #
-# Secrets 需要在 Gitea 仓库 Settings → Secrets 里配置：
-# - DEPLOY_PATH: 项目部署路径，如 C:\stockscape 或 /opt/stockscape
+# 之后每次 GitHub push → Gitea 同步 → 自动 pull + 重新构建部署
 
 name: Deploy StockScape
 
@@ -18,19 +20,23 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Deploy with Docker Compose
+      - name: Pull latest code
         run: |
+          cd ${{ secrets.DEPLOY_PATH }}
+          git pull origin main
+          echo "✅ 代码已更新"
+
+      - name: Build & Deploy
+        run: |
+          cd ${{ secrets.DEPLOY_PATH }}
           echo "🚀 开始构建和部署..."
-          docker compose -f docker-compose.yml down --remove-orphans || true
-          docker compose -f docker-compose.yml up -d --build
+          docker compose down --remove-orphans || true
+          docker compose up -d --build
           echo "✅ 部署完成"
 
       - name: Health check
         run: |
           echo "⏳ 等待服务启动..."
-          sleep 15
+          sleep 20
           curl -f http://localhost:8000/api/v1/health && echo "✅ 后端正常" || echo "❌ 后端异常"
           curl -f http://localhost:8001 && echo "✅ 前端正常" || echo "❌ 前端异常"
