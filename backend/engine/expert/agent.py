@@ -445,7 +445,12 @@ class ExpertAgent:
             f"当前是第 {current_round} 轮澄清（最多 {max_rounds} 轮）。\n\n"
             "请你根据问题内容和之前的选择，生成 3-4 个分析方向选项，帮助用户进一步聚焦。\n"
             "每个选项要贴合用户的具体问题（不要千篇一律的通用选项），让用户选择最关心的维度。\n\n"
-            "要求：\n"
+            "【关键规则 — 必须遵守】\n"
+            "- 你的输出必须是纯 JSON，不要包含任何自然语言、问句或解释\n"
+            "- options 数组必须包含 3-4 个选项，绝对不能为空\n"
+            "- 不要输出类似「你想了解哪方面？」这种问句作为回复，分析方向由 options 字段承载\n"
+            "- question_summary 是对用户问题的重述，不是你对用户的提问\n\n"
+            "字段说明：\n"
             "1. question_summary: 用一句话重述当前轮次要确认的问题核心（自然、口语化）\n"
             "2. multi_select: 是否允许用户多选（true/false）。如果各选项之间不冲突、用户可能同时关心多个维度，设为 true\n"
             "3. options: 3-4个选项，每个包含 id(英文标识)、label(A/B/C/D)、title(8字以内)、description(一句话说明)、focus(分析关键词)\n"
@@ -454,7 +459,7 @@ class ExpertAgent:
             "   - 普通选项不需要 sub_choices\n"
             "4. reasoning: 一句话解释为什么需要这轮确认\n"
             "5. needs_more: true 表示还需要继续追问，false 表示这轮选完就够了\n\n"
-            "严格返回 JSON 格式：\n"
+            "严格返回 JSON 格式（不要有任何其他文字）：\n"
             "```json\n"
             "{\n"
             '  "question_summary": "...",\n'
@@ -463,7 +468,8 @@ class ExpertAgent:
             '    {"id": "style", "label": "A", "title": "先确认投资风格", "description": "...", "focus": "...",\n'
             '     "sub_choices": [{"id": "short", "label": "①", "text": "短线"}, {"id": "mid", "label": "②", "text": "中线"}, {"id": "long", "label": "③", "text": "长线"}]},\n'
             '    {"id": "valuation", "label": "B", "title": "看估值", "description": "...", "focus": "..."},\n'
-            '    ...\n'
+            '    {"id": "risk", "label": "C", "title": "风险评估", "description": "...", "focus": "..."},\n'
+            '    {"id": "catalyst", "label": "D", "title": "催化剂", "description": "...", "focus": "..."}\n'
             '  ],\n'
             '  "reasoning": "...",\n'
             '  "needs_more": true\n'
@@ -1740,8 +1746,8 @@ class ExpertAgent:
                 # 在跳过块内：丢弃内容，但防止缓冲区无限增长
                 if in_skip:
                     skip_bytes += len(token)
-                    # 保护：如果 skip 区域累积超过 2000 字节还未关闭，强制退出
-                    if skip_bytes > 2000:
+                    # 保护：如果 skip 区域累积超过 50000 字节还未关闭，强制退出
+                    if skip_bytes > 50000:
                         logger.warning(f"skip 区域未关闭(>{skip_bytes}B)，强制退出: {skip_end_tag}")
                         in_skip = False
                         raw_buffer = ""
@@ -1751,9 +1757,13 @@ class ExpertAgent:
                         raw_buffer = raw_buffer[-20:]
                     continue
 
-                # 正常正文：检查是否可能是不完整的标签
-                if "<" in raw_buffer and not raw_buffer.endswith(">") and len(raw_buffer) < 30:
+                # 正常正文：检查是否可能是不完整的标签开头
+                # 仅当 buffer 以 "<" 开头且很短时才等待（避免误判正文中的 < 符号）
+                if raw_buffer.startswith("<") and not raw_buffer.endswith(">") and len(raw_buffer) < 30:
                     continue
+                # 安全阀：buffer 超过 30 字符仍未闭合，说明不是标签，直接输出
+                if len(raw_buffer) >= 30 and "<" in raw_buffer and ">" not in raw_buffer:
+                    pass  # 不 continue，直接往下走输出
 
                 if raw_buffer:
                     # 清洗幻觉工具调用 [tool:xxx]...[/tool]
