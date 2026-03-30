@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { API_BASE, SSE_BASE } from "@/lib/api-base";
+import { getApiBase, getSseBase } from "@/lib/api-base";
 import { inspectSseResponse } from "@/lib/sseResponse";
 import type { ChainNode, ChainLink, NodeShock, ExploreStatus } from "@/types/chain";
 
@@ -546,7 +546,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     });
 
     try {
-      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/build`, {
+      const res = await fetch(`${getSseBase()}/api/v1/industry/chain/build`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -597,7 +597,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
 
     try {
       // 1. 调 /chain/parse 拆解文本
-      const parseRes = await fetch(`${SSE_BASE}/api/v1/industry/chain/parse`, {
+      const parseRes = await fetch(`${getSseBase()}/api/v1/industry/chain/parse`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: trimmed }),
@@ -624,7 +624,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
 
         set({ status: "adding" });
         const existing = get().nodes.map((n) => n.name);
-        const placeRes = await fetch(`${SSE_BASE}/api/v1/industry/chain/place-node`, {
+        const placeRes = await fetch(`${getSseBase()}/api/v1/industry/chain/place-node`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -665,7 +665,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
 
     try {
       const existing = nodes.map((n) => n.name);
-      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/add-node`, {
+      const res = await fetch(`${getSseBase()}/api/v1/industry/chain/add-node`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -740,7 +740,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     try {
       // expandAll 展开多个节点，固定 depth=1 防止指数爆炸
       // 深度设置只影响双击单个节点的展开
-      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/expand-all`, {
+      const res = await fetch(`${getSseBase()}/api/v1/industry/chain/expand-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -783,7 +783,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     set({ status: "building" });
 
     try {
-      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/reindex-links`, {
+      const res = await fetch(`${getSseBase()}/api/v1/industry/chain/reindex-links`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -890,7 +890,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
     }));
 
     try {
-      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/simulate`, {
+      const res = await fetch(`${getSseBase()}/api/v1/industry/chain/simulate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -939,7 +939,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
         buildBody.max_nodes = expandMaxNodes;
       }
 
-      const res = await fetch(`${SSE_BASE}/api/v1/industry/chain/build`, {
+      const res = await fetch(`${getSseBase()}/api/v1/industry/chain/build`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildBody),
@@ -969,7 +969,7 @@ export const useChainStore = create<ChainStore>((set, get) => ({
       if (newNodes.length > 0 && existingNames.length > 0) {
         set({ streamingProgress: `关联 ${newNodes.length} 个新节点到图谱...` });
         try {
-          const relateRes = await fetch(`${SSE_BASE}/api/v1/industry/chain/relate-batch`, {
+          const relateRes = await fetch(`${getSseBase()}/api/v1/industry/chain/relate-batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

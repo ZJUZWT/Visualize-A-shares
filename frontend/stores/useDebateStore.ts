@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { API_BASE, SSE_BASE } from "@/lib/api-base";
+import { getApiBase, getSseBase, apiFetch, getAuthHeaders } from "@/lib/api-base";
 import type {
   DebateEntry, JudgeVerdict, DebateStatus,
   ObserverState, RoleState, DebateReplayRecord, RoundEval,
@@ -108,9 +108,9 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
       const body: Record<string, unknown> = { target, max_rounds: maxRounds, mode };
       if (asOfDate) body.as_of_date = asOfDate;
 
-      const res = await fetch(`${SSE_BASE}/api/v1/debate`, {
+      const res = await fetch(`${getSseBase()}/api/v1/debate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify(body),
         signal: _abortController.signal,
       });
@@ -167,7 +167,7 @@ export const useDebateStore = create<DebateStore>((set, get) => ({
     set({ isReplayMode: true });
 
     try {
-      const res = await fetch(`${API_BASE}/api/v1/debate/${debateId}`);
+      const res = await apiFetch(`${getApiBase()}/api/v1/debate/${debateId}`);
       if (!res.ok) {
         set({ error: "加载回放失败", isReplayMode: false });
         return;

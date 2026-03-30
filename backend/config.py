@@ -184,6 +184,19 @@ class RAGConfig(BaseModel):
     search_top_k: int = _env_int("RAG_SEARCH_TOP_K", 3)
 
 
+# ─── 功能开关配置 ─────────────────────────────────────
+class FeatureConfig(BaseModel):
+    """功能模块开关 — 控制前端菜单可见性"""
+    terrain: bool = _env_bool("FEATURE_TERRAIN", True)
+    debate: bool = _env_bool("FEATURE_DEBATE", True)
+    expert: bool = _env_bool("FEATURE_EXPERT", True)
+    plans: bool = _env_bool("FEATURE_PLANS", True)
+    agent: bool = _env_bool("FEATURE_AGENT", True)
+    tasks: bool = _env_bool("FEATURE_TASKS", True)
+    sector: bool = _env_bool("FEATURE_SECTOR", True)
+    chain: bool = _env_bool("FEATURE_CHAIN", True)
+
+
 # ─── 聚合配置 ───────────────────────────────────────────
 class AppConfig(BaseModel):
     datasource: DataSourceConfig = DataSourceConfig()
@@ -197,6 +210,7 @@ class AppConfig(BaseModel):
     chromadb: ChromaDBConfig = ChromaDBConfig()
     info: InfoConfig = InfoConfig()
     rag: RAGConfig = RAGConfig()
+    features: FeatureConfig = FeatureConfig()
 
 
 # 全局单例

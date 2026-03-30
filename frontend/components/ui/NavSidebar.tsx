@@ -2,21 +2,30 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Mountain, Scale, BrainCircuit, TrendingUp, ClipboardList, GitBranch, FileText, Bot } from "lucide-react";
+import { Mountain, Scale, BrainCircuit, TrendingUp, ClipboardList, GitBranch, FileText, Bot, LogOut, User } from "lucide-react";
+import { useConnectionStore } from "@/stores/useConnectionStore";
 
 const NAV_ITEMS = [
-  { href: "/", icon: Mountain, label: "地形图" },
-  { href: "/debate", icon: Scale, label: "专家辩论" },
-  { href: "/expert", icon: BrainCircuit, label: "投资专家" },
-  { href: "/plans", icon: FileText, label: "交易计划" },
-  { href: "/agent", icon: Bot, label: "Agent" },
-  { href: "/tasks", icon: ClipboardList, label: "事务管理" },
-  { href: "/sector", icon: TrendingUp, label: "板块研究" },
-  { href: "/chain", icon: GitBranch, label: "产业链图谱" },
+  { href: "/", icon: Mountain, label: "地形图", feature: "terrain" },
+  { href: "/debate", icon: Scale, label: "专家辩论", feature: "debate" },
+  { href: "/expert", icon: BrainCircuit, label: "投资专家", feature: "expert" },
+  { href: "/plans", icon: FileText, label: "交易计划", feature: "plans" },
+  { href: "/agent", icon: Bot, label: "Agent", feature: "agent" },
+  { href: "/tasks", icon: ClipboardList, label: "事务管理", feature: "tasks" },
+  { href: "/sector", icon: TrendingUp, label: "板块研究", feature: "sector" },
+  { href: "/chain", icon: GitBranch, label: "产业链图谱", feature: "chain" },
 ];
 
 export default function NavSidebar() {
   const pathname = usePathname();
+  const features = useConnectionStore((s) => s.features);
+  const username = useConnectionStore((s) => s.username);
+  const logout = useConnectionStore((s) => s.logout);
+
+  // features 为 null（未加载）→ 全部显示；后端明确返回 false → 隐藏
+  const visibleItems = NAV_ITEMS.filter(
+    (item) => !features || features[item.feature] !== false
+  );
 
   return (
     <nav
@@ -37,7 +46,7 @@ export default function NavSidebar() {
         </span>
       </div>
 
-      {NAV_ITEMS.map(({ href, icon: Icon, label }) => {
+      {visibleItems.map(({ href, icon: Icon, label }) => {
         const active = pathname === href;
         return (
           <Link
@@ -60,6 +69,41 @@ export default function NavSidebar() {
           </Link>
         );
       })}
+
+      {/* 底部用户信息 */}
+      <div className="mt-auto">
+        <div className="border-t border-[var(--border)] mx-2 mb-2" />
+        {username ? (
+          <div className="flex items-center shrink-0 text-[var(--text-secondary)]">
+            <span className="flex items-center justify-center shrink-0" style={{width: 48, height: 48}}>
+              <User size={18} />
+            </span>
+            <span className="text-xs font-medium whitespace-nowrap
+                             opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-75"
+                  style={{ maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis" }}>
+              {username}
+            </span>
+            <button
+              onClick={logout}
+              className="ml-auto mr-2 p-1 rounded hover:bg-[var(--bg-primary)]
+                         opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-75"
+              title="退出登录"
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center shrink-0 text-[var(--text-tertiary)]">
+            <span className="flex items-center justify-center shrink-0" style={{width: 48, height: 48}}>
+              <User size={18} />
+            </span>
+            <span className="text-xs whitespace-nowrap
+                             opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-75">
+              匿名
+            </span>
+          </div>
+        )}
+      </div>
     </nav>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { API_BASE } from "@/lib/api-base";
+import { getApiBase, apiFetch, getAuthHeaders } from "@/lib/api-base";
 import type { TradePlanData } from "@/lib/parseTradePlan";
 import NavSidebar from "@/components/ui/NavSidebar";
 import AgentPetStage from "./components/AgentPetStage";
@@ -143,7 +143,7 @@ function normalizePercent(value: unknown): number | null {
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const resp = await fetch(url);
+  const resp = await apiFetch(url);
   if (!resp.ok) {
     throw new Error(`${resp.status} ${resp.statusText}`);
   }
@@ -856,7 +856,7 @@ export default function AgentPage() {
   }, []);
 
   const fetchPortfolios = useCallback(async (preferredPortfolioId?: string | null) => {
-    const raw = await fetchJson<unknown>(`${API_BASE}/api/v1/agent/portfolio`);
+    const raw = await fetchJson<unknown>(`${getApiBase()}/api/v1/agent/portfolio`);
     const nextPortfolios = normalizePortfolioSummaries(raw);
     setPortfolios(nextPortfolios);
     setPortfolioId((current) => pickActivePortfolioId(nextPortfolios, current, preferredPortfolioId ?? null));
@@ -883,7 +883,7 @@ export default function AgentPage() {
       return [];
     }
     const data = await fetchJson<BrainRun[]>(
-      `${API_BASE}/api/v1/agent/brain/runs?portfolio_id=${portfolioId}`
+      `${getApiBase()}/api/v1/agent/brain/runs?portfolio_id=${portfolioId}`
     );
     setRuns(data);
     setSelectedRun((current) => {
@@ -902,7 +902,7 @@ export default function AgentPage() {
     if (!portfolioId) {
       return null;
     }
-    const data = await fetchJson<unknown>(`${API_BASE}/api/v1/agent/state?portfolio_id=${portfolioId}`);
+    const data = await fetchJson<unknown>(`${getApiBase()}/api/v1/agent/state?portfolio_id=${portfolioId}`);
     const normalized = normalizeAgentState(portfolioId, data);
     setAgentState(normalized);
     return normalized;
@@ -914,7 +914,7 @@ export default function AgentPage() {
     }
     try {
       const data = await fetchJson<unknown>(
-        `${API_BASE}/api/v1/agent/ledger/overview?portfolio_id=${portfolioId}`
+        `${getApiBase()}/api/v1/agent/ledger/overview?portfolio_id=${portfolioId}`
       );
       const normalized = normalizeLedgerOverview(portfolioId, data);
       setLedgerOverview(normalized);
@@ -924,9 +924,9 @@ export default function AgentPage() {
     } catch {
       try {
         const [portfolio, plans, trades] = await Promise.all([
-          fetchJson<unknown>(`${API_BASE}/api/v1/agent/portfolio/${portfolioId}`),
-          fetchJson<unknown>(`${API_BASE}/api/v1/agent/plans`),
-          fetchJson<unknown>(`${API_BASE}/api/v1/agent/portfolio/${portfolioId}/trades?limit=20`),
+          fetchJson<unknown>(`${getApiBase()}/api/v1/agent/portfolio/${portfolioId}`),
+          fetchJson<unknown>(`${getApiBase()}/api/v1/agent/plans`),
+          fetchJson<unknown>(`${getApiBase()}/api/v1/agent/portfolio/${portfolioId}/trades?limit=20`),
         ]);
         const fallback = buildLedgerFallback(portfolioId, portfolio, plans, trades);
         setLedgerOverview(fallback);
@@ -951,7 +951,7 @@ export default function AgentPage() {
     setTimelineLoading(true);
     try {
       const raw = await fetchJson<unknown>(
-        `${API_BASE}/api/v1/agent/timeline/equity?portfolio_id=${portfolioId}`
+        `${getApiBase()}/api/v1/agent/timeline/equity?portfolio_id=${portfolioId}`
       );
       const normalized = normalizeEquityTimeline(portfolioId, raw);
       setEquityTimeline(normalized);
@@ -987,7 +987,7 @@ export default function AgentPage() {
     setReplayLoading(true);
     try {
       const raw = await fetchJson<unknown>(
-        `${API_BASE}/api/v1/agent/timeline/replay?portfolio_id=${portfolioId}&date=${replayDate}`
+        `${getApiBase()}/api/v1/agent/timeline/replay?portfolio_id=${portfolioId}&date=${replayDate}`
       );
       const normalized = normalizeReplaySnapshot(portfolioId, raw);
       setReplaySnapshot(normalized);
@@ -1009,7 +1009,7 @@ export default function AgentPage() {
     setReplayLearningLoading(true);
     try {
       const raw = await fetchJson<unknown>(
-        `${API_BASE}/api/v1/agent/timeline/replay-learning?portfolio_id=${portfolioId}&date=${replayDate}`
+        `${getApiBase()}/api/v1/agent/timeline/replay-learning?portfolio_id=${portfolioId}&date=${replayDate}`
       );
       const normalized = normalizeReplayLearning(portfolioId, raw);
       setReplayLearning(normalized);
@@ -1073,7 +1073,7 @@ export default function AgentPage() {
     setPortfolioCreateSubmitting(true);
     setPortfolioCreateError(null);
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/agent/portfolio`, {
+      const resp = await apiFetch(`${getApiBase()}/api/v1/agent/portfolio`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payloadResult.value),
@@ -1102,12 +1102,12 @@ export default function AgentPage() {
     try {
       const [recordsRaw, statsRaw, weeklyRaw] = await Promise.all([
         fetchFirstAvailable<unknown>([
-          `${API_BASE}/api/v1/agent/reviews?portfolio_id=${portfolioId}&days=30`,
+          `${getApiBase()}/api/v1/agent/reviews?portfolio_id=${portfolioId}&days=30`,
         ]),
         fetchFirstAvailable<unknown>([
-          `${API_BASE}/api/v1/agent/reviews/stats?portfolio_id=${portfolioId}&days=30`,
+          `${getApiBase()}/api/v1/agent/reviews/stats?portfolio_id=${portfolioId}&days=30`,
         ]),
-        fetchFirstAvailable<unknown>([`${API_BASE}/api/v1/agent/reviews/weekly?limit=10`]),
+        fetchFirstAvailable<unknown>([`${getApiBase()}/api/v1/agent/reviews/weekly?limit=10`]),
       ]);
 
       const normalizedRecords = normalizeReviewRecords(recordsRaw);
@@ -1132,7 +1132,7 @@ export default function AgentPage() {
     setMemoryLoading(true);
     try {
       const raw = await fetchFirstAvailable<unknown>([
-        `${API_BASE}/api/v1/agent/memories?status=${memoryStatus}&portfolio_id=${portfolioId}`,
+        `${getApiBase()}/api/v1/agent/memories?status=${memoryStatus}&portfolio_id=${portfolioId}`,
       ]);
       setMemoryRules(normalizeMemoryRules(raw));
       setMemoryError(null);
@@ -1150,8 +1150,8 @@ export default function AgentPage() {
     }
     setReflectionLoading(true);
     const [feedResult, historyResult] = await Promise.allSettled([
-      fetchJson<unknown>(`${API_BASE}/api/v1/agent/reflections?portfolio_id=${portfolioId}`),
-      fetchJson<unknown>(`${API_BASE}/api/v1/agent/strategy/history?portfolio_id=${portfolioId}`),
+      fetchJson<unknown>(`${getApiBase()}/api/v1/agent/reflections?portfolio_id=${portfolioId}`),
+      fetchJson<unknown>(`${getApiBase()}/api/v1/agent/strategy/history?portfolio_id=${portfolioId}`),
     ]);
 
     if (feedResult.status === "fulfilled") {
@@ -1182,8 +1182,8 @@ export default function AgentPage() {
 
     setWakeLoading(true);
     const [signalsResult, digestsResult] = await Promise.allSettled([
-      fetchJson<unknown>(`${API_BASE}/api/v1/agent/watch-signals?portfolio_id=${portfolioId}`),
-      fetchJson<unknown>(`${API_BASE}/api/v1/agent/info-digests?portfolio_id=${portfolioId}&limit=30`),
+      fetchJson<unknown>(`${getApiBase()}/api/v1/agent/watch-signals?portfolio_id=${portfolioId}`),
+      fetchJson<unknown>(`${getApiBase()}/api/v1/agent/info-digests?portfolio_id=${portfolioId}&limit=30`),
     ]);
 
     if (signalsResult.status === "fulfilled") {
@@ -1218,7 +1218,7 @@ export default function AgentPage() {
       setChatSessionsLoading(true);
       try {
         const raw = await fetchJson<unknown>(
-          `${API_BASE}/api/v1/agent/chat/sessions?portfolio_id=${portfolioId}`
+          `${getApiBase()}/api/v1/agent/chat/sessions?portfolio_id=${portfolioId}`
         );
         const sessions = normalizeAgentChatSessions(portfolioId, raw);
         setChatSessions(sessions);
@@ -1252,7 +1252,7 @@ export default function AgentPage() {
       setChatMessagesLoading(true);
       try {
         const raw = await fetchJson<unknown>(
-          `${API_BASE}/api/v1/agent/chat/sessions/${sessionId}/messages?portfolio_id=${portfolioId}`
+          `${getApiBase()}/api/v1/agent/chat/sessions/${sessionId}/messages?portfolio_id=${portfolioId}`
         );
         const messages = normalizeAgentChatMessages(sessionId, raw);
         chatEntriesRef.current = messages;
@@ -1281,7 +1281,7 @@ export default function AgentPage() {
     }
     try {
       const raw = await fetchJson<unknown>(
-        `${API_BASE}/api/v1/agent/strategy-actions?session_id=${sessionId}`
+        `${getApiBase()}/api/v1/agent/strategy-actions?session_id=${sessionId}`
       );
       const actions = normalizeStrategyExecutionActions(raw);
       const next: Record<string, AgentStrategyExecutionState> = {};
@@ -1312,7 +1312,7 @@ export default function AgentPage() {
     setMemoInboxLoading(true);
     try {
       const raw = await fetchJson<unknown>(
-        `${API_BASE}/api/v1/agent/strategy-memos?portfolio_id=${portfolioId}&limit=200`
+        `${getApiBase()}/api/v1/agent/strategy-memos?portfolio_id=${portfolioId}&limit=200`
       );
       const memos = normalizeStrategyMemos(raw);
       setMemoInboxItems(memos.filter((memo) => memo.status === "saved"));
@@ -1365,7 +1365,7 @@ export default function AgentPage() {
         return null;
       }
       try {
-        const resp = await fetch(`${API_BASE}/api/v1/agent/chat/sessions`, {
+        const resp = await apiFetch(`${getApiBase()}/api/v1/agent/chat/sessions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1485,7 +1485,7 @@ export default function AgentPage() {
   const fetchWatchlist = useCallback(async () => {
     if (!portfolioId) return;
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/agent/watchlist?portfolio_id=${portfolioId}`);
+      const resp = await apiFetch(`${getApiBase()}/api/v1/agent/watchlist?portfolio_id=${portfolioId}`);
       if (!resp.ok) {
         setWatchlist([]);
         return;
@@ -1532,7 +1532,7 @@ export default function AgentPage() {
 
     setWatchSignalSubmitting(true);
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/agent/watch-signals`, {
+      const resp = await apiFetch(`${getApiBase()}/api/v1/agent/watch-signals`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -1556,7 +1556,7 @@ export default function AgentPage() {
     async (signalId: string, status: "triggered" | "cancelled") => {
       setWatchSignalUpdatingId(signalId);
       try {
-        const resp = await fetch(`${API_BASE}/api/v1/agent/watch-signals/${signalId}`, {
+        const resp = await apiFetch(`${getApiBase()}/api/v1/agent/watch-signals/${signalId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status }),
@@ -1585,7 +1585,7 @@ export default function AgentPage() {
     setRunning(true);
     setRunError(null);
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/agent/brain/run?portfolio_id=${portfolioId}`, {
+      const resp = await apiFetch(`${getApiBase()}/api/v1/agent/brain/run?portfolio_id=${portfolioId}`, {
         method: "POST",
       });
       if (!resp.ok) {
@@ -1600,7 +1600,7 @@ export default function AgentPage() {
         maxPollMs: 5 * 60 * 1_000,
         maxConsecutiveErrors: 5,
         loadRun: async (signal) => {
-          const result = await fetch(`${API_BASE}/api/v1/agent/brain/runs/${run.id}`, { signal });
+          const result = await apiFetch(`${getApiBase()}/api/v1/agent/brain/runs/${run.id}`, { signal });
           if (!result.ok) {
             throw new Error(await readErrorMessage(result, `HTTP ${result.status}`));
           }
@@ -1644,8 +1644,8 @@ export default function AgentPage() {
 
   const fetchBacktestArtifacts = useCallback(async (runId: string) => {
     const [summaryRaw, daysRaw] = await Promise.all([
-      fetchJson<unknown>(`${API_BASE}/api/v1/agent/backtest/run/${runId}`),
-      fetchJson<unknown>(`${API_BASE}/api/v1/agent/backtest/run/${runId}/days`),
+      fetchJson<unknown>(`${getApiBase()}/api/v1/agent/backtest/run/${runId}`),
+      fetchJson<unknown>(`${getApiBase()}/api/v1/agent/backtest/run/${runId}/days`),
     ]);
     setBacktestSummary(normalizeBacktestSummary(summaryRaw));
     setBacktestDays(normalizeBacktestDays(daysRaw));
@@ -1656,7 +1656,7 @@ export default function AgentPage() {
       setSuiteRunningMode(mode);
       setSuiteError(null);
       try {
-        const resp = await fetch(`${API_BASE}/api/v1/agent/verification-suite/run`, {
+        const resp = await apiFetch(`${getApiBase()}/api/v1/agent/verification-suite/run`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1722,7 +1722,7 @@ export default function AgentPage() {
     setBacktestRunning(true);
     setBacktestError(null);
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/agent/backtest/run`, {
+      const resp = await apiFetch(`${getApiBase()}/api/v1/agent/backtest/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1790,7 +1790,7 @@ export default function AgentPage() {
     setChatStreaming(true);
 
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/agent/chat`, {
+      const resp = await apiFetch(`${getApiBase()}/api/v1/agent/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1952,7 +1952,7 @@ export default function AgentPage() {
       );
 
       try {
-        const resp = await fetch(`${API_BASE}${config.endpoint}`, {
+        const resp = await apiFetch(`${getApiBase()}${config.endpoint}`, {
           method: config.method,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(config.body),
@@ -2027,7 +2027,7 @@ export default function AgentPage() {
       const config = buildMemoRequestConfig(portfolioId, request);
 
       try {
-        const resp = await fetch(`${API_BASE}${config.endpoint}`, {
+        const resp = await apiFetch(`${getApiBase()}${config.endpoint}`, {
           method: config.method,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(config.body),
@@ -2086,7 +2086,7 @@ export default function AgentPage() {
       }
       setMemoMutatingId(memoId);
       try {
-        const resp = await fetch(`${API_BASE}/api/v1/agent/strategy-memos/${memoId}`, {
+        const resp = await apiFetch(`${getApiBase()}/api/v1/agent/strategy-memos/${memoId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: "archived" }),
@@ -2111,7 +2111,7 @@ export default function AgentPage() {
       }
       setMemoMutatingId(memoId);
       try {
-        const resp = await fetch(`${API_BASE}/api/v1/agent/strategy-memos/${memoId}`, {
+        const resp = await apiFetch(`${getApiBase()}/api/v1/agent/strategy-memos/${memoId}`, {
           method: "DELETE",
         });
         if (!resp.ok) {
@@ -2131,7 +2131,7 @@ export default function AgentPage() {
     if (!newCode.trim() || !portfolioId) {
       return;
     }
-    await fetch(`${API_BASE}/api/v1/agent/watchlist?portfolio_id=${portfolioId}`, {
+    await apiFetch(`${getApiBase()}/api/v1/agent/watchlist?portfolio_id=${portfolioId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -2145,7 +2145,7 @@ export default function AgentPage() {
   };
 
   const handleRemoveWatch = async (id: string) => {
-    await fetch(`${API_BASE}/api/v1/agent/watchlist/${id}`, { method: "DELETE" });
+    await apiFetch(`${getApiBase()}/api/v1/agent/watchlist/${id}`, { method: "DELETE" });
     fetchWatchlist();
   };
 
@@ -2241,7 +2241,7 @@ export default function AgentPage() {
                     onClick={async () => {
                       if (!confirm(`确定删除账户「${portfolioId}」及其所有数据？此操作不可撤销。`)) return;
                       try {
-                        const res = await fetch(`${API_BASE}/api/v1/agent/portfolio/${portfolioId}`, { method: "DELETE" });
+                        const res = await apiFetch(`${getApiBase()}/api/v1/agent/portfolio/${portfolioId}`, { method: "DELETE" });
                         if (!res.ok) {
                           alert(`删除失败: ${res.status}`);
                           return;
@@ -2348,7 +2348,7 @@ export default function AgentPage() {
                       const payloadResult = buildCreatePortfolioPayload(defaultDraft);
                       if (!payloadResult.ok) return;
                       try {
-                        await fetch(`${API_BASE}/api/v1/agent/portfolio`, {
+                        await apiFetch(`${getApiBase()}/api/v1/agent/portfolio`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify(payloadResult.value),

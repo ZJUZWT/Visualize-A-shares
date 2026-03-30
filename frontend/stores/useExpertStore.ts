@@ -1,5 +1,5 @@
 import { create, type StoreApi } from "zustand";
-import { API_BASE, SSE_BASE } from "@/lib/api-base";
+import { getApiBase, getSseBase, apiFetch, getAuthHeaders } from "@/lib/api-base";
 import type {
   ExpertMessage,
   ExpertStatus,
@@ -276,9 +276,9 @@ async function streamExpertReply(opts: {
   _abortMap.set(expertType, ac);
 
   try {
-    const res = await fetch(`${SSE_BASE}/api/v1/expert/chat/${expertType}`, {
+    const res = await fetch(`${getSseBase()}/api/v1/expert/chat/${expertType}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       signal: ac.signal,
     });
@@ -472,7 +472,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
 
   fetchProfiles: async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/expert/profiles`);
+      const res = await apiFetch(`${getApiBase()}/api/v1/expert/profiles`);
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -487,8 +487,8 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   fetchSessions: async (expertType?: ExpertType) => {
     const type = expertType || get().activeExpert;
     try {
-      const res = await fetch(
-        `${API_BASE}/api/v1/expert/sessions?expert_type=${type}`
+      const res = await apiFetch(
+        `${getApiBase()}/api/v1/expert/sessions?expert_type=${type}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -504,7 +504,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   createSession: async (expertType?: ExpertType) => {
     const type = expertType || get().activeExpert;
     try {
-      const res = await fetch(`${API_BASE}/api/v1/expert/sessions`, {
+      const res = await apiFetch(`${getApiBase()}/api/v1/expert/sessions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ expert_type: type, title: "新对话" }),
@@ -545,8 +545,8 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
 
     // 加载该 session 的消息
     try {
-      const res = await fetch(
-        `${API_BASE}/api/v1/expert/sessions/${sessionId}/messages`
+      const res = await apiFetch(
+        `${getApiBase()}/api/v1/expert/sessions/${sessionId}/messages`
       );
       if (res.ok) {
         const messages: Array<{
@@ -599,7 +599,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   deleteSession: async (sessionId: string) => {
     const { activeExpert, activeSessions } = get();
     try {
-      await fetch(`${API_BASE}/api/v1/expert/sessions/${sessionId}`, {
+      await apiFetch(`${getApiBase()}/api/v1/expert/sessions/${sessionId}`, {
         method: "DELETE",
       });
       set((s) => {
@@ -724,7 +724,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     // 立即将用户消息写入 DB
     if (sessionId) {
       try {
-        await fetch(`${API_BASE}/api/v1/expert/sessions/${sessionId}/messages/save-user`, {
+        await apiFetch(`${getApiBase()}/api/v1/expert/sessions/${sessionId}/messages/save-user`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ content: text }),
@@ -746,7 +746,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     });
     if (shouldClarify) {
       try {
-        const res = await fetch(`${API_BASE}/api/v1/expert/clarify/${expertType}`, {
+        const res = await apiFetch(`${getApiBase()}/api/v1/expert/clarify/${expertType}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -944,7 +944,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       return { chatHistories: { ...s.chatHistories, [expertType]: history } };
     });
     try {
-      const res = await fetch(`${API_BASE}/api/v1/expert/clarify/${expertType}`, {
+      const res = await fetch(`${getApiBase()}/api/v1/expert/clarify/${expertType}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

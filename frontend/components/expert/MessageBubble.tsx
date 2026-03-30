@@ -9,7 +9,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { splitByTradePlan, hasTradePlan } from "@/lib/parseTradePlan";
 import TradePlanCard from "@/components/plans/TradePlanCard";
-import { API_BASE } from "@/lib/api-base";
+import { getApiBase, apiFetch } from "@/lib/api-base";
 
 interface MessageBubbleProps {
   message: ExpertMessage;
@@ -496,7 +496,7 @@ export function MessageBubble({
                       plan={segment.plan}
                       variant="dark"
                       onSave={async (plan) => {
-                        const resp = await fetch(`${API_BASE}/api/v1/agent/plans`, {
+                        const resp = await apiFetch(`${getApiBase()}/api/v1/agent/plans`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify(plan),

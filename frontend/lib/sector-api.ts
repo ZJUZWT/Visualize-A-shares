@@ -1,4 +1,4 @@
-import { API_BASE } from "@/lib/api-base";
+import { getApiBase } from "@/lib/api-base";
 
 export interface SectorBoardItem {
   board_code: string;
@@ -82,7 +82,7 @@ export interface SectorPredictionItem {
 export async function fetchSectorBoards(type: string, date = "") {
   const params = new URLSearchParams({ type });
   if (date) params.set("date", date);
-  const res = await fetch(`${API_BASE}/api/v1/sector/boards?${params}`);
+  const res = await fetch(`${getApiBase()}/api/v1/sector/boards?${params}`);
   return res.json();
 }
 
@@ -93,31 +93,31 @@ export async function fetchSectorHistory(
   const params = new URLSearchParams({ board_name: boardName, board_type: boardType });
   if (start) params.set("start", start);
   if (end) params.set("end", end);
-  const res = await fetch(`${API_BASE}/api/v1/sector/${boardCode}/history?${params}`);
+  const res = await fetch(`${getApiBase()}/api/v1/sector/${boardCode}/history?${params}`);
   return res.json();
 }
 
 export async function fetchSectorConstituents(boardCode: string, boardName: string) {
   const params = new URLSearchParams({ board_name: boardName });
-  const res = await fetch(`${API_BASE}/api/v1/sector/${boardCode}/constituents?${params}`);
+  const res = await fetch(`${getApiBase()}/api/v1/sector/${boardCode}/constituents?${params}`);
   return res.json();
 }
 
 export async function fetchSectorHeatmap(type: string, date = "") {
   const params = new URLSearchParams({ type });
   if (date) params.set("date", date);
-  const res = await fetch(`${API_BASE}/api/v1/sector/heatmap?${params}`);
+  const res = await fetch(`${getApiBase()}/api/v1/sector/heatmap?${params}`);
   return res.json();
 }
 
 export async function fetchSectorRotation(days = 10, type = "industry") {
   const params = new URLSearchParams({ days: String(days), type });
-  const res = await fetch(`${API_BASE}/api/v1/sector/rotation?${params}`);
+  const res = await fetch(`${getApiBase()}/api/v1/sector/rotation?${params}`);
   return res.json();
 }
 
 export async function triggerSectorFetch(type: string) {
-  const res = await fetch(`${API_BASE}/api/v1/sector/fetch?type=${type}`, { method: "POST" });
+  const res = await fetch(`${getApiBase()}/api/v1/sector/fetch?type=${type}`, { method: "POST" });
   return res.json();
 }
 
@@ -132,7 +132,7 @@ export async function fetchStockSectors(code: string, name = "") {
   const params = new URLSearchParams();
   if (code) params.set("code", code);
   if (name) params.set("name", name);
-  const res = await fetch(`${API_BASE}/api/v1/sector/stock-sectors?${params}`);
+  const res = await fetch(`${getApiBase()}/api/v1/sector/stock-sectors?${params}`);
   return res.json() as Promise<{
     stock_code: string;
     stock_name: string;
@@ -152,6 +152,6 @@ export interface StockSearchResult {
 
 export async function searchStockInBoards(q: string, type = "industry") {
   const params = new URLSearchParams({ q, type });
-  const res = await fetch(`${API_BASE}/api/v1/sector/search-stock?${params}`);
+  const res = await fetch(`${getApiBase()}/api/v1/sector/search-stock?${params}`);
   return res.json() as Promise<{ results: StockSearchResult[] }>;
 }

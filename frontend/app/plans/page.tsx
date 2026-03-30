@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import NavSidebar from "@/components/ui/NavSidebar";
 import TradePlanCard from "@/components/plans/TradePlanCard";
 import type { TradePlanData } from "@/lib/parseTradePlan";
-import { API_BASE } from "@/lib/api-base";
+import { getApiBase, apiFetch } from "@/lib/api-base";
 
 interface SavedPlan extends TradePlanData {
   id: string;
@@ -41,7 +41,7 @@ export default function PlansPage() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-      const resp = await fetch(`${API_BASE}/api/v1/agent/plans?${params}`, {
+      const resp = await apiFetch(`${getApiBase()}/api/v1/agent/plans?${params}`, {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -69,7 +69,7 @@ export default function PlansPage() {
   }, [fetchPlans]);
 
   const handleStatusChange = async (id: string, status: string) => {
-    await fetch(`${API_BASE}/api/v1/agent/plans/${id}`, {
+    await apiFetch(`${getApiBase()}/api/v1/agent/plans/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
@@ -79,7 +79,7 @@ export default function PlansPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm("确定删除这个交易计划？")) return;
-    await fetch(`${API_BASE}/api/v1/agent/plans/${id}`, { method: "DELETE" });
+    await apiFetch(`${getApiBase()}/api/v1/agent/plans/${id}`, { method: "DELETE" });
     fetchPlans();
   };
 

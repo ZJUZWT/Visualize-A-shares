@@ -6,9 +6,11 @@ from datetime import datetime
 from pathlib import Path
 
 import duckdb
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from loguru import logger
+
+from auth import get_current_user
 
 from config import settings, DB_PATH, DATA_DIR
 from engine.expert.agent import ExpertAgent
@@ -88,6 +90,20 @@ async def _init_db():
             )
         """)
         logger.info("expert.sessions + expert.messages 表初始化完成")
+
+        # ── Phase 2: 用户隔离 — 顶级资源表加 user_id ──
+        try:
+            con.execute("""
+                ALTER TABLE expert.sessions
+                ADD COLUMN IF NOT EXISTS user_id VARCHAR DEFAULT 'anonymous'
+            """)
+            try:
+                con.execute("CREATE INDEX idx_sessions_user_id ON expert.sessions(user_id)")
+            except Exception:
+                pass
+            logger.info("expert.sessions user_id 列已就绪")
+        except Exception as e:
+            logger.debug(f"expert.sessions user_id 迁移跳过: {e}")
     except Exception as e:
         logger.error(f"expert DB 初始化失败: {e}")
     finally:
@@ -178,8 +194,8 @@ def get_user_profile_tracker() -> UserProfileTracker | None:
 
 
 @router.get("/sessions")
-async def list_sessions(expert_type: str = Query(default=None)):
-    """列出所有 session（可按 expert_type 过滤）"""
+async def list_sessions(expert_type: str = Query(default=None), user_id: str = Depends(get_current_user)):
+    """列出所有 session（可按 expert_type 过滤，按 user_id 隔离）"""
     con = None
     try:
         con = _get_db()
@@ -187,14 +203,15 @@ async def list_sessions(expert_type: str = Query(default=None)):
             rows = con.execute(
                 "SELECT s.id, s.expert_type, s.title, s.created_at, s.updated_at, "
                 "(SELECT COUNT(*) FROM expert.messages m WHERE m.session_id = s.id) as msg_count "
-                "FROM expert.sessions s WHERE s.expert_type = ? ORDER BY s.updated_at DESC",
-                [expert_type],
+                "FROM expert.sessions s WHERE s.expert_type = ? AND s.user_id = ? ORDER BY s.updated_at DESC",
+                [expert_type, user_id],
             ).fetchall()
         else:
             rows = con.execute(
                 "SELECT s.id, s.expert_type, s.title, s.created_at, s.updated_at, "
                 "(SELECT COUNT(*) FROM expert.messages m WHERE m.session_id = s.id) as msg_count "
-                "FROM expert.sessions s ORDER BY s.updated_at DESC",
+                "FROM expert.sessions s WHERE s.user_id = ? ORDER BY s.updated_at DESC",
+                [user_id],
             ).fetchall()
         return [
             {"id": r[0], "expert_type": r[1], "title": r[2],
@@ -210,7 +227,7 @@ async def list_sessions(expert_type: str = Query(default=None)):
 
 
 @router.post("/sessions")
-async def create_session(req: SessionCreateRequest):
+async def create_session(req: SessionCreateRequest, user_id: str = Depends(get_current_user)):
     """创建新 session（接收 JSON body: {expert_type, title}）"""
     con = None
     sid = str(uuid.uuid4())
@@ -220,8 +237,8 @@ async def create_session(req: SessionCreateRequest):
         con = _get_db()
         now = datetime.now()
         con.execute(
-            "INSERT INTO expert.sessions (id, expert_type, title, created_at, updated_at) VALUES (?,?,?,?,?)",
-            [sid, expert_type, title, now, now],
+            "INSERT INTO expert.sessions (id, expert_type, title, created_at, updated_at, user_id) VALUES (?,?,?,?,?,?)",
+            [sid, expert_type, title, now, now, user_id],
         )
         return {"id": sid, "expert_type": expert_type, "title": title,
                 "created_at": now.isoformat(), "updated_at": now.isoformat(), "message_count": 0}
@@ -234,11 +251,16 @@ async def create_session(req: SessionCreateRequest):
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, user_id: str = Depends(get_current_user)):
     """删除 session 及其所有消息"""
     con = None
     try:
         con = _get_db()
+        # 校验归属
+        row = con.execute("SELECT user_id FROM expert.sessions WHERE id = ?", [session_id]).fetchone()
+        if row and row[0] != user_id:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="无权删除此会话")
         con.execute("DELETE FROM expert.messages WHERE session_id = ?", [session_id])
         con.execute("DELETE FROM expert.sessions WHERE id = ?", [session_id])
         return {"ok": True}
@@ -655,7 +677,7 @@ async def ws_notifications(websocket: WebSocket):
 
 
 @router.post("/tasks")
-async def create_task(req: ScheduledTaskRequest):
+async def create_task(req: ScheduledTaskRequest, user_id: str = Depends(get_current_user)):
     """创建定时任务"""
     if not _task_manager:
         return {"error": "任务调度器未初始化"}
@@ -669,8 +691,8 @@ async def create_task(req: ScheduledTaskRequest):
             session_id = str(uuid.uuid4())
             now = datetime.now()
             con.execute(
-                "INSERT INTO expert.sessions (id, expert_type, title, created_at, updated_at) VALUES (?,?,?,?,?)",
-                [session_id, req.expert_type, f"⏰ {req.name}", now, now],
+                "INSERT INTO expert.sessions (id, expert_type, title, created_at, updated_at, user_id) VALUES (?,?,?,?,?,?)",
+                [session_id, req.expert_type, f"⏰ {req.name}", now, now, user_id],
             )
         except Exception as e:
             logger.error(f"创建任务 session 失败: {e}")
@@ -685,16 +707,19 @@ async def create_task(req: ScheduledTaskRequest):
         message=req.message,
         cron_expr=req.cron_expr,
         session_id=session_id,
+        user_id=user_id,
     )
     return task
 
 
 @router.get("/tasks")
-async def list_tasks():
-    """列出所有定时任务"""
+async def list_tasks(user_id: str = Depends(get_current_user)):
+    """列出当前用户的定时任务"""
     if not _task_manager:
         return []
-    return _task_manager.list_tasks()
+    all_tasks = _task_manager.list_tasks()
+    # 按 user_id 过滤（兼容旧数据无 user_id 字段）
+    return [t for t in all_tasks if t.get("user_id", "anonymous") == user_id]
 
 
 @router.delete("/tasks/{task_id}")

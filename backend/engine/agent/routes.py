@@ -6,11 +6,12 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel
 from pydantic import ValidationError
 
+from auth import get_current_user
 from engine.agent.backtest import AgentBacktestEngine
 from engine.agent.chat_routes import create_agent_chat_router
 from engine.agent.db import AgentDB
@@ -116,26 +117,47 @@ def create_agent_router() -> APIRouter:
         db = AgentDB.get_instance()
         return AgentBacktestEngine(db=db, service=AgentService(db=db, validator=TradeValidator()))
 
+    async def _verify_portfolio_owner(portfolio_id: str, user_id: str) -> None:
+        """校验 portfolio 归属当前用户"""
+        db = AgentDB.get_instance()
+        rows = await db.execute_read(
+            "SELECT user_id FROM agent.portfolio_config WHERE id = ?", [portfolio_id]
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"Portfolio 不存在: {portfolio_id}")
+        if rows[0]["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="无权访问此 Portfolio")
+
     # ── Portfolio ──
 
     @router.post("/portfolio")
-    async def create_portfolio(req: CreatePortfolioRequest):
+    async def create_portfolio(req: CreatePortfolioRequest, user_id: str = Depends(get_current_user)):
         svc = _get_service()
         try:
             result = await svc.create_portfolio(
                 req.id, req.mode, req.initial_capital, req.sim_start_date
+            )
+            # 写入 user_id
+            db = AgentDB.get_instance()
+            await db.execute_write(
+                "UPDATE agent.portfolio_config SET user_id = ? WHERE id = ?",
+                [user_id, req.id],
             )
             return result
         except ValueError as e:
             raise HTTPException(status_code=409, detail=str(e))
 
     @router.get("/portfolio")
-    async def list_portfolios():
-        svc = _get_service()
-        return await svc.list_portfolios()
+    async def list_portfolios(user_id: str = Depends(get_current_user)):
+        db = AgentDB.get_instance()
+        return await db.execute_read(
+            "SELECT * FROM agent.portfolio_config WHERE user_id = ? ORDER BY created_at DESC",
+            [user_id],
+        )
 
     @router.get("/portfolio/{portfolio_id}")
-    async def get_portfolio(portfolio_id: str):
+    async def get_portfolio(portfolio_id: str, user_id: str = Depends(get_current_user)):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.get_portfolio(portfolio_id)
@@ -143,7 +165,8 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(e))
 
     @router.delete("/portfolio/{portfolio_id}")
-    async def delete_portfolio(portfolio_id: str):
+    async def delete_portfolio(portfolio_id: str, user_id: str = Depends(get_current_user)):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             await svc.delete_portfolio(portfolio_id)
@@ -157,12 +180,15 @@ def create_agent_router() -> APIRouter:
     async def get_positions(
         portfolio_id: str,
         status: str = Query("open", pattern="^(open|closed)$"),
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         return await svc.get_positions(portfolio_id, status)
 
     @router.get("/portfolio/{portfolio_id}/positions/{position_id}")
-    async def get_position(portfolio_id: str, position_id: str):
+    async def get_position(portfolio_id: str, position_id: str, user_id: str = Depends(get_current_user)):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.get_position(portfolio_id, position_id)
@@ -176,7 +202,9 @@ def create_agent_router() -> APIRouter:
         portfolio_id: str,
         position_id: str | None = None,
         limit: int = Query(50, ge=1, le=500),
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         return await svc.get_trades(portfolio_id, position_id, limit)
 
@@ -186,7 +214,9 @@ def create_agent_router() -> APIRouter:
         trade_input: TradeInput,
         position_id: str | None = None,
         trade_date: str | None = None,
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         if trade_date is None:
             trade_date = date.today().isoformat()
@@ -202,7 +232,9 @@ def create_agent_router() -> APIRouter:
     @router.post("/portfolio/{portfolio_id}/positions/{position_id}/strategy")
     async def create_strategy(
         portfolio_id: str, position_id: str, req: CreateStrategyRequest,
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.create_strategy(
@@ -212,7 +244,8 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(e))
 
     @router.get("/portfolio/{portfolio_id}/positions/{position_id}/strategy")
-    async def get_strategy(portfolio_id: str, position_id: str):
+    async def get_strategy(portfolio_id: str, position_id: str, user_id: str = Depends(get_current_user)):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.get_strategy(portfolio_id, position_id)
@@ -222,28 +255,56 @@ def create_agent_router() -> APIRouter:
     # ── Plans ──
 
     @router.post("/plans")
-    async def create_plan(req: TradePlanInput):
+    async def create_plan(req: TradePlanInput, user_id: str = Depends(get_current_user)):
         svc = _get_service()
-        return await svc.create_plan(req)
+        result = await svc.create_plan(req)
+        # 写入 user_id
+        db = AgentDB.get_instance()
+        await db.execute_write(
+            "UPDATE agent.trade_plans SET user_id = ? WHERE id = ?",
+            [user_id, result["id"]],
+        )
+        return result
 
     @router.get("/plans")
     async def list_plans(
         status: str | None = None,
         stock_code: str | None = None,
+        user_id: str = Depends(get_current_user),
     ):
-        svc = _get_service()
-        return await svc.list_plans(status, stock_code)
+        db = AgentDB.get_instance()
+        sql = "SELECT * FROM agent.trade_plans WHERE user_id = ?"
+        params: list = [user_id]
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        if stock_code:
+            sql += " AND stock_code = ?"
+            params.append(stock_code)
+        sql += " ORDER BY created_at DESC"
+        return await db.execute_read(sql, params)
 
     @router.get("/plans/{plan_id}")
-    async def get_plan(plan_id: str):
+    async def get_plan(plan_id: str, user_id: str = Depends(get_current_user)):
         svc = _get_service()
         try:
-            return await svc.get_plan(plan_id)
+            plan = await svc.get_plan(plan_id)
+            # 校验归属
+            if plan.get("user_id", "anonymous") != user_id:
+                raise HTTPException(status_code=403, detail="无权访问此交易计划")
+            return plan
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
     @router.patch("/plans/{plan_id}")
-    async def update_plan(plan_id: str, req: TradePlanUpdate):
+    async def update_plan(plan_id: str, req: TradePlanUpdate, user_id: str = Depends(get_current_user)):
+        # 先校验归属
+        db = AgentDB.get_instance()
+        rows = await db.execute_read("SELECT user_id FROM agent.trade_plans WHERE id = ?", [plan_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="交易计划不存在")
+        if rows[0].get("user_id", "anonymous") != user_id:
+            raise HTTPException(status_code=403, detail="无权修改此交易计划")
         svc = _get_service()
         try:
             return await svc.update_plan(plan_id, req.model_dump(exclude_none=True))
@@ -251,7 +312,13 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(e))
 
     @router.delete("/plans/{plan_id}")
-    async def delete_plan(plan_id: str):
+    async def delete_plan(plan_id: str, user_id: str = Depends(get_current_user)):
+        db = AgentDB.get_instance()
+        rows = await db.execute_read("SELECT user_id FROM agent.trade_plans WHERE id = ?", [plan_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="交易计划不存在")
+        if rows[0].get("user_id", "anonymous") != user_id:
+            raise HTTPException(status_code=403, detail="无权删除此交易计划")
         svc = _get_service()
         try:
             await svc.delete_plan(plan_id)
@@ -262,17 +329,43 @@ def create_agent_router() -> APIRouter:
     # ── Watchlist ──
 
     @router.post("/watchlist")
-    async def add_watchlist(req: WatchlistInput, portfolio_id: str | None = Query(None)):
+    async def add_watchlist(
+        req: WatchlistInput,
+        portfolio_id: str | None = Query(None),
+        user_id: str = Depends(get_current_user),
+    ):
         svc = _get_service()
-        return await svc.add_watchlist(req, portfolio_id=portfolio_id)
+        result = await svc.add_watchlist(req, portfolio_id=portfolio_id)
+        # 写入 user_id
+        db = AgentDB.get_instance()
+        await db.execute_write(
+            "UPDATE agent.watchlist SET user_id = ? WHERE id = ?",
+            [user_id, result["id"]],
+        )
+        return result
 
     @router.get("/watchlist")
-    async def list_watchlist(portfolio_id: str | None = Query(None)):
-        svc = _get_service()
-        return await svc.list_watchlist(portfolio_id=portfolio_id)
+    async def list_watchlist(
+        portfolio_id: str | None = Query(None),
+        user_id: str = Depends(get_current_user),
+    ):
+        db = AgentDB.get_instance()
+        sql = "SELECT * FROM agent.watchlist WHERE user_id = ?"
+        params: list = [user_id]
+        if portfolio_id:
+            sql += " AND portfolio_id = ?"
+            params.append(portfolio_id)
+        sql += " ORDER BY created_at DESC"
+        return await db.execute_read(sql, params)
 
     @router.delete("/watchlist/{item_id}")
-    async def remove_watchlist(item_id: str):
+    async def remove_watchlist(item_id: str, user_id: str = Depends(get_current_user)):
+        db = AgentDB.get_instance()
+        rows = await db.execute_read("SELECT user_id FROM agent.watchlist WHERE id = ?", [item_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="关注项不存在")
+        if rows[0].get("user_id", "anonymous") != user_id:
+            raise HTTPException(status_code=403, detail="无权删除此关注项")
         svc = _get_service()
         try:
             await svc.remove_watchlist(item_id)
@@ -281,10 +374,17 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(e))
 
     @router.post("/strategy-memos")
-    async def create_strategy_memo(req: StrategyMemoInput):
+    async def create_strategy_memo(req: StrategyMemoInput, user_id: str = Depends(get_current_user)):
         svc = _get_service()
         try:
-            return await svc.create_strategy_memo(req)
+            result = await svc.create_strategy_memo(req)
+            # 写入 user_id
+            db = AgentDB.get_instance()
+            await db.execute_write(
+                "UPDATE agent.strategy_memos SET user_id = ? WHERE id = ?",
+                [user_id, result["id"]],
+            )
+            return result
         except ValueError as e:
             raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
 
@@ -293,7 +393,9 @@ def create_agent_router() -> APIRouter:
         portfolio_id: str,
         status: str | None = Query(None),
         limit: int = Query(50, ge=1, le=200),
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.list_strategy_memos(portfolio_id, status=status, limit=limit)
@@ -301,7 +403,13 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
 
     @router.patch("/strategy-memos/{memo_id}")
-    async def update_strategy_memo(memo_id: str, req: dict):
+    async def update_strategy_memo(memo_id: str, req: dict, user_id: str = Depends(get_current_user)):
+        db = AgentDB.get_instance()
+        rows = await db.execute_read("SELECT user_id FROM agent.strategy_memos WHERE id = ?", [memo_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="策略备忘不存在")
+        if rows[0].get("user_id", "anonymous") != user_id:
+            raise HTTPException(status_code=403, detail="无权修改此策略备忘")
         svc = _get_service()
         try:
             return await svc.update_strategy_memo(
@@ -314,7 +422,13 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
 
     @router.delete("/strategy-memos/{memo_id}")
-    async def delete_strategy_memo(memo_id: str):
+    async def delete_strategy_memo(memo_id: str, user_id: str = Depends(get_current_user)):
+        db = AgentDB.get_instance()
+        rows = await db.execute_read("SELECT user_id FROM agent.strategy_memos WHERE id = ?", [memo_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="策略备忘不存在")
+        if rows[0].get("user_id", "anonymous") != user_id:
+            raise HTTPException(status_code=403, detail="无权删除此策略备忘")
         svc = _get_service()
         try:
             await svc.delete_strategy_memo(memo_id)
@@ -323,7 +437,8 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
 
     @router.post("/watch-signals")
-    async def create_watch_signal(req: CreateWatchSignalRequest):
+    async def create_watch_signal(req: CreateWatchSignalRequest, user_id: str = Depends(get_current_user)):
+        await _verify_portfolio_owner(req.portfolio_id, user_id)
         svc = _get_service()
         try:
             payload = WatchSignalInput(**req.model_dump(exclude={"portfolio_id"}))
@@ -335,7 +450,9 @@ def create_agent_router() -> APIRouter:
     async def list_watch_signals(
         portfolio_id: str,
         status: str | None = Query(None),
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.list_watch_signals(portfolio_id, status=status)
@@ -343,7 +460,7 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(e))
 
     @router.patch("/watch-signals/{signal_id}")
-    async def update_watch_signal(signal_id: str, req: dict):
+    async def update_watch_signal(signal_id: str, req: dict, user_id: str = Depends(get_current_user)):
         svc = _get_service()
         try:
             return await svc.update_watch_signal(signal_id, req)
@@ -356,7 +473,9 @@ def create_agent_router() -> APIRouter:
         run_id: str | None = None,
         stock_code: str | None = None,
         limit: int = Query(50, ge=1, le=200),
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.list_info_digests(
@@ -371,7 +490,8 @@ def create_agent_router() -> APIRouter:
     # ── Agent State ──
 
     @router.get("/state")
-    async def get_agent_state(portfolio_id: str):
+    async def get_agent_state(portfolio_id: str, user_id: str = Depends(get_current_user)):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.get_agent_state(portfolio_id)
@@ -379,7 +499,8 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(e))
 
     @router.patch("/state")
-    async def update_agent_state(portfolio_id: str, req: dict):
+    async def update_agent_state(portfolio_id: str, req: dict, user_id: str = Depends(get_current_user)):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         source_run_id = req.pop("source_run_id", None)
         try:
@@ -390,7 +511,8 @@ def create_agent_router() -> APIRouter:
     # ── Ledger Read Model ──
 
     @router.get("/ledger/overview")
-    async def get_ledger_overview(portfolio_id: str):
+    async def get_ledger_overview(portfolio_id: str, user_id: str = Depends(get_current_user)):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.get_ledger_overview(portfolio_id)
@@ -402,7 +524,9 @@ def create_agent_router() -> APIRouter:
         portfolio_id: str,
         start_date: str | None = None,
         end_date: str | None = None,
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.get_equity_timeline(
@@ -417,7 +541,9 @@ def create_agent_router() -> APIRouter:
     async def get_timeline_replay(
         portfolio_id: str,
         date: str,
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.get_replay_snapshot(portfolio_id, date)
@@ -428,7 +554,9 @@ def create_agent_router() -> APIRouter:
     async def get_timeline_replay_learning(
         portfolio_id: str,
         date: str,
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.get_replay_learning(portfolio_id, date)
@@ -442,7 +570,9 @@ def create_agent_router() -> APIRouter:
         portfolio_id: str,
         days: int = Query(30, ge=1, le=3650),
         type: str | None = Query(None, pattern="^(daily|weekly)$"),
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.list_review_records(portfolio_id, days=days, review_type=type)
@@ -453,7 +583,9 @@ def create_agent_router() -> APIRouter:
     async def get_review_stats(
         portfolio_id: str,
         days: int = Query(30, ge=1, le=3650),
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.get_review_stats(portfolio_id, days=days)
@@ -469,7 +601,10 @@ def create_agent_router() -> APIRouter:
     async def get_memories(
         status: str = Query("active", pattern="^(active|retired|all)$"),
         portfolio_id: str | None = Query(None),
+        user_id: str = Depends(get_current_user),
     ):
+        if portfolio_id:
+            await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         return await svc.list_memories(status=status, portfolio_id=portfolio_id)
 
@@ -536,7 +671,8 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
 
     @router.post("/backtest/run")
-    async def run_backtest(req: RunBacktestRequest):
+    async def run_backtest(req: RunBacktestRequest, user_id: str = Depends(get_current_user)):
+        await _verify_portfolio_owner(req.portfolio_id, user_id)
         engine = _get_backtest_engine()
         try:
             result = await engine.run_backtest(
@@ -572,7 +708,9 @@ def create_agent_router() -> APIRouter:
     async def get_strategy_history(
         portfolio_id: str,
         limit: int = Query(20, ge=1, le=200),
+        user_id: str = Depends(get_current_user),
     ):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         try:
             return await svc.list_strategy_history(portfolio_id, limit=limit)
@@ -583,25 +721,29 @@ def create_agent_router() -> APIRouter:
     async def get_reflections(
         portfolio_id: str | None = Query(None),
         limit: int = Query(20, ge=1, le=200),
+        user_id: str = Depends(get_current_user),
     ):
+        if portfolio_id:
+            await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         return await svc.list_reflections(limit=limit, portfolio_id=portfolio_id)
 
     # ── Brain ──
 
     @router.get("/brain/config")
-    async def get_brain_config():
+    async def get_brain_config(user_id: str = Depends(get_current_user)):
         svc = _get_service()
         return await svc.get_brain_config()
 
     @router.patch("/brain/config")
-    async def update_brain_config(req: dict):
+    async def update_brain_config(req: dict, user_id: str = Depends(get_current_user)):
         svc = _get_service()
         await svc.update_brain_config(req)
         return await svc.get_brain_config()
 
     @router.get("/brain/runs")
-    async def list_brain_runs(portfolio_id: str):
+    async def list_brain_runs(portfolio_id: str, user_id: str = Depends(get_current_user)):
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         return await svc.list_brain_runs(portfolio_id)
 
@@ -614,8 +756,9 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=str(e))
 
     @router.post("/brain/run")
-    async def trigger_brain_run(portfolio_id: str):
+    async def trigger_brain_run(portfolio_id: str, user_id: str = Depends(get_current_user)):
         """手动触发一次 Brain 运行"""
+        await _verify_portfolio_owner(portfolio_id, user_id)
         svc = _get_service()
         run_record = await svc.create_brain_run(portfolio_id, "manual")
         import asyncio

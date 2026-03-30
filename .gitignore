@@ -18,6 +18,7 @@ out/
 data/*.duckdb
 data/*.duckdb.wal
 data/*.duckdb.wal.corrupt-*
+data/.jwt_secret
 data/cache/
 data/chromadb/
 data/chromadb_rag/

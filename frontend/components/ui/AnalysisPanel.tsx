@@ -7,7 +7,7 @@
 import { useState, useCallback } from "react";
 import { useTerrainStore } from "@/stores/useTerrainStore";
 import { Brain, TrendingUp, TrendingDown, Minus, AlertTriangle, Loader2, CheckCircle2, XCircle, X } from "lucide-react";
-import { API_BASE } from "@/lib/api-base";
+import { getApiBase } from "@/lib/api-base";
 
 interface AgentStatus {
   agent: string;
@@ -104,7 +104,7 @@ export default function AnalysisPanel() {
     });
 
     try {
-      const resp = await fetch(`${API_BASE}/api/v1/analysis`, {
+      const resp = await fetch(`${getApiBase()}/api/v1/analysis`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

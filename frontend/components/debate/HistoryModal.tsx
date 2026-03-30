@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import type { DebateHistoryItem, DebateSignal } from "@/types/debate";
-import { API_BASE } from "@/lib/api-base";
+import { getApiBase, apiFetch } from "@/lib/api-base";
 
 const SIGNAL_COLOR: Record<DebateSignal, string> = {
   bullish: "#EF4444",
@@ -42,7 +42,7 @@ export default function HistoryModal({ onClose, onSelect, onNew }: HistoryModalP
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/v1/debate/history?limit=20`)
+    apiFetch(`${getApiBase()}/api/v1/debate/history?limit=20`)
       .then(r => r.json())
       .then(data => setItems(data))
       .catch(() => setItems([]))

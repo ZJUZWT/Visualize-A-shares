@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Toaster } from "sonner";
+import ConnectionGuard from "@/components/ConnectionGuard";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,7 +22,9 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
-        {children}
+        <ConnectionGuard>
+          {children}
+        </ConnectionGuard>
         <Toaster richColors position="top-right" />
       </body>
     </html>

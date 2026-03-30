@@ -56,6 +56,15 @@ class ScheduledTaskManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Phase 2: 用户隔离
+            con.execute("""
+                ALTER TABLE expert.scheduled_tasks
+                ADD COLUMN IF NOT EXISTS user_id VARCHAR DEFAULT 'anonymous'
+            """)
+            try:
+                con.execute("CREATE INDEX idx_scheduled_tasks_user_id ON expert.scheduled_tasks(user_id)")
+            except Exception:
+                pass
         finally:
             con.close()
 
@@ -69,6 +78,7 @@ class ScheduledTaskManager:
         cron_expr: str,
         persona: str = "rag",
         session_id: str | None = None,
+        user_id: str = "anonymous",
     ) -> dict:
         """创建定时任务"""
         task_id = str(uuid.uuid4())
@@ -77,10 +87,10 @@ class ScheduledTaskManager:
         try:
             con.execute(
                 """INSERT INTO expert.scheduled_tasks
-                   (id, name, expert_type, persona, message, cron_expr, session_id, status, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                   (id, name, expert_type, persona, message, cron_expr, session_id, status, created_at, user_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 [task_id, name, expert_type, persona, message, cron_expr,
-                 session_id, "active", now],
+                 session_id, "active", now, user_id],
             )
             task = {
                 "id": task_id, "name": name, "expert_type": expert_type,
@@ -88,6 +98,7 @@ class ScheduledTaskManager:
                 "session_id": session_id, "status": "active",
                 "last_run_at": None, "last_result_summary": None,
                 "next_run_at": None, "created_at": now.isoformat(),
+                "user_id": user_id,
             }
         finally:
             con.close()

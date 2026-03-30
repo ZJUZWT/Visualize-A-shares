@@ -1282,6 +1282,7 @@ async def _extract_judge_verdict(
 async def persist_debate(
     blackboard: Blackboard,
     judge_verdict: JudgeVerdict,
+    user_id: str = "anonymous",
 ) -> None:
     """持久化到 DuckDB shared.debate_records。失败只记录 warning，不抛出。"""
     try:
@@ -1302,19 +1303,29 @@ async def persist_debate(
                 completed_at        TIMESTAMP
             )
         """)
+        # Phase 2: 用户隔离
+        con.execute("""
+            ALTER TABLE shared.debate_records
+            ADD COLUMN IF NOT EXISTS user_id VARCHAR DEFAULT 'anonymous'
+        """)
+        try:
+            con.execute("CREATE INDEX idx_debate_records_user_id ON shared.debate_records(user_id)")
+        except Exception:
+            pass
 
         now = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
         con.execute("""
             INSERT INTO shared.debate_records
                 (id, target, max_rounds, rounds_completed, termination_reason,
-                 blackboard_json, judge_verdict_json, created_at, completed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 blackboard_json, judge_verdict_json, created_at, completed_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 rounds_completed   = excluded.rounds_completed,
                 termination_reason = excluded.termination_reason,
                 blackboard_json    = excluded.blackboard_json,
                 judge_verdict_json = excluded.judge_verdict_json,
-                completed_at       = excluded.completed_at
+                completed_at       = excluded.completed_at,
+                user_id            = excluded.user_id
         """, [
             blackboard.debate_id,
             blackboard.target,
@@ -1325,6 +1336,7 @@ async def persist_debate(
             judge_verdict.model_dump_json(),
             now,
             now,
+            user_id,
         ])
         logger.info(f"辩论记录已持久化: {blackboard.debate_id}")
     except Exception as e:
@@ -1476,6 +1488,7 @@ async def run_debate(
     memory: AgentMemory,
     data_fetcher: DataFetcher,
     judge=None,  # JudgeRAG | None
+    user_id: str = "anonymous",
 ) -> AsyncGenerator[dict, None]:
     """专家辩论主循环 — async generator，推送 SSE 事件
 
@@ -1721,4 +1734,4 @@ async def run_debate(
 
     # 8. 持久化
     if judge_verdict:
-        await persist_debate(blackboard, judge_verdict)
+        await persist_debate(blackboard, judge_verdict, user_id=user_id)

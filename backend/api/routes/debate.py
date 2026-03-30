@@ -4,10 +4,12 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
+
+from auth import get_current_user
 
 from engine.arena.schemas import Blackboard
 
@@ -23,7 +25,7 @@ class DebateRequest(BaseModel):
 
 
 @router.post("/debate")
-async def start_debate(req: DebateRequest):
+async def start_debate(req: DebateRequest, user_id: str = Depends(get_current_user)):
     """发起专家辩论，SSE 流式返回辩论过程
 
     SSE 事件类型:
@@ -71,6 +73,7 @@ async def start_debate(req: DebateRequest):
                 memory=orch._memory,
                 data_fetcher=orch._data,
                 judge=judge,
+                user_id=user_id,
             ):
                 yield f"event: {event['event']}\ndata: {json.dumps(event['data'], ensure_ascii=False, default=str)}\n\n"
         except Exception as e:
@@ -84,12 +87,12 @@ async def start_debate(req: DebateRequest):
     )
 
 
-from fastapi import Query
+from fastapi import Depends, Query
 
 
 @router.get("/debate/history")
-async def get_debate_history(limit: int = Query(default=20, ge=1, le=100)):
-    """返回最近 N 条辩论记录摘要"""
+async def get_debate_history(limit: int = Query(default=20, ge=1, le=100), user_id: str = Depends(get_current_user)):
+    """返回当前用户最近 N 条辩论记录摘要"""
     try:
         from engine.data import get_data_engine
         con = get_data_engine().store._conn
@@ -111,9 +114,10 @@ async def get_debate_history(limit: int = Query(default=20, ge=1, le=100)):
                 json_extract_string(judge_verdict_json, '$.signal') AS signal,
                 json_extract_string(judge_verdict_json, '$.debate_quality') AS debate_quality
             FROM shared.debate_records
+            WHERE user_id = ?
             ORDER BY created_at DESC
             LIMIT ?
-        """, [limit]).fetchall()
+        """, [user_id, limit]).fetchall()
 
         cols = ["debate_id", "target", "rounds_completed", "termination_reason",
                 "created_at", "signal", "debate_quality"]

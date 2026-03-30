@@ -11,7 +11,7 @@ import JudgeVerdictOverlay from "./JudgeVerdictOverlay";
 import StopConfirmModal from "./StopConfirmModal";
 import SummaryCard from "./SummaryCard";
 import type { PartialSummary } from "@/types/debate";
-import { API_BASE } from "@/lib/api-base";
+import { getApiBase, apiFetch } from "@/lib/api-base";
 
 export default function DebatePage() {
   const {
@@ -37,7 +37,7 @@ export default function DebatePage() {
     if (status !== "stopped" || !currentTarget) return;
     setPartialSummary(null);
     const { transcript } = useDebateStore.getState();
-    fetch(`${API_BASE}/api/v1/debate/summarize`, {
+    apiFetch(`${getApiBase()}/api/v1/debate/summarize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ target: currentTarget, transcript }),

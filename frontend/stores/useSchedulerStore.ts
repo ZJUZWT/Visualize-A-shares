@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { API_BASE, getWebSocketBase } from "@/lib/api-base";
+import { getApiBase, getWebSocketBase, apiFetch } from "@/lib/api-base";
 import { toast } from "sonner";
 import type { ScheduledTask, CreateTaskRequest } from "@/types/scheduler";
 
@@ -29,7 +29,7 @@ export const useSchedulerStore = create<SchedulerStore>((set, get) => ({
   fetchTasks: async () => {
     set({ loading: true });
     try {
-      const res = await fetch(`${API_BASE}/api/v1/expert/tasks`);
+      const res = await apiFetch(`${getApiBase()}/api/v1/expert/tasks`);
       if (!res.ok) {
         set({ tasks: [] });
         return;
@@ -45,7 +45,7 @@ export const useSchedulerStore = create<SchedulerStore>((set, get) => ({
 
   createTask: async (req) => {
     try {
-      const res = await fetch(`${API_BASE}/api/v1/expert/tasks`, {
+      const res = await apiFetch(`${getApiBase()}/api/v1/expert/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
@@ -70,7 +70,7 @@ export const useSchedulerStore = create<SchedulerStore>((set, get) => ({
 
   deleteTask: async (id) => {
     try {
-      await fetch(`${API_BASE}/api/v1/expert/tasks/${id}`, { method: "DELETE" });
+      await apiFetch(`${getApiBase()}/api/v1/expert/tasks/${id}`, { method: "DELETE" });
       toast.success("任务已删除");
       await get().fetchTasks();
     } catch (e) {
@@ -80,7 +80,7 @@ export const useSchedulerStore = create<SchedulerStore>((set, get) => ({
 
   pauseTask: async (id) => {
     try {
-      await fetch(`${API_BASE}/api/v1/expert/tasks/${id}/pause`, { method: "POST" });
+      await apiFetch(`${getApiBase()}/api/v1/expert/tasks/${id}/pause`, { method: "POST" });
       toast.info("任务已暂停");
       await get().fetchTasks();
     } catch (e) {
@@ -90,7 +90,7 @@ export const useSchedulerStore = create<SchedulerStore>((set, get) => ({
 
   resumeTask: async (id) => {
     try {
-      await fetch(`${API_BASE}/api/v1/expert/tasks/${id}/resume`, { method: "POST" });
+      await apiFetch(`${getApiBase()}/api/v1/expert/tasks/${id}/resume`, { method: "POST" });
       toast.info("任务已恢复");
       await get().fetchTasks();
     } catch (e) {
@@ -101,7 +101,7 @@ export const useSchedulerStore = create<SchedulerStore>((set, get) => ({
   runNow: async (id) => {
     toast.info("⏰ 正在执行任务...");
     try {
-      const res = await fetch(`${API_BASE}/api/v1/expert/tasks/${id}/run`, { method: "POST" });
+      const res = await apiFetch(`${getApiBase()}/api/v1/expert/tasks/${id}/run`, { method: "POST" });
       if (!res.ok) {
         toast.error(`执行失败: ${res.status}`);
         return;

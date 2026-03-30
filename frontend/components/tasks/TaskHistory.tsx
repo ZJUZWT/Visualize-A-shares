@@ -5,7 +5,7 @@ import { CRON_PRESETS, EXPERT_OPTIONS } from "@/types/scheduler";
 import type { ScheduledTask } from "@/types/scheduler";
 import { useSchedulerStore } from "@/stores/useSchedulerStore";
 import { Clock, Bot, MessageSquare, RotateCw } from "lucide-react";
-import { API_BASE } from "@/lib/api-base";
+import { getApiBase, apiFetch } from "@/lib/api-base";
 
 interface Props {
   task: ScheduledTask;
@@ -36,7 +36,7 @@ export function TaskHistory({ task }: Props) {
       return;
     }
     setLoading(true);
-    fetch(`${API_BASE}/api/v1/expert/sessions/${task.session_id}/messages`)
+    apiFetch(`${getApiBase()}/api/v1/expert/sessions/${task.session_id}/messages`)
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => setMessages(Array.isArray(data) ? data : []))
       .catch(() => setMessages([]))

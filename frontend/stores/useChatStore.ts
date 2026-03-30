@@ -9,10 +9,10 @@
  */
 
 import { create } from "zustand";
-import { API_BASE } from "@/lib/api-base";
+import { getApiBase, apiFetch, getAuthHeaders } from "@/lib/api-base";
 import { useTerrainStore } from "./useTerrainStore";
 
-const SSE_API_BASE = API_BASE;
+// SSE_API_BASE removed - using getApiBase() directly
 
 // ─── Types ────────────────────────────────────────
 
@@ -259,7 +259,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // 同步到后端
     try {
-      await fetch(`${SSE_API_BASE}/api/v1/chat/config`, {
+      await apiFetch(`${getApiBase()}/api/v1/chat/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -317,9 +317,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 提取当前地形上下文
       const context = extractTerrainContext();
 
-      const res = await fetch(`${SSE_API_BASE}/api/v1/chat`, {
+      const res = await fetch(`${getApiBase()}/api/v1/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({
           message: content,
           history,

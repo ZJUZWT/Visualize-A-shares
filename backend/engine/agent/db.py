@@ -563,6 +563,36 @@ class AgentDB:
             ADD COLUMN IF NOT EXISTS portfolio_id VARCHAR
         """)
 
+        # ── Phase 2: 用户隔离 — 顶级资源表加 user_id ──
+        for table in (
+            "portfolio_config",
+            "trade_plans",
+            "watchlist",
+            "brain_config",
+            "strategy_memos",
+        ):
+            try:
+                self._conn.execute(f"""
+                    ALTER TABLE agent.{table}
+                    ADD COLUMN IF NOT EXISTS user_id VARCHAR DEFAULT 'anonymous'
+                """)
+            except Exception:
+                pass
+        # 为 user_id 建索引（幂等，忽略已存在错误）
+        for table in (
+            "portfolio_config",
+            "trade_plans",
+            "watchlist",
+            "brain_config",
+            "strategy_memos",
+        ):
+            try:
+                self._conn.execute(
+                    f"CREATE INDEX idx_{table}_user_id ON agent.{table}(user_id)"
+                )
+            except Exception:
+                pass  # 索引已存在
+
     async def execute_read(self, sql: str, params=None) -> list[dict]:
         async with self._get_write_lock():
             return await asyncio.to_thread(self._sync_read, sql, params)
