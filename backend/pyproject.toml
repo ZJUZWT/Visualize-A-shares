@@ -43,6 +43,11 @@ dependencies = [
 
     # MCP Server
     "mcp>=1.26.0",
+
+    # 认证
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.0.0,<5",
+    "PyJWT>=2.8.0",
 ]
 
 [project.optional-dependencies]

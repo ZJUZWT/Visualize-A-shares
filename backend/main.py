@@ -18,9 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import time
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+from pydantic import BaseModel
 
 from config import settings
 from engine.data.routes import router as data_router
@@ -96,6 +97,13 @@ async def _startup() -> None:
         logger.info("   Main Agent DB: 已初始化")
     except Exception as e:
         logger.warning(f"⚠️ Main Agent DB 初始化失败: {e}")
+
+    # 初始化 users 表
+    try:
+        from auth import ensure_users_table
+        ensure_users_table()
+    except Exception as e:
+        logger.warning(f"⚠️ Users 表初始化失败: {e}")
 
     # 启动 Agent Brain 调度器
     try:
@@ -221,6 +229,101 @@ async def global_health():
         "version": "0.1.0",
         "stock_count": health.get("stock_count", 0),
     }
+
+
+# ─── 应用 Bootstrap ──────────────────────────────────
+@app.get("/api/v1/app/bootstrap")
+async def app_bootstrap():
+    """前端启动时调用 — 返回功能开关和服务器状态"""
+    from llm.config import llm_settings
+
+    return {
+        "version": "0.1.0",
+        "features": settings.features.model_dump(),
+        "llm_enabled": bool(llm_settings.api_key),
+    }
+
+
+# ─── 用户认证端点 ─────────────────────────────────────
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    display_name: str | None = None
+
+
+_USERNAME_RE = r'^[\w\u4e00-\u9fff]{1,32}$'
+
+
+@app.post("/api/v1/app/login")
+async def app_login(req: LoginRequest):
+    """用户登录 — 验证密码，返回 JWT"""
+    import re
+    from auth import get_user, verify_password, update_last_login, create_jwt
+
+    username = req.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+    if not re.match(_USERNAME_RE, username):
+        raise HTTPException(status_code=400, detail="无效的用户名格式（仅允许字母、数字、下划线、中文，1~32字符）")
+
+    user = get_user(username)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户不存在")
+
+    if not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="密码错误")
+
+    update_last_login(username)
+    token = create_jwt(username)
+
+    return {
+        "user_id": username,
+        "display_name": user["display_name"],
+        "token": token,
+    }
+
+
+@app.post("/api/v1/app/register")
+async def app_register(req: RegisterRequest):
+    """用户注册 — 创建用户，返回 JWT"""
+    import re
+    from auth import get_user, create_user, create_jwt, update_last_login
+
+    username = req.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="用户名不能为空")
+    if not re.match(_USERNAME_RE, username):
+        raise HTTPException(status_code=400, detail="无效的用户名格式（仅允许字母、数字、下划线、中文，1~32字符）")
+    if len(req.password) < 4:
+        raise HTTPException(status_code=400, detail="密码至少 4 位")
+
+    existing = get_user(username)
+    if existing:
+        raise HTTPException(status_code=409, detail="用户名已存在")
+
+    user = create_user(username, req.password, req.display_name)
+    update_last_login(username)
+    token = create_jwt(username)
+
+    return {
+        "user_id": user["user_id"],
+        "display_name": user["display_name"],
+        "token": token,
+    }
+
+
+@app.get("/api/v1/app/users")
+async def app_users():
+    """获取用户列表（不含密码）"""
+    from auth import list_users
+
+    return {"users": list_users()}
 
 
 # ─── 根路由 ────────────────────────────────────────────
