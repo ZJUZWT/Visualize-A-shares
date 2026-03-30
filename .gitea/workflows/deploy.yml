@@ -33,4 +33,4 @@ jobs:
           echo "⏳ 等待服务启动..."
           sleep 15
           curl -f http://localhost:8000/api/v1/health && echo "✅ 后端正常" || echo "❌ 后端异常"
-          curl -f http://localhost:3000 && echo "✅ 前端正常" || echo "❌ 前端异常"
+          curl -f http://localhost:8001 && echo "✅ 前端正常" || echo "❌ 前端异常"
