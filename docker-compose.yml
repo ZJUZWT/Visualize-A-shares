@@ -7,6 +7,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - model-cache:/root/.cache
     env_file:
       - .env
     environment:
@@ -35,3 +36,6 @@ services:
     environment:
       - NEXT_PUBLIC_API_BASE=
       - PORT=8001
+
+volumes:
+  model-cache:

@@ -20,13 +20,13 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.7}
-      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-2048}
     restart: unless-stopped
     expose:
       - "8000"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - model-cache:/root/.cache
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 15s
@@ -86,3 +86,6 @@ services:
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     command: tunnel --no-autoupdate run
+
+volumes:
+  model-cache:
