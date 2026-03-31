@@ -23,7 +23,8 @@ jobs:
         shell: powershell
         run: |
           cd ${{ secrets.DEPLOY_PATH }}
-          git pull origin main
+          git fetch --all
+          git reset --hard origin/main
           Write-Host "代码已更新"
 
       - name: Build and Deploy
