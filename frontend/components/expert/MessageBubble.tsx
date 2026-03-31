@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { ExpertMessage, ThinkingItem, ClarificationSelection, ClarificationOption } from "@/types/expert";
 import { useExpertStore } from "@/stores/useExpertStore";
 import { ThinkingPanel } from "./ThinkingPanel";
-import { AlertCircle, RotateCw, CheckCircle2, ChevronDown, ChevronRight, Check } from "lucide-react";
+import { AlertCircle, RotateCw, CheckCircle2, ChevronDown, ChevronRight, Check, PlayCircle, AlertTriangle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { splitByTradePlan, hasTradePlan } from "@/lib/parseTradePlan";
@@ -424,6 +424,35 @@ function MarkdownContent({ content }: { content: string }) {
   );
 }
 
+/** partial 消息提示条 + 续写按钮 */
+function PartialBanner({
+  messageId,
+  expertColor,
+}: {
+  messageId: string;
+  expertColor: string;
+}) {
+  const { resumeReply, statusMap, activeExpert } = useExpertStore();
+  const isResuming = statusMap[activeExpert] === "thinking";
+
+  return (
+    <div className="mt-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+      <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+      <span className="text-xs text-amber-600 dark:text-amber-400">回复未完成</span>
+      <button
+        onClick={() => !isResuming && resumeReply(messageId)}
+        disabled={isResuming}
+        className="ml-auto flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all
+                   border-[var(--border)] hover:border-[var(--border-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+        style={{ color: expertColor }}
+      >
+        <PlayCircle size={12} />
+        继续生成
+      </button>
+    </div>
+  );
+}
+
 export function MessageBubble({
   message,
   expertColor,
@@ -529,6 +558,14 @@ export function MessageBubble({
             />
           )}
         </div>
+
+        {/* partial 消息提示条 + 续写按钮 */}
+        {message.status === "partial" && !message.isStreaming && (
+          <PartialBanner
+            messageId={message.dbMessageId || message.id}
+            expertColor={expertColor}
+          />
+        )}
       </div>
     </div>
   );

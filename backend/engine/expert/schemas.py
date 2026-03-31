@@ -201,6 +201,12 @@ class ExpertChatRequest(BaseModel):
     enable_trade_plan: bool = False    # 是否启用策略卡片（交易计划）生成
 
 
+class ExpertResumeRequest(BaseModel):
+    """续写被中断的 expert 回复"""
+    session_id: str
+    message_id: str  # partial 消息的 DB id
+
+
 class SessionCreateRequest(BaseModel):
     """创建 session 请求体"""
     expert_type: str = "rag"

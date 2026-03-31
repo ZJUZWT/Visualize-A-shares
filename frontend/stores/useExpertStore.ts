@@ -87,6 +87,8 @@ interface ExpertStore {
   switchSession: (sessionId: string) => Promise<void>;
   /** 删除 session */
   deleteSession: (sessionId: string) => Promise<void>;
+  /** 续写被中断的 expert 回复 */
+  resumeReply: (messageId: string) => Promise<void>;
 }
 
 function newId() {
@@ -554,11 +556,14 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           role: string;
           content: string;
           thinking: ThinkingItem[];
+          status?: string;
         }> = await res.json();
         const expertMessages: ExpertMessage[] = messages.map((m) => ({
           id: m.id,
+          dbMessageId: m.id,
           role: m.role as "user" | "expert",
           content: m.content,
+          status: (m.role === "expert" ? (m.status as "completed" | "partial") || "completed" : undefined),
           thinking: (m.thinking || []).map((t: any) => {
             // 兼容旧数据：tool_call 缺少 status 字段时默认设为 "done"（历史数据肯定已完成）
             if (t.type === "tool_call" && !t.status) {
@@ -1056,6 +1061,156 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         },
         set,
         get,
+      });
+    }
+  },
+
+  resumeReply: async (messageId: string) => {
+    const { activeExpert, activeSessions } = get();
+    const expertType = activeExpert;
+    const sessionId = activeSessions[expertType];
+    if (!sessionId) return;
+
+    // 找到这条 partial 消息
+    const history = get().chatHistories[expertType] ?? [];
+    const msgIdx = history.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
+    if (msgIdx === -1) return;
+    const msg = history[msgIdx];
+    if (msg.role !== "expert" || msg.status !== "partial") return;
+
+    const dbMsgId = msg.dbMessageId;
+    if (!dbMsgId) return;
+
+    // 设置为 streaming 状态
+    setExpertStatus(set, expertType, "thinking");
+    set((s) => {
+      const h = [...(s.chatHistories[expertType] ?? [])];
+      if (h[msgIdx]) {
+        h[msgIdx] = { ...h[msgIdx], isStreaming: true };
+      }
+      return { chatHistories: { ...s.chatHistories, [expertType]: h } };
+    });
+
+    const ac = new AbortController();
+    _abortMap.set(expertType, ac);
+
+    try {
+      const res = await fetch(`${getSseBase()}/api/v1/expert/chat/resume`, {
+        method: "POST",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, message_id: dbMsgId }),
+        signal: ac.signal,
+      });
+
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let eventType = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (line.startsWith("event:")) {
+            eventType = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            const rawData = line.slice(5).trim();
+            if (!rawData) continue;
+            let data: Record<string, unknown>;
+            try {
+              data = JSON.parse(rawData);
+            } catch {
+              continue;
+            }
+
+            if (eventType === "resume_token") {
+              // 追加 token 到已有 content
+              set((s) => {
+                const h = [...(s.chatHistories[expertType] ?? [])];
+                const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
+                if (idx !== -1) {
+                  h[idx] = {
+                    ...h[idx],
+                    content: h[idx].content + ((data.token as string) ?? ""),
+                  };
+                }
+                return { chatHistories: { ...s.chatHistories, [expertType]: h } };
+              });
+            } else if (eventType === "resume_complete") {
+              // 续写完成
+              set((s) => {
+                const h = [...(s.chatHistories[expertType] ?? [])];
+                const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
+                if (idx !== -1) {
+                  h[idx] = {
+                    ...h[idx],
+                    isStreaming: false,
+                    status: "completed",
+                  };
+                }
+                return { chatHistories: { ...s.chatHistories, [expertType]: h } };
+              });
+            } else if (eventType === "error") {
+              set((s) => {
+                const h = [...(s.chatHistories[expertType] ?? [])];
+                const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
+                if (idx !== -1) {
+                  h[idx] = { ...h[idx], isStreaming: false };
+                }
+                return { chatHistories: { ...s.chatHistories, [expertType]: h } };
+              });
+            }
+          }
+        }
+      }
+
+      // 流结束后确保 isStreaming=false
+      set((s) => {
+        const h = [...(s.chatHistories[expertType] ?? [])];
+        const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
+        if (idx !== -1 && h[idx].isStreaming) {
+          h[idx] = { ...h[idx], isStreaming: false, status: "completed" };
+        }
+        return { chatHistories: { ...s.chatHistories, [expertType]: h } };
+      });
+    } catch (e: unknown) {
+      if ((e as Error).name === "AbortError") {
+        set((s) => {
+          const h = [...(s.chatHistories[expertType] ?? [])];
+          const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
+          if (idx !== -1) {
+            h[idx] = { ...h[idx], isStreaming: false };
+          }
+          return { chatHistories: { ...s.chatHistories, [expertType]: h } };
+        });
+        return;
+      }
+      console.error("resumeReply error:", (e as Error).message);
+      set((s) => {
+        const h = [...(s.chatHistories[expertType] ?? [])];
+        const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
+        if (idx !== -1) {
+          h[idx] = { ...h[idx], isStreaming: false };
+        }
+        return { chatHistories: { ...s.chatHistories, [expertType]: h } };
+      });
+    } finally {
+      _abortMap.delete(expertType);
+      set((s) => {
+        if (s.statusMap[expertType] !== "error") {
+          const newStatusMap = { ...s.statusMap, [expertType]: "idle" as ExpertStatus };
+          return {
+            statusMap: newStatusMap,
+            ...(s.activeExpert === expertType ? { status: "idle" as ExpertStatus } : {}),
+          };
+        }
+        return s;
       });
     }
   },

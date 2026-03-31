@@ -164,6 +164,10 @@ export interface ExpertMessage {
   isStreaming: boolean;
   /** 用户消息的发送状态（仅 role=user 时有意义） */
   sendStatus?: "pending" | "sent" | "failed";
+  /** 消息完成状态（仅 role=expert 时有意义）— partial 表示流中断未完成 */
+  status?: "completed" | "partial";
+  /** DB 中的消息 ID（用于 resume 续写） */
+  dbMessageId?: string;
 }
 
 export type ExpertStatus = "idle" | "clarifying" | "thinking" | "error";

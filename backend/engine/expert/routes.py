@@ -15,7 +15,7 @@ from auth import get_current_user
 from config import settings, DB_PATH, DATA_DIR
 from engine.expert.agent import ExpertAgent
 from engine.expert.engine_experts import EngineExpert, ExpertType, get_expert_profiles
-from engine.expert.schemas import ExpertChatRequest, SessionCreateRequest, ScheduledTaskRequest, ClarifyRequest
+from engine.expert.schemas import ExpertChatRequest, ExpertResumeRequest, SessionCreateRequest, ScheduledTaskRequest, ClarifyRequest
 from engine.expert.scheduler import ScheduledTaskManager
 from engine.expert.tools import ExpertTools
 from engine.expert.tool_tracker import ToolOutcomeTracker
@@ -72,9 +72,16 @@ async def _init_db():
                 role VARCHAR NOT NULL,
                 content VARCHAR NOT NULL DEFAULT '',
                 thinking JSON,
+                status VARCHAR DEFAULT 'completed',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # 迁移：为已有表添加 status 列
+        try:
+            con.execute("ALTER TABLE expert.messages ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'completed'")
+        except Exception:
+            pass
 
         # 保留旧表兼容
         con.execute("""
@@ -293,19 +300,20 @@ async def update_session_title(session_id: str, title: str = ""):
 
 @router.get("/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str):
-    """获取指定 session 的所有消息（按时间正序）"""
+    """获取指定 session 的所有消息（按时间正序），含 status 字段"""
     con = None
     try:
         con = _get_db()
         rows = con.execute(
-            "SELECT id, role, content, thinking, created_at "
+            "SELECT id, role, content, thinking, status, created_at "
             "FROM expert.messages WHERE session_id = ? ORDER BY created_at ASC",
             [session_id],
         ).fetchall()
         return [
             {"id": r[0], "role": r[1], "content": r[2],
              "thinking": json.loads(r[3]) if r[3] else [],
-             "created_at": str(r[4])}
+             "status": r[4] or "completed",
+             "created_at": str(r[5])}
             for r in rows
         ]
     except Exception as e:
@@ -349,25 +357,46 @@ def _get_session_history(session_id: str, limit: int = MAX_CONTEXT_TURNS) -> lis
             con.close()
 
 
-def _save_message(session_id: str, role: str, content: str, thinking: list | None = None):
-    """将消息写入 messages 表"""
+def _save_message(session_id: str, role: str, content: str, thinking: list | None = None, status: str = "completed") -> str | None:
+    """将消息写入 messages 表，返回消息 ID"""
     if not session_id:
-        return
+        return None
     con = None
+    msg_id = str(uuid.uuid4())
     try:
         con = _get_db()
         con.execute(
-            "INSERT INTO expert.messages (id, session_id, role, content, thinking, created_at) "
-            "VALUES (?,?,?,?,?,?)",
-            [str(uuid.uuid4()), session_id, role, content,
-             json.dumps(thinking or [], ensure_ascii=False), datetime.now()],
+            "INSERT INTO expert.messages (id, session_id, role, content, thinking, status, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            [msg_id, session_id, role, content,
+             json.dumps(thinking or [], ensure_ascii=False), status, datetime.now()],
         )
         con.execute(
             "UPDATE expert.sessions SET updated_at = ? WHERE id = ?",
             [datetime.now(), session_id],
         )
+        return msg_id
     except Exception as e:
         logger.warning(f"消息写入失败: {e}")
+        return None
+    finally:
+        if con:
+            con.close()
+
+
+def _update_message(message_id: str, content: str, thinking: list | None = None, status: str = "completed"):
+    """更新已有消息的 content、thinking 和 status"""
+    if not message_id:
+        return
+    con = None
+    try:
+        con = _get_db()
+        con.execute(
+            "UPDATE expert.messages SET content = ?, thinking = ?, status = ? WHERE id = ?",
+            [content, json.dumps(thinking or [], ensure_ascii=False), status, message_id],
+        )
+    except Exception as e:
+        logger.warning(f"消息更新失败: {e}")
     finally:
         if con:
             con.close()
@@ -439,7 +468,9 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
                 enable_trade_plan=req.enable_trade_plan,
             ):
                 evt_type = event["event"]
-                if evt_type == "reply_complete":
+                if evt_type == "reply_token":
+                    full_reply += event["data"].get("token", "")
+                elif evt_type == "reply_complete":
                     full_reply = event["data"].get("full_text", "")
                 elif evt_type == "tool_call":
                     tools_used.append(event["data"].get("action", ""))
@@ -472,12 +503,16 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"{expert_type} expert chat 错误: {e}")
+            # 流中断时保存部分消息
+            if session_id and full_reply.strip():
+                _save_message(session_id, "expert", full_reply, thinking_items, status="partial")
+                logger.info(f"💾 流中断，已保存 partial 消息 (session={session_id}, len={len(full_reply)})")
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
         # 存入 session 消息（用户消息已由前端 save-user 接口写入，此处只存 expert 回复）
         if session_id:
-            _save_message(session_id, "expert", full_reply, thinking_items)
+            _save_message(session_id, "expert", full_reply, thinking_items, status="completed")
             _auto_title(session_id, req.message)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -531,7 +566,9 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
                 enable_trade_plan=req.enable_trade_plan,
             ):
                 evt_type = event["event"]
-                if evt_type == "reply_complete":
+                if evt_type == "reply_token":
+                    full_reply += event["data"].get("token", "")
+                elif evt_type == "reply_complete":
                     full_reply = event["data"].get("full_text", "")
                 elif evt_type == "tool_call":
                     tools_used.append(event["data"].get("action", ""))
@@ -563,12 +600,16 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"expert chat 错误: {e}")
+            # 流中断时保存部分消息
+            if session_id and full_reply.strip():
+                _save_message(session_id, "expert", full_reply, thinking_items, status="partial")
+                logger.info(f"💾 流中断，已保存 partial 消息 (session={session_id}, len={len(full_reply)})")
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
         # 存入 session 消息（用户消息已由前端 save-user 接口写入，此处只存 expert 回复）
         if session_id:
-            _save_message(session_id, "expert", full_reply, thinking_items)
+            _save_message(session_id, "expert", full_reply, thinking_items, status="completed")
             _auto_title(session_id, req.message)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -576,6 +617,104 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
 
 async def _error_stream(message: str):
     yield f"event: error\ndata: {json.dumps({'message': message}, ensure_ascii=False)}\n\n"
+
+
+@router.post("/chat/resume")
+async def expert_chat_resume(req: ExpertResumeRequest):
+    """续写被中断的 expert 回复（SSE 流式）"""
+    con = None
+    try:
+        con = _get_db()
+        row = con.execute(
+            "SELECT id, session_id, role, content, thinking, status "
+            "FROM expert.messages WHERE id = ? AND session_id = ?",
+            [req.message_id, req.session_id],
+        ).fetchone()
+    except Exception as e:
+        logger.error(f"resume 查询消息失败: {e}")
+        return StreamingResponse(
+            _error_stream(f"查询消息失败: {e}"),
+            media_type="text/event-stream",
+        )
+    finally:
+        if con:
+            con.close()
+
+    if not row:
+        return StreamingResponse(
+            _error_stream("消息不存在"),
+            media_type="text/event-stream",
+        )
+
+    msg_id, session_id, role, partial_content, thinking_json, status = row
+    if status != "partial":
+        return StreamingResponse(
+            _error_stream(f"消息状态为 {status}，无需续写"),
+            media_type="text/event-stream",
+        )
+
+    thinking_items = json.loads(thinking_json) if thinking_json else []
+
+    # 获取该 partial 消息之前的所有历史
+    history = _get_session_history(session_id)
+
+    # 找到对应的用户原始问题（partial 消息前最后一条 user 消息）
+    user_message = ""
+    for h in reversed(history):
+        if h["role"] == "user":
+            user_message = h["content"]
+            break
+
+    if not user_message:
+        return StreamingResponse(
+            _error_stream("未找到对应的用户问题"),
+            media_type="text/event-stream",
+        )
+
+    # 判断 session 的 expert_type 以决定用哪个 persona
+    persona = "rag"
+    try:
+        con2 = _get_db()
+        session_row = con2.execute(
+            "SELECT expert_type FROM expert.sessions WHERE id = ?", [session_id]
+        ).fetchone()
+        if session_row and session_row[0] == "short_term":
+            persona = "short_term"
+        con2.close()
+    except Exception:
+        pass
+
+    agent = get_expert_agent()
+
+    async def event_stream():
+        continuation = ""
+        try:
+            async for event in agent.resume_reply(
+                message=user_message,
+                partial_content=partial_content,
+                history=history,
+                persona=persona,
+            ):
+                evt_type = event["event"]
+                if evt_type == "resume_token":
+                    continuation += event["data"].get("token", "")
+                elif evt_type == "resume_complete":
+                    continuation_text = event["data"].get("continuation", "")
+                    # 合并: 原有 partial + 续写部分
+                    full_content = partial_content + continuation_text
+                    _update_message(msg_id, full_content, thinking_items, status="completed")
+                    logger.info(f"✅ 续写完成 (msg={msg_id}, partial_len={len(partial_content)}, continuation_len={len(continuation_text)})")
+                yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.error(f"resume stream 错误: {e}")
+            # 续写也中断了：更新 partial 内容（追加已续写部分）
+            if continuation.strip():
+                full_content = partial_content + continuation
+                _update_message(msg_id, full_content, thinking_items, status="partial")
+                logger.info(f"💾 续写中断，已更新 partial 消息 (msg={msg_id}, added_len={len(continuation)})")
+            yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/graph")

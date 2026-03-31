@@ -485,8 +485,26 @@ class ExpertAgent:
                 "你可以把范围选择和分析维度混合在同一组选项中，让用户同时表达偏好。\n"
             )
 
+        # ── 对话历史上下文（让 LLM 理解用户的追问/纠正语境）──
+        history_context = ""
+        if conv_history and len(conv_history) > 0:
+            history_lines = []
+            for h in conv_history[-6:]:  # 最近 6 条消息（3 轮对话）
+                role_name = "👤 用户" if h["role"] == "user" else "🤖 AI"
+                history_lines.append(f"{role_name}: {h['content']}")
+            if history_lines:
+                history_context = (
+                    "\n\n【对话背景 — 之前的交互记录】\n"
+                    + "\n".join(history_lines)
+                    + "\n\n"
+                    "请结合上述对话背景理解用户当前这条消息的意图。"
+                    "如果用户在纠正之前的分析结果、追问细节、或基于之前的讨论继续提问，"
+                    "你应该 **直接设置 should_clarify=false**，不需要再次澄清，让系统直接进入分析。\n"
+                )
+
         prompt = (
             f"{role_desc}。用户向你提问：\n\n「{clean_message}」\n"
+            f"{history_context}"
             f"{prev_context}"
             f"{open_reco_hint}"
             f"{force_end_hint}\n"
@@ -495,10 +513,13 @@ class ExpertAgent:
             "每个选项要贴合用户的具体问题（不要千篇一律的通用选项），让用户选择最关心的维度。\n\n"
             "【关键规则 — 必须遵守】\n"
             "- 你的输出必须是纯 JSON 格式，不要在 JSON 外面写任何自然语言\n"
-            "- options 数组必须包含 3-4 个选项，绝对不能为空\n"
+            "- 如果用户是在**纠正之前的分析**、**追问细节**、或**基于之前讨论继续**，"
+            "设置 should_clarify=false，不需要再次选择方向\n"
+            "- 如果需要澄清，options 数组必须包含 3-4 个选项，绝对不能为空\n"
             "- 即使你想问用户一个问题，也必须通过 question_summary + options 结构来承载，不能只返回一句问话\n"
             "- question_summary 里可以包含问句，但必须同时提供 options 让用户选择\n\n"
             "字段说明：\n"
+            "0. should_clarify: 是否需要澄清（true/false）。如果用户在追问、纠正、或意图已经很明确，设为 false\n"
             "1. question_summary: 用一句话重述当前轮次要确认的问题核心（自然、口语化）\n"
             "2. multi_select: 是否允许用户多选（true/false）。**默认应该设为 true**，除非选项之间是严格互斥的（如「短线 vs 长线」只能选一个）。大多数分析维度之间不冲突，用户可能同时关心多个维度\n"
             "3. options: 3-4个选项，每个包含 id(英文标识)、label(A/B/C/D)、title(8字以内)、description(一句话说明)、focus(分析关键词)\n"
@@ -510,6 +531,7 @@ class ExpertAgent:
             "严格返回 JSON 格式（不要有任何其他文字）：\n"
             "```json\n"
             "{\n"
+            '  "should_clarify": true,\n'
             '  "question_summary": "...",\n'
             '  "multi_select": true,\n'
             '  "options": [\n'
@@ -566,6 +588,25 @@ class ExpertAgent:
                 has_exclusive_option = any(opt.get("sub_choices") for opt in parsed.get("options", []))
                 if not has_exclusive_option:
                     multi_select = True
+
+                # 尊重 LLM 的 should_clarify 判断（追问/纠正场景下 LLM 可能返回 false）
+                should_clarify = parsed.get("should_clarify", True)
+                if not should_clarify:
+                    logger.info(f"LLM 判断无需澄清（用户可能在追问/纠正），跳过 clarification")
+                    return ClarificationOutput(
+                        should_clarify=False,
+                        question_summary=parsed.get("question_summary", clean_message[:60]),
+                        options=[],
+                        reasoning=parsed.get("reasoning", "用户意图明确，无需澄清"),
+                        skip_option=ClarificationOption(
+                            id="skip", label="S", title="跳过，直接分析",
+                            description="不做澄清，直接进入完整分析。", focus="完整分析",
+                        ),
+                        needs_more=False,
+                        round=current_round,
+                        max_rounds=max_rounds,
+                    )
+
                 if options:
                     return ClarificationOutput(
                         should_clarify=True,
@@ -1860,6 +1901,68 @@ class ExpertAgent:
         except Exception as e:
             logger.error(f"reply_stream 失败: {e}")
             yield f"回复生成失败: {e}", f"回复生成失败: {e}"
+
+    async def resume_reply(
+        self,
+        message: str,
+        partial_content: str,
+        history: list[dict] | None = None,
+        persona: str = "rag",
+    ) -> AsyncGenerator[dict, None]:
+        """续写被中断的回复 — 跳过 think+工具调用，直接让 LLM 续写已有部分
+
+        将 partial_content 作为 assistant 的未完成回复注入上下文，
+        LLM 看到后自然续写剩余部分。
+
+        Yields:
+            dict: SSE 事件 {"event": "resume_token"/"resume_complete", "data": {...}}
+        """
+        from llm.providers import ChatMessage
+
+        llm = self._get_quality_llm()
+        if not llm:
+            yield {"event": "error", "data": {"message": "LLM 未配置"}}
+            return
+
+        # 构建 system prompt（简洁版，不走完整工具链）
+        system = build_reply_system(
+            persona,
+            current_date=get_current_date_context(),
+        )
+        system += (
+            "\n\n## 续写任务\n"
+            "你之前的回复因为网络中断而不完整。现在请从断点处继续完成回复。\n"
+            "不要重复已有内容，直接从中断处续写。\n"
+            "保持与已有内容一致的风格、格式和分析深度。\n"
+        )
+
+        # 构建消息列表
+        messages = [ChatMessage("system", system)]
+        for h in (history or []):
+            role = "assistant" if h["role"] == "expert" else h["role"]
+            messages.append(ChatMessage(role, h.get("content", "")))
+        messages.append(ChatMessage("user", message))
+        # 注入 assistant 的未完成回复（LLM 会从此处续写）
+        messages.append(ChatMessage("assistant", partial_content))
+
+        # 上下文窗口保护
+        msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
+        msg_dicts = self._context_guard.guard_messages(msg_dicts)
+        messages = [ChatMessage(m["role"], m["content"]) for m in msg_dicts]
+
+        accumulated = ""
+        try:
+            async for token in llm.chat_stream(messages):
+                # 简单过滤 <think> 标签
+                if "<think>" in token or "</think>" in token:
+                    continue
+                accumulated += token
+                yield {"event": "resume_token", "data": {"token": token}}
+
+            yield {"event": "resume_complete", "data": {"continuation": accumulated}}
+        except Exception as e:
+            logger.error(f"resume_reply 失败: {e}")
+            yield {"event": "error", "data": {"message": f"续写失败: {e}"}}
 
     async def _belief_update(
         self,
