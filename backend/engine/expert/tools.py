@@ -26,9 +26,39 @@ class ExpertTools:
         self.llm_engine = llm_engine
         self.api_base = api_base
 
+    # ── 已知 action 白名单（不在里面的 fallback 到引擎专家）──
+    _KNOWN_ACTIONS: dict[str, set[str]] = {
+        "data": {"get_current_date", "get_daily_history", "search_asset", "get_asset_profile",
+                 "get_asset_quote", "get_asset_daily_history", "get_company_profile", "search_stock"},
+        "quant": {"get_factor_scores", "get_technical_indicators"},
+        "cluster": {"get_terrain_data", "search_stocks"},
+        "industry": {"bridge_market_assets"},
+        "debate": {"start"},
+    }
+    # 可以 fallback 到引擎专家的 engine 列表
+    _EXPERT_FALLBACK_ENGINES = {"data", "quant", "info", "industry", "cluster"}
+
     async def execute(self, engine: str, action: str, params: dict) -> str:
-        """异步执行工具调用，返回摘要字符串"""
+        """异步执行工具调用，返回摘要字符串
+
+        兜底策略：任何未知的 engine 或 action 都 fallback 到对应引擎专家，
+        彻底杜绝 LLM 幻觉工具调用导致的 "Unknown xxx" 错误。
+        """
         logger.debug(f"执行工具调用: {engine}.{action} with {params}")
+
+        # ── 前置检查：未知 engine/action → fallback 到引擎专家 ──
+        known = self._KNOWN_ACTIONS.get(engine)
+        if engine != "expert" and (known is None or action not in known):
+            # 确定 fallback 目标
+            fallback_expert = engine if engine in self._EXPERT_FALLBACK_ENGINES else None
+            if fallback_expert:
+                logger.info(f"🔧 工具 fallback: {engine}.{action} → expert.{fallback_expert}")
+                params.setdefault("question", params.get("query", f"{engine}.{action}"))
+                return await self._ask_expert(fallback_expert, params)
+            else:
+                logger.warning(f"未知引擎且无法 fallback: {engine}.{action}")
+                return json.dumps({"error": f"未知引擎: {engine}"}, ensure_ascii=False)
+
         try:
             if engine == "data":
                 result = await asyncio.to_thread(self._call_data_engine, action, params)
@@ -37,21 +67,16 @@ class ExpertTools:
             elif engine == "cluster":
                 result = await asyncio.to_thread(self._call_cluster_engine, action, params)
             elif engine == "industry":
-                if action == "bridge_market_assets":
-                    result = await asyncio.to_thread(self._call_bridge_market_assets, params)
-                else:
-                    result = {"error": f"Unknown industry action: {action}"}
+                result = await asyncio.to_thread(self._call_bridge_market_assets, params)
             elif engine == "expert":
-                # 调用引擎专家（聚合者模式）
                 return await self._ask_expert(action, params)
             elif engine == "debate":
-                if action == "start":
-                    return await self._run_debate(
-                        code=params.get("code", ""),
-                        max_rounds=params.get("max_rounds", 2),
-                    )
-                result = {"error": f"Unknown debate action: {action}"}
+                return await self._run_debate(
+                    code=params.get("code", ""),
+                    max_rounds=params.get("max_rounds", 2),
+                )
             else:
+                # 不应到达这里，但以防万一
                 result = {"error": f"Unknown engine: {engine}"}
 
             summary = json.dumps(result, ensure_ascii=False, default=str)
