@@ -152,6 +152,27 @@ class ExpertAgent:
         self._graph.save_sync()
         logger.info(f"初始信念已写入图谱: {count} 条 (投资顾问 {len(INITIAL_BELIEFS)} + 短线专家 {len(SHORT_TERM_BELIEFS)})")
 
+    @staticmethod
+    def _is_open_recommendation(query: str) -> bool:
+        """检测是否为开放式推荐问题（没有指定具体股票，只问推荐/选股/买什么）
+
+        用于：
+        1. 图谱召回时过滤历史股票节点，避免锚定效应
+        2. 澄清环节增加"范围偏好"引导
+        """
+        # 先检测是否有具体股票（6位代码或常见股票名）
+        has_specific_stock = bool(re.search(r'\d{6}', query))
+        if has_specific_stock:
+            return False
+        # 开放式推荐关键词
+        open_patterns = [
+            r"推荐", r"选股", r"选.*股", r"有什么好", r"买什么", r"配置",
+            r"看好.*什么", r"投资.*建议", r"哪些.*值得", r"好股", r"有什么机会",
+            r"什么.*值得买", r"什么.*可以买", r"有没有.*推荐", r"帮我选",
+            r"今天.*做什么", r"有什么.*题材", r"什么.*机会",
+        ]
+        return any(re.search(p, query) for p in open_patterns)
+
     async def recall_and_think(
         self,
         query: str,
@@ -165,6 +186,19 @@ class ExpertAgent:
         t0 = time.monotonic()
         agent_role = "short_term" if persona == "short_term" else "expert"
         recalled_nodes = self._graph.recall(query, persona=persona)
+
+        # ── 开放式推荐：过滤历史股票节点，避免锚定效应 ──
+        # 保留 belief/sector/event 等方向性节点，去掉具体 stock 节点
+        # 这样 LLM 在 think 时不会被之前聊过的个股锚定，能真正发散扫描
+        if self._is_open_recommendation(query):
+            before_count = len(recalled_nodes)
+            recalled_nodes = [
+                n for n in recalled_nodes
+                if n.get("type") != "stock"
+            ]
+            filtered = before_count - len(recalled_nodes)
+            if filtered > 0:
+                logger.info(f"🔓 开放式推荐：过滤 {filtered} 个历史股票节点，避免锚定")
         memories: list[dict] = []
         if self._memory:
             try:
@@ -438,21 +472,35 @@ class ExpertAgent:
                 "不要为了多轮而多轮——如果一轮就够了，直接 needs_more=false。\n"
             )
 
+        # ── 开放式推荐：第1轮时引导 LLM 生成"范围偏好"选项 ──
+        open_reco_hint = ""
+        if current_round == 1 and self._is_open_recommendation(clean_message):
+            open_reco_hint = (
+                "\n\n【特别注意 — 开放式推荐问题】\n"
+                "用户没有指定具体股票，而是想要推荐/选股。你的选项中应该包含**范围维度**的选择，例如：\n"
+                "- 全市场发散扫描（不限行业，从量价、资金、题材等多维度挖掘）\n"
+                "- 聚焦某个行业/板块（如新能源、半导体、消费等）\n"
+                "- 某种投资风格（如低估值价值股、高成长股、高股息防御股等）\n"
+                "不要默认只扫描之前聊过的股票，用户通常希望发现新的机会。\n"
+                "你可以把范围选择和分析维度混合在同一组选项中，让用户同时表达偏好。\n"
+            )
+
         prompt = (
             f"{role_desc}。用户向你提问：\n\n「{clean_message}」\n"
             f"{prev_context}"
+            f"{open_reco_hint}"
             f"{force_end_hint}\n"
             f"当前是第 {current_round} 轮澄清（最多 {max_rounds} 轮）。\n\n"
             "请你根据问题内容和之前的选择，生成 3-4 个分析方向选项，帮助用户进一步聚焦。\n"
             "每个选项要贴合用户的具体问题（不要千篇一律的通用选项），让用户选择最关心的维度。\n\n"
             "【关键规则 — 必须遵守】\n"
-            "- 你的输出必须是纯 JSON，不要包含任何自然语言、问句或解释\n"
+            "- 你的输出必须是纯 JSON 格式，不要在 JSON 外面写任何自然语言\n"
             "- options 数组必须包含 3-4 个选项，绝对不能为空\n"
-            "- 不要输出类似「你想了解哪方面？」这种问句作为回复，分析方向由 options 字段承载\n"
-            "- question_summary 是对用户问题的重述，不是你对用户的提问\n\n"
+            "- 即使你想问用户一个问题，也必须通过 question_summary + options 结构来承载，不能只返回一句问话\n"
+            "- question_summary 里可以包含问句，但必须同时提供 options 让用户选择\n\n"
             "字段说明：\n"
             "1. question_summary: 用一句话重述当前轮次要确认的问题核心（自然、口语化）\n"
-            "2. multi_select: 是否允许用户多选（true/false）。如果各选项之间不冲突、用户可能同时关心多个维度，设为 true\n"
+            "2. multi_select: 是否允许用户多选（true/false）。**默认应该设为 true**，除非选项之间是严格互斥的（如「短线 vs 长线」只能选一个）。大多数分析维度之间不冲突，用户可能同时关心多个维度\n"
             "3. options: 3-4个选项，每个包含 id(英文标识)、label(A/B/C/D)、title(8字以内)、description(一句话说明)、focus(分析关键词)\n"
             "   - 如果某个选项本质上是一个「二选一/三选一」的子问题（如「你是短线还是长线？」），给它加 sub_choices 字段\n"
             "   - sub_choices 示例: [{\"id\": \"short\", \"label\": \"①\", \"text\": \"短线（1-5日）\"}, ...]\n"
@@ -463,7 +511,7 @@ class ExpertAgent:
             "```json\n"
             "{\n"
             '  "question_summary": "...",\n'
-            '  "multi_select": false,\n'
+            '  "multi_select": true,\n'
             '  "options": [\n'
             '    {"id": "style", "label": "A", "title": "先确认投资风格", "description": "...", "focus": "...",\n'
             '     "sub_choices": [{"id": "short", "label": "①", "text": "短线"}, {"id": "mid", "label": "②", "text": "中线"}, {"id": "long", "label": "③", "text": "长线"}]},\n'
@@ -512,7 +560,12 @@ class ExpertAgent:
                     ))
                 # 第3轮强制 needs_more=false
                 needs_more = parsed.get("needs_more", True) if current_round < max_rounds else False
-                multi_select = bool(parsed.get("multi_select", False))
+                multi_select = bool(parsed.get("multi_select", True))
+                # 兜底：如果没有任何选项带 sub_choices（互斥子选项），强制多选
+                # 只有带 sub_choices 的选项才可能是互斥的（如"短线 vs 长线"）
+                has_exclusive_option = any(opt.get("sub_choices") for opt in parsed.get("options", []))
+                if not has_exclusive_option:
+                    multi_select = True
                 if options:
                     return ClarificationOutput(
                         should_clarify=True,

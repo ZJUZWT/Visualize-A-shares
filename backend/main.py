@@ -114,6 +114,19 @@ async def _startup() -> None:
     except Exception as e:
         logger.warning(f"⚠️ Agent Brain 调度器启动失败: {e}")
 
+    # 异步探测 Responses API 支持（不阻塞启动）
+    if llm_settings.api_key and llm_settings.provider == "openai_compatible":
+        import asyncio
+        async def _probe():
+            try:
+                from llm.providers import LLMProviderFactory
+                provider = LLMProviderFactory.create(llm_settings)
+                supported = await provider.probe_responses_api()
+                logger.info(f"   Responses API: {'✅ 可用' if supported else '⬇️ 不可用，使用 Chat Completions'}")
+            except Exception as e:
+                logger.debug(f"Responses API 探测异常: {e}")
+        asyncio.create_task(_probe())
+
 
 async def _shutdown() -> None:
     # 关闭定时任务调度器

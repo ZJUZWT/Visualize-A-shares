@@ -82,7 +82,7 @@ class LLMConfig(BaseModel):
     )
     fast_max_tokens: int | None = Field(
         default=None,
-        ge=64, le=32768,
+        ge=64, le=131072,
         description="快模型最大输出 token，未配置时继承 max_tokens"
     )
 
@@ -92,10 +92,10 @@ class LLMConfig(BaseModel):
         ge=0.0, le=2.0,
         description="生成温度（创造性）"
     )
-    max_tokens: int = Field(
-        default=8192,
-        ge=64, le=32768,
-        description="最大输出 token 数（产业链推演等复杂任务需要 4096+）"
+    max_tokens: int | None = Field(
+        default=None,
+        ge=64, le=131072,
+        description="最大输出 token 数，不设置则由模型决定上限"
     )
 
     # 系统提示词
@@ -123,7 +123,11 @@ class LLMConfig(BaseModel):
             fast_base_url=os.getenv("LLM_FAST_BASE_URL") or None,
             fast_model=os.getenv("LLM_FAST_MODEL") or None,
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
-            max_tokens=int(os.getenv("LLM_MAX_TOKENS", "2048")),
+            max_tokens=(
+                int(os.getenv("LLM_MAX_TOKENS"))
+                if os.getenv("LLM_MAX_TOKENS")
+                else None
+            ),
             fast_temperature=(
                 float(os.getenv("LLM_FAST_TEMPERATURE"))
                 if os.getenv("LLM_FAST_TEMPERATURE")

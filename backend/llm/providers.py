@@ -4,13 +4,9 @@ LLM Provider 统一抽象层
 架构设计：
 - BaseLLMProvider: 抽象基类，定义统一接口
 - OpenAICompatibleProvider: 覆盖 90%+ 厂商（OpenAI/DeepSeek/Qwen/Kimi/GLM/百川等）
+  - 自动探测 Responses API (/v1/responses) → 不支持则降级 Chat Completions (/v1/chat/completions)
 - AnthropicProvider: Claude 系列
 - LLMProviderFactory: 根据配置自动选择 Provider
-
-所有 Provider 都支持：
-1. 同步对话: chat()
-2. 流式对话: chat_stream()  (SSE 流式输出)
-3. 工具调用: chat_with_tools() (原生 Function Calling)
 """
 
 from abc import ABC, abstractmethod
@@ -111,11 +107,15 @@ class BaseLLMProvider(ABC):
 # ─── OpenAI 兼容 Provider ────────────────────────────
 class OpenAICompatibleProvider(BaseLLMProvider):
     """
-    OpenAI 兼容格式 Provider
+    OpenAI 兼容格式 Provider — 自动探测 Responses API 降级
+
+    优先尝试 Responses API (/v1/responses)，
+    收到 404/405/501 时自动降级到 Chat Completions (/v1/chat/completions)。
+    探测结果按 base_url 缓存，同一地址不重复试。
 
     适用厂商（仅需更换 base_url）：
-    - OpenAI:     https://api.openai.com/v1
-    - DeepSeek:   https://api.deepseek.com/v1
+    - OpenAI:     https://api.openai.com/v1      ← 支持 Responses API
+    - DeepSeek:   https://api.deepseek.com/v1    ← 仅 Chat Completions
     - 通义千问:    https://dashscope.aliyuncs.com/compatible-mode/v1
     - Kimi:       https://api.moonshot.cn/v1
     - 智谱GLM:    https://open.bigmodel.cn/api/paas/v4
@@ -128,20 +128,243 @@ class OpenAICompatibleProvider(BaseLLMProvider):
     # 长任务（产业链推演等）需要更长超时，思考型模型首 token 可能延迟 30s+
     _TIMEOUT = httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
 
-    async def chat(self, messages: list[ChatMessage]) -> str:
-        t0 = time.monotonic()
-        url = f"{self.config.base_url.rstrip('/')}/chat/completions"
+    # ── 类级别缓存：base_url → True(支持 Responses) / False(不支持) ──
+    # None 表示尚未探测
+    _responses_api_support: dict[str, bool] = {}
+
+    # ── 格式转换：ChatMessage[] → Responses API 的 input + instructions ──
+
+    @staticmethod
+    def _messages_to_responses_format(messages: list[ChatMessage]) -> tuple[str, list[dict]]:
+        """将 ChatMessage 列表转换为 Responses API 格式
+
+        Returns:
+            (instructions, input_items)
+            - instructions: system prompt 内容（Responses API 用 instructions 代替 system role）
+            - input_items: input 数组，每项是 {"role": "user"|"assistant"|"developer", "content": "..."}
+        """
+        instructions = ""
+        input_items: list[dict] = []
+
+        for m in messages:
+            if m.role == "system":
+                # Responses API: system prompt → instructions 字段
+                # 多个 system 消息拼合
+                if instructions:
+                    instructions += "\n\n"
+                instructions += m.content
+            elif m.role == "tool":
+                # tool 结果 → function_call_output 格式
+                input_items.append({
+                    "type": "function_call_output",
+                    "call_id": m.tool_call_id or "",
+                    "output": m.content,
+                })
+            elif m.role == "assistant" and m.tool_calls:
+                # assistant 的 tool_calls → 先加文本消息，再加 function_call items
+                if m.content:
+                    input_items.append({"role": "assistant", "content": m.content})
+                for tc in m.tool_calls:
+                    func = tc.get("function", {})
+                    input_items.append({
+                        "type": "function_call",
+                        "id": tc.get("id", ""),
+                        "call_id": tc.get("id", ""),
+                        "name": func.get("name", ""),
+                        "arguments": func.get("arguments", "{}"),
+                    })
+            else:
+                input_items.append({"role": m.role, "content": m.content})
+
+        return instructions, input_items
+
+    @staticmethod
+    def _extract_responses_text(data: dict) -> str:
+        """从 Responses API 返回中提取文本内容
+
+        Response format:
+        {
+            "output": [
+                {"type": "message", "content": [{"type": "output_text", "text": "..."}]}
+            ]
+        }
+        """
+        for item in data.get("output", []):
+            if item.get("type") == "message":
+                for content_part in item.get("content", []):
+                    if content_part.get("type") == "output_text":
+                        return content_part.get("text", "")
+        # fallback: 有些返回直接有 output_text
+        if "output_text" in data:
+            return data["output_text"]
+        return ""
+
+    @staticmethod
+    def _extract_responses_tool_calls(data: dict) -> list[dict]:
+        """从 Responses API 返回中提取 tool_calls"""
+        tool_calls = []
+        for item in data.get("output", []):
+            if item.get("type") == "function_call":
+                tool_calls.append({
+                    "id": item.get("call_id") or item.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": item.get("name", ""),
+                        "arguments": item.get("arguments", "{}"),
+                    },
+                })
+        return tool_calls
+
+    def _should_try_responses(self) -> bool:
+        """判断是否应该尝试 Responses API"""
+        base = self.config.base_url.rstrip("/")
+        cached = self._responses_api_support.get(base)
+        if cached is False:
+            return False  # 已确认不支持
+        return True  # 未探测或已确认支持
+
+    async def probe_responses_api(self) -> bool:
+        """轻量探测 Responses API 是否可用（建议在启动时调用一次）
+
+        发一个最小请求（max_output_tokens=1），看是否返回成功。
+        超时设为 10s，避免阻塞启动。
+        """
+        base = self.config.base_url.rstrip("/")
+        if base in self._responses_api_support:
+            return self._responses_api_support[base]
+
+        url = f"{base}/responses"
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",
             "Content-Type": "application/json",
         }
         payload = {
             "model": self.config.model,
-            "messages": [m.to_dict() for m in messages],
-            "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
+            "input": "hi",
+            "max_output_tokens": 1,
             "stream": False,
         }
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                if resp.status_code in (401, 429):
+                    # 鉴权/限流问题，不能判断是否支持，先乐观假设
+                    logger.debug(f"Responses API 探测返回 {resp.status_code}，无法判断是否支持")
+                    return True
+                if resp.status_code == 200:
+                    self._mark_responses_support(True)
+                    return True
+                else:
+                    self._mark_responses_support(False)
+                    return False
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            logger.debug(f"Responses API 探测超时/连接失败: {e}")
+            self._mark_responses_support(False)
+            return False
+        except Exception as e:
+            logger.debug(f"Responses API 探测异常: {e}")
+            self._mark_responses_support(False)
+            return False
+
+    def _mark_responses_support(self, supported: bool) -> None:
+        """缓存探测结果"""
+        base = self.config.base_url.rstrip("/")
+        self._responses_api_support[base] = supported
+        if supported:
+            logger.info(f"✅ Responses API 可用: {base}")
+        else:
+            logger.info(f"⬇️ Responses API 不可用，降级 Chat Completions: {base}")
+
+    def _should_fallback_to_completions(self, exc: Exception) -> bool:
+        """判断异常是否应触发降级到 Chat Completions
+
+        降级策略（宽松）：
+        - 首次探测时，除 401(鉴权)/429(限流) 外的所有 HTTP 错误都降级
+          （400/404/405/500/501/502/503 等都可能是"不支持该端点"的表现）
+        - 已确认支持后，不再降级（此时错误应由调用方处理）
+        - 超时/连接错误：首次探测时也降级（某些网关对未知路径直接挂住）
+        """
+        base = self.config.base_url.rstrip("/")
+        already_confirmed = self._responses_api_support.get(base) is True
+        if already_confirmed:
+            return False  # 已确认支持，不降级
+
+        if isinstance(exc, httpx.HTTPStatusError):
+            # 401/429 是鉴权/限流问题，两套 API 都会有，不降级直接报错
+            return exc.response.status_code not in (401, 429)
+        if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError)):
+            # 超时或连接错误：首次探测时降级（有些网关对未知路径直接挂住）
+            return True
+        return False
+
+    # ══════════════════════════════════════════════════
+    # chat() — 非流式对话
+    # ══════════════════════════════════════════════════
+
+    async def chat(self, messages: list[ChatMessage]) -> str:
+        if self._should_try_responses():
+            try:
+                return await self._chat_responses(messages)
+            except Exception as e:
+                if self._should_fallback_to_completions(e):
+                    self._mark_responses_support(False)
+                    return await self._chat_completions(messages)
+                raise
+        return await self._chat_completions(messages)
+
+    async def _chat_responses(self, messages: list[ChatMessage]) -> str:
+        """Responses API: POST /v1/responses"""
+        t0 = time.monotonic()
+        base = self.config.base_url.rstrip("/")
+        url = f"{base}/responses"
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        instructions, input_items = self._messages_to_responses_format(messages)
+        payload: dict = {
+            "model": self.config.model,
+            "input": input_items,
+            "temperature": self.config.temperature,
+            "stream": False,
+        }
+        if self.config.max_tokens is not None:
+            payload["max_output_tokens"] = self.config.max_tokens
+        if instructions:
+            payload["instructions"] = instructions
+
+        async with httpx.AsyncClient(timeout=self._TIMEOUT) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        # 首次成功，标记支持
+        base_key = self.config.base_url.rstrip("/")
+        if base_key not in self._responses_api_support:
+            self._mark_responses_support(True)
+
+        result = self._extract_responses_text(data)
+        elapsed = time.monotonic() - t0
+        logger.info(f"⏱️ LLM chat/responses ({self.config.model}) 耗时 {elapsed:.1f}s, 响应长度 {len(result)} 字符")
+        return result
+
+    async def _chat_completions(self, messages: list[ChatMessage]) -> str:
+        """Chat Completions API: POST /v1/chat/completions"""
+        t0 = time.monotonic()
+        url = f"{self.config.base_url.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload: dict = {
+            "model": self.config.model,
+            "messages": [m.to_dict() for m in messages],
+            "temperature": self.config.temperature,
+            "stream": False,
+        }
+        if self.config.max_tokens is not None:
+            payload["max_tokens"] = self.config.max_tokens
 
         async with httpx.AsyncClient(timeout=self._TIMEOUT) as client:
             resp = await client.post(url, json=payload, headers=headers)
@@ -149,10 +372,116 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             data = resp.json()
             result = data["choices"][0]["message"]["content"]
             elapsed = time.monotonic() - t0
-            logger.info(f"⏱️ LLM chat ({self.config.model}) 耗时 {elapsed:.1f}s, 响应长度 {len(result)} 字符")
+            logger.info(f"⏱️ LLM chat/completions ({self.config.model}) 耗时 {elapsed:.1f}s, 响应长度 {len(result)} 字符")
             return result
 
+    # ══════════════════════════════════════════════════
+    # chat_stream() — 流式对话
+    # ══════════════════════════════════════════════════
+
     async def chat_stream(self, messages: list[ChatMessage]) -> AsyncGenerator[str, None]:
+        if self._should_try_responses():
+            try:
+                yielded = False
+                async for token in self._chat_stream_responses(messages):
+                    yielded = True
+                    yield token
+                if yielded:
+                    return
+                return
+            except Exception as e:
+                if self._should_fallback_to_completions(e):
+                    self._mark_responses_support(False)
+                    async for token in self._chat_stream_completions(messages):
+                        yield token
+                    return
+                raise
+
+        async for token in self._chat_stream_completions(messages):
+            yield token
+
+    async def _chat_stream_responses(self, messages: list[ChatMessage]) -> AsyncGenerator[str, None]:
+        """Responses API 流式: POST /v1/responses (stream=true)
+
+        SSE 事件格式:
+        - event: response.output_text.delta  data: {"delta": "文本片段", ...}
+        - event: response.output_text.done   data: {"text": "完整文本", ...}
+        - event: response.completed          data: {完整 response}
+        """
+        t0 = time.monotonic()
+        token_count = 0
+        base = self.config.base_url.rstrip("/")
+        url = f"{base}/responses"
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        instructions, input_items = self._messages_to_responses_format(messages)
+        payload: dict = {
+            "model": self.config.model,
+            "input": input_items,
+            "temperature": self.config.temperature,
+            "stream": True,
+        }
+        if self.config.max_tokens is not None:
+            payload["max_output_tokens"] = self.config.max_tokens
+        if instructions:
+            payload["instructions"] = instructions
+
+        try:
+            async with httpx.AsyncClient(timeout=self._TIMEOUT) as client:
+                async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                    resp.raise_for_status()
+
+                    # 首次成功，标记支持
+                    base_key = self.config.base_url.rstrip("/")
+                    if base_key not in self._responses_api_support:
+                        self._mark_responses_support(True)
+
+                    # Responses API SSE 格式: "event: xxx\ndata: {...}\n\n"
+                    current_event_type = ""
+                    async for line in resp.aiter_lines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        if line.startswith("event: "):
+                            current_event_type = line[7:].strip()
+                            continue
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:].strip()
+                        if data_str == "[DONE]":
+                            break
+
+                        try:
+                            import json
+                            event_data = json.loads(data_str)
+
+                            # 方式1: 通过 event type 判断
+                            if current_event_type == "response.output_text.delta":
+                                delta = event_data.get("delta", "")
+                                if delta:
+                                    token_count += 1
+                                    yield delta
+                            # 方式2: 通过 data 中的 type 字段判断（部分实现不发 event 行）
+                            elif event_data.get("type") == "response.output_text.delta":
+                                delta = event_data.get("delta", "")
+                                if delta:
+                                    token_count += 1
+                                    yield delta
+
+                        except (json.JSONDecodeError, KeyError):
+                            continue
+                        finally:
+                            # 每个 data 行处理后重置 event type
+                            current_event_type = ""
+        finally:
+            elapsed = time.monotonic() - t0
+            logger.info(f"⏱️ LLM stream/responses ({self.config.model}) 耗时 {elapsed:.1f}s, {token_count} chunks")
+
+    async def _chat_stream_completions(self, messages: list[ChatMessage]) -> AsyncGenerator[str, None]:
+        """Chat Completions API 流式: POST /v1/chat/completions (stream=true)"""
         t0 = time.monotonic()
         token_count = 0
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
@@ -160,13 +489,14 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             "Authorization": f"Bearer {self.config.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
+        payload: dict = {
             "model": self.config.model,
             "messages": [m.to_dict() for m in messages],
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
             "stream": True,
         }
+        if self.config.max_tokens is not None:
+            payload["max_tokens"] = self.config.max_tokens
 
         try:
             async with httpx.AsyncClient(timeout=self._TIMEOUT) as client:
@@ -190,17 +520,107 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                             continue
         finally:
             elapsed = time.monotonic() - t0
-            logger.info(f"⏱️ LLM stream ({self.config.model}) 耗时 {elapsed:.1f}s, {token_count} chunks")
+            logger.info(f"⏱️ LLM stream/completions ({self.config.model}) 耗时 {elapsed:.1f}s, {token_count} chunks")
+
+    # ══════════════════════════════════════════════════
+    # chat_with_tools() — 工具调用
+    # ══════════════════════════════════════════════════
 
     async def chat_with_tools(
         self,
         messages: list[ChatMessage],
         tools: list[dict] | None = None,
     ) -> ToolCallResult:
-        """原生 Function Calling — 通过 OpenAI tools 参数让模型结构化返回工具调用
+        if self._should_try_responses():
+            try:
+                return await self._chat_with_tools_responses(messages, tools)
+            except Exception as e:
+                if self._should_fallback_to_completions(e):
+                    self._mark_responses_support(False)
+                    return await self._chat_with_tools_completions(messages, tools)
+                raise
+        return await self._chat_with_tools_completions(messages, tools)
 
-        支持 OpenAI / MiniMax / DeepSeek / 通义 等兼容 OpenAI tools 协议的厂商。
-        """
+    async def _chat_with_tools_responses(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict] | None = None,
+    ) -> ToolCallResult:
+        """Responses API 工具调用"""
+        t0 = time.monotonic()
+        base = self.config.base_url.rstrip("/")
+        url = f"{base}/responses"
+        headers = {
+            "Authorization": f"Bearer {self.config.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        instructions, input_items = self._messages_to_responses_format(messages)
+        payload: dict = {
+            "model": self.config.model,
+            "input": input_items,
+            "temperature": self.config.temperature,
+            "stream": False,
+        }
+        if self.config.max_tokens is not None:
+            payload["max_output_tokens"] = self.config.max_tokens
+        if instructions:
+            payload["instructions"] = instructions
+        if tools:
+            # Responses API 的 tools 格式略有不同：type 直接用 "function"
+            resp_tools = []
+            for t in tools:
+                if t.get("type") == "function":
+                    func = t.get("function", {})
+                    resp_tools.append({
+                        "type": "function",
+                        "name": func.get("name", ""),
+                        "description": func.get("description", ""),
+                        "parameters": func.get("parameters", {}),
+                    })
+                else:
+                    resp_tools.append(t)
+            payload["tools"] = resp_tools
+            payload["tool_choice"] = "auto"
+
+        async with httpx.AsyncClient(timeout=self._TIMEOUT) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        # 首次成功，标记支持
+        base_key = self.config.base_url.rstrip("/")
+        if base_key not in self._responses_api_support:
+            self._mark_responses_support(True)
+
+        content = self._extract_responses_text(data)
+        tool_calls = self._extract_responses_tool_calls(data)
+        elapsed = time.monotonic() - t0
+
+        logger.info(
+            f"⏱️ LLM tools/responses ({self.config.model}) 耗时 {elapsed:.1f}s, "
+            f"content={len(content)}字, tool_calls={len(tool_calls)}个"
+        )
+
+        # 构造兼容的 raw_message（方便多轮对话）
+        raw_message: dict = {"role": "assistant"}
+        if content:
+            raw_message["content"] = content
+        if tool_calls:
+            raw_message["tool_calls"] = tool_calls
+
+        return ToolCallResult(
+            content=content,
+            tool_calls=tool_calls,
+            raw_message=raw_message,
+        )
+
+    async def _chat_with_tools_completions(
+        self,
+        messages: list[ChatMessage],
+        tools: list[dict] | None = None,
+    ) -> ToolCallResult:
+        """Chat Completions API 工具调用"""
         t0 = time.monotonic()
         url = f"{self.config.base_url.rstrip('/')}/chat/completions"
         headers = {
@@ -211,9 +631,10 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             "model": self.config.model,
             "messages": [m.to_dict() for m in messages],
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
             "stream": False,
         }
+        if self.config.max_tokens is not None:
+            payload["max_tokens"] = self.config.max_tokens
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
@@ -242,7 +663,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             })
 
         logger.info(
-            f"⏱️ LLM chat_with_tools ({self.config.model}) 耗时 {elapsed:.1f}s, "
+            f"⏱️ LLM tools/completions ({self.config.model}) 耗时 {elapsed:.1f}s, "
             f"content={len(content)}字, tool_calls={len(tool_calls)}个"
         )
         return ToolCallResult(
@@ -299,7 +720,7 @@ class AnthropicProvider(BaseLLMProvider):
 
         payload = {
             "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": self.config.max_tokens or 8192,
             "temperature": self.config.temperature,
             "messages": api_messages,
         }
@@ -336,7 +757,7 @@ class AnthropicProvider(BaseLLMProvider):
 
         payload = {
             "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": self.config.max_tokens or 8192,
             "temperature": self.config.temperature,
             "messages": api_messages,
             "stream": True,
