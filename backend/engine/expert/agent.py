@@ -721,6 +721,17 @@ class ExpertAgent:
 
             tool_calls = current_tool_calls
 
+            # ── 容错：LLM 有时幻觉出 data.query / quant.query / info.query / industry.query ──
+            # 这些 action 不存在，应重映射为 expert.{engine}（咨询对应引擎专家）
+            _EXPERT_ENGINES = {"data", "quant", "info", "industry"}
+            for tc in tool_calls:
+                if tc.engine in _EXPERT_ENGINES and tc.action == "query":
+                    original = f"{tc.engine}.query"
+                    tc.params.setdefault("question", analysis_message)
+                    tc.action = tc.engine   # expert.data / expert.quant / ...
+                    tc.engine = "expert"
+                    logger.info(f"🔧 工具重映射: {original} → expert.{tc.action}")
+
             # ── 去重：当已有 expert.data 调用时，过滤掉多余的 data.get_daily_history ──
             has_data_expert = any(tc.engine == "expert" and tc.action == "data" for tc in tool_calls)
             if has_data_expert:

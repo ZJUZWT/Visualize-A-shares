@@ -22,6 +22,7 @@ data/.jwt_secret
 data/cache/
 data/chromadb/
 data/chromadb_rag/
+data/expert_kg.json
 
 # 误用 pip = 语法产生的垃圾文件
 =*
