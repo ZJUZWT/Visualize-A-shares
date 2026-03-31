@@ -488,6 +488,20 @@ export function MessageBubble({
                       text-white text-sm leading-relaxed ${isFailed ? "opacity-60" : ""}`}
           style={{ backgroundColor: expertColor }}
         >
+          {/* 用户发送的图片缩略图 */}
+          {message.images && message.images.length > 0 && (
+            <div className="mb-2 flex gap-1.5 flex-wrap">
+              {message.images.map((img, i) => (
+                <img
+                  key={i}
+                  src={img}
+                  alt={`图片 ${i + 1}`}
+                  className="h-20 w-20 rounded-lg object-cover border border-white/20 cursor-pointer hover:opacity-80 transition-opacity"
+                  onClick={() => window.open(img, "_blank")}
+                />
+              ))}
+            </div>
+          )}
           {message.content}
         </div>
       </div>

@@ -35,8 +35,21 @@ class ContextGuard:
         return int(cn_chars * 0.7 + other_chars * 0.25)
 
     def _total_tokens(self, messages: list[dict]) -> int:
-        """估算消息列表的总 token 数"""
-        return sum(self.estimate_tokens(m.get("content", "")) for m in messages)
+        """估算消息列表的总 token 数（支持多模态 content）"""
+        total = 0
+        for m in messages:
+            content = m.get("content", "")
+            if isinstance(content, str):
+                total += self.estimate_tokens(content)
+            elif isinstance(content, list):
+                # 多模态 content: [{type: "text", text: ...}, {type: "image_url", ...}]
+                for part in content:
+                    if isinstance(part, dict):
+                        if part.get("type") == "text":
+                            total += self.estimate_tokens(part.get("text", ""))
+                        elif part.get("type") in ("image_url", "image"):
+                            total += 170  # 图片固定 ~170 tokens（低分辨率模式）
+        return total
 
     def guard_messages(self, messages: list[dict]) -> list[dict]:
         """三级保护，返回可能被截断的消息列表（新列表，不修改原始）

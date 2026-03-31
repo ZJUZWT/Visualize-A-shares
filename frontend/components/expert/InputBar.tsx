@@ -1,15 +1,40 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useExpertStore } from "@/stores/useExpertStore";
-import { ArrowUp, Square, Download, BrainCircuit, MessageSquareMore, FileBarChart } from "lucide-react";
+import { ArrowUp, Square, Download, BrainCircuit, MessageSquareMore, FileBarChart, Image as ImageIcon, X } from "lucide-react";
 
 interface InputBarProps {
   onExport?: () => void;
 }
 
+/** 将 File 转为 base64 data URI */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/** 从 ClipboardEvent 或 DataTransfer 中提取图片文件 */
+function extractImageFiles(items: DataTransferItemList | undefined): File[] {
+  if (!items) return [];
+  const files: File[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.type.startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) files.push(file);
+    }
+  }
+  return files;
+}
+
 export function InputBar({ onExport }: InputBarProps) {
   const [input, setInput] = useState("");
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
   const {
     sendMessage, stopStreaming, status, error, activeExpert,
     profiles, chatHistories, deepThink, toggleDeepThink,
@@ -21,16 +46,19 @@ export function InputBar({ onExport }: InputBarProps) {
   const pendingClarification = pendingClarifications[activeExpert];
   const isBusy = isThinking || !!pendingClarification;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const profile = profiles.find((p) => p.type === activeExpert);
   const color = profile?.color ?? "#60A5FA";
   const hasMessages = (chatHistories[activeExpert] ?? []).length > 0;
 
   const handleSend = async () => {
-    if (!input.trim() || isBusy) return;
-    const msg = input;
+    if ((!input.trim() && pendingImages.length === 0) || isBusy) return;
+    const msg = input || (pendingImages.length > 0 ? "请看图片" : "");
+    const imgs = pendingImages.length > 0 ? [...pendingImages] : undefined;
     setInput("");
+    setPendingImages([]);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-    await sendMessage(msg);
+    await sendMessage(msg, imgs);
   };
 
   const handleStop = () => {
@@ -58,6 +86,37 @@ export function InputBar({ onExport }: InputBarProps) {
     el.style.height = Math.min(el.scrollHeight, 160) + "px";
   };
 
+  /** 处理粘贴事件 — 拦截图片 */
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    const imageFiles = extractImageFiles(e.clipboardData?.items);
+    if (imageFiles.length === 0) return; // 不是图片，走默认文本粘贴
+    e.preventDefault(); // 阻止图片作为文本粘贴
+    try {
+      const newImages = await Promise.all(imageFiles.map(fileToBase64));
+      setPendingImages((prev) => [...prev, ...newImages].slice(0, 4)); // 最多 4 张
+    } catch (err) {
+      console.error("图片粘贴失败:", err);
+    }
+  }, []);
+
+  /** 文件选择器 */
+  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
+    if (files.length === 0) return;
+    try {
+      const newImages = await Promise.all(files.map(fileToBase64));
+      setPendingImages((prev) => [...prev, ...newImages].slice(0, 4));
+    } catch (err) {
+      console.error("图片选择失败:", err);
+    }
+    // 清空 input 以便重复选同一文件
+    e.target.value = "";
+  }, []);
+
+  const removeImage = useCallback((index: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
   return (
     <div className="px-6 pb-4 pt-2 shrink-0">
       {error && (
@@ -65,6 +124,30 @@ export function InputBar({ onExport }: InputBarProps) {
           {error}
         </div>
       )}
+
+      {/* 图片预览区 */}
+      {pendingImages.length > 0 && (
+        <div className="mb-2 flex gap-2 flex-wrap">
+          {pendingImages.map((img, i) => (
+            <div key={i} className="relative group">
+              <img
+                src={img}
+                alt={`待发送图片 ${i + 1}`}
+                className="h-16 w-16 rounded-lg object-cover border border-[var(--border)]"
+              />
+              <button
+                onClick={() => removeImage(i)}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--bg-primary)] border border-[var(--border)]
+                           flex items-center justify-center text-[var(--text-tertiary)] hover:text-red-500
+                           opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <X size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div
         className="flex items-end gap-2 px-4 py-3 rounded-2xl border border-[var(--border)]
                     bg-[var(--bg-secondary)] shadow-[var(--shadow-sm)]
@@ -88,6 +171,25 @@ export function InputBar({ onExport }: InputBarProps) {
             <Download size={14} />
           </button>
         )}
+
+        {/* 图片上传按钮 */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="shrink-0 w-8 h-8 rounded-xl flex items-center justify-center
+                     text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]
+                     hover:bg-[var(--bg-primary)] transition-all duration-150"
+          title="上传图片（也可直接粘贴截图）"
+        >
+          <ImageIcon size={14} />
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={handleFileSelect}
+        />
 
         {/* 深度思考开关 */}
         <button
@@ -142,12 +244,13 @@ export function InputBar({ onExport }: InputBarProps) {
           value={input}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={
             isThinking
               ? "AI 正在思考… 按 Enter 或点击按钮停止"
               : pendingClarification
               ? "请先选择上方的分析方向，然后继续生成"
-              : `向${profile?.name ?? "专家"}提问… (Enter 发送，Shift+Enter 换行)`
+              : `向${profile?.name ?? "专家"}提问… (Enter 发送，Shift+Enter 换行，可粘贴图片)`
           }
           rows={1}
           className="flex-1 bg-transparent text-sm text-[var(--text-primary)]
@@ -177,12 +280,12 @@ export function InputBar({ onExport }: InputBarProps) {
         ) : (
           <button
             onClick={handleSend}
-            disabled={!input.trim() || !!pendingClarification}
+            disabled={(!input.trim() && pendingImages.length === 0) || !!pendingClarification}
             className="shrink-0 w-8 h-8 rounded-xl flex items-center justify-center
                        transition-all duration-150 text-white
                        disabled:opacity-30 disabled:cursor-not-allowed"
             style={{
-              backgroundColor: !input.trim() ? "var(--border)" : color,
+              backgroundColor: (!input.trim() && pendingImages.length === 0) ? "var(--border)" : color,
             }}
           >
             <ArrowUp size={15} strokeWidth={2.5} />

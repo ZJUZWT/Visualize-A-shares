@@ -168,6 +168,8 @@ export interface ExpertMessage {
   status?: "completed" | "partial";
   /** DB 中的消息 ID（用于 resume 续写） */
   dbMessageId?: string;
+  /** 用户发送的图片（base64，仅 role=user 时有值） */
+  images?: string[];
 }
 
 export type ExpertStatus = "idle" | "clarifying" | "thinking" | "error";

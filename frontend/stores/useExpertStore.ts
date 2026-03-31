@@ -57,8 +57,8 @@ interface ExpertStore {
 
   /** 切换专家 */
   setActiveExpert: (type: ExpertType) => void;
-  /** 发送消息 */
-  sendMessage: (text: string) => Promise<void>;
+  /** 发送消息（可附带图片） */
+  sendMessage: (text: string, images?: string[]) => Promise<void>;
   /** 选择 clarification 选项并继续分析（单选兼容） */
   submitClarification: (selection: ClarificationSelection) => Promise<void>;
   /** 提交多选 clarification 选项并继续分析 */
@@ -678,13 +678,14 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       chatHistories: { ...s.chatHistories, [activeExpert]: newHistory },
     }));
     // 重新发送
-    await get().sendMessage(failedMsg.content);
+    await get().sendMessage(failedMsg.content, failedMsg.images);
   },
 
-  sendMessage: async (text: string) => {
+  sendMessage: async (text: string, images?: string[]) => {
     const { activeExpert, activeSessions, pendingClarifications, deepThink, useClarification, useTradePlan } = get();
     const expertType = activeExpert; // 闭包捕获，防止中途切走后写错专家
     if (pendingClarifications[expertType]) return;
+    const msgImages = images && images.length > 0 ? images : undefined;
 
     // 如果该专家已有进行中的请求，先中止（同一专家不并发）
     const existingAc = _abortMap.get(expertType);
@@ -706,6 +707,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       thinking: [],
       isStreaming: false,
       sendStatus: "pending",
+      images: msgImages,
     };
     const expertMsg: ExpertMessage = {
       id: newId(),
@@ -828,6 +830,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       userMessageId: userMsg.id,
       payload: {
         message: text,
+        images: msgImages || [],
         session_id: sessionId,
         deep_think: deepThink,
         use_clarification: useClarification,

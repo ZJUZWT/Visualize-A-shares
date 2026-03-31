@@ -307,11 +307,13 @@ class ExpertAgent:
         history: list[dict] | None = None,
         persona: str = "rag",
         enable_trade_plan: bool = False,
+        images: list[str] | None = None,
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复，yield (token, full_text)"""
         async for token, full_text in self._reply_stream(
             message, nodes, memories, tool_results, history or [],
             persona=persona, enable_trade_plan=enable_trade_plan,
+            images=images,
         ):
             yield token, full_text
 
@@ -695,6 +697,7 @@ class ExpertAgent:
         clarification_selection: ClarificationSelection | dict | None = None,
         clarification_chain: list[ClarificationRoundSelection | dict] | None = None,
         enable_trade_plan: bool = False,
+        images: list[str] | None = None,
     ) -> AsyncGenerator[dict, None]:
         """完整对话流程，yield 结构化事件 dict
 
@@ -877,6 +880,7 @@ class ExpertAgent:
             async for token, full_text in self.generate_reply_stream(
                 analysis_message, recalled_nodes, memories, tool_results, conv_history,
                 persona=persona, enable_trade_plan=enable_trade_plan,
+                images=images,
             ):
                 expert_reply = full_text
                 yield {"event": "reply_token", "data": {"token": token}}
@@ -1716,6 +1720,7 @@ class ExpertAgent:
         history: list[dict] | None = None,
         persona: str = "rag",
         enable_trade_plan: bool = False,
+        images: list[str] | None = None,
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复（含 <think> 标签过滤），yield (token, accumulated_text)"""
         from llm.providers import ChatMessage
@@ -1807,7 +1812,7 @@ class ExpertAgent:
             role = "assistant" if h["role"] == "expert" else h["role"]
             content = h.get("content", "")
             messages.append(ChatMessage(role, content))
-        messages.append(ChatMessage("user", message + trade_plan_reminder))
+        messages.append(ChatMessage("user", message + trade_plan_reminder, images=images or []))
 
         # 上下文窗口保护
         msg_dicts = [{"role": m.role, "content": m.content} for m in messages]

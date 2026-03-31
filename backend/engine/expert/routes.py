@@ -564,6 +564,7 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
                 clarification_selection=req.clarification_selection,
                 clarification_chain=req.clarification_chain,
                 enable_trade_plan=req.enable_trade_plan,
+                images=req.images,
             ):
                 evt_type = event["event"]
                 if evt_type == "reply_token":

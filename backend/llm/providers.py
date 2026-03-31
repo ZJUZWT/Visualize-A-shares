@@ -23,30 +23,47 @@ from .config import LLMConfig
 
 # ─── 消息格式 ────────────────────────────────────────
 class ChatMessage:
-    """统一消息格式 — 支持纯文本和 tool_calls / tool 结果"""
+    """统一消息格式 — 支持纯文本、多模态（图片）和 tool_calls / tool 结果"""
 
     def __init__(
         self,
         role: str,
         content: str = "",
         *,
+        images: list[str] | None = None,
         tool_calls: list[dict] | None = None,
         tool_call_id: str | None = None,
         name: str | None = None,
     ):
         self.role = role      # "system" | "user" | "assistant" | "tool"
         self.content = content
+        self.images = images or []    # base64 编码的图片列表
         self.tool_calls = tool_calls      # assistant 消息中 LLM 返回的工具调用
         self.tool_call_id = tool_call_id  # tool 消息中对应的 tool_call id
         self.name = name                  # tool 消息中的函数名
 
     def to_dict(self) -> dict:
+        """转换为 OpenAI 格式 dict — 有图片时自动用多模态 content 数组"""
         d: dict = {"role": self.role}
-        if self.content:
+
+        if self.images and self.role == "user":
+            # 多模态格式: content = [{type: "text", text: ...}, {type: "image_url", image_url: {...}}]
+            parts: list[dict] = []
+            if self.content:
+                parts.append({"type": "text", "text": self.content})
+            for img_b64 in self.images:
+                # 自动检测并补全 data URI 前缀
+                if img_b64.startswith("data:"):
+                    url = img_b64
+                else:
+                    url = f"data:image/png;base64,{img_b64}"
+                parts.append({"type": "image_url", "image_url": {"url": url}})
+            d["content"] = parts
+        elif self.content:
             d["content"] = self.content
         elif self.role != "assistant":
-            # 非 assistant 角色需要 content 字段
             d["content"] = self.content
+
         if self.tool_calls:
             d["tool_calls"] = self.tool_calls
         if self.tool_call_id:
@@ -54,6 +71,38 @@ class ChatMessage:
         if self.name:
             d["name"] = self.name
         return d
+
+    def to_anthropic_content(self) -> str | list[dict]:
+        """转换为 Anthropic Messages API 的 content 格式"""
+        if not self.images or self.role != "user":
+            return self.content
+
+        # Anthropic 多模态: content = [{type: "text", text: ...}, {type: "image", source: {...}}]
+        parts: list[dict] = []
+        for img_b64 in self.images:
+            # 剥离 data URI 前缀
+            raw_b64 = img_b64
+            media_type = "image/png"
+            if img_b64.startswith("data:"):
+                # "data:image/jpeg;base64,/9j/4AAQ..." → 提取 media_type 和 base64
+                header, raw_b64 = img_b64.split(",", 1)
+                if "image/jpeg" in header or "image/jpg" in header:
+                    media_type = "image/jpeg"
+                elif "image/webp" in header:
+                    media_type = "image/webp"
+                elif "image/gif" in header:
+                    media_type = "image/gif"
+            parts.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": raw_b64,
+                },
+            })
+        if self.content:
+            parts.append({"type": "text", "text": self.content})
+        return parts
 
 
 @dataclass
@@ -716,7 +765,8 @@ class AnthropicProvider(BaseLLMProvider):
             if m.role == "system":
                 system_text = m.content
             else:
-                api_messages.append(m.to_dict())
+                d = {"role": m.role, "content": m.to_anthropic_content()}
+                api_messages.append(d)
 
         payload = {
             "model": self.config.model,
@@ -753,7 +803,8 @@ class AnthropicProvider(BaseLLMProvider):
             if m.role == "system":
                 system_text = m.content
             else:
-                api_messages.append(m.to_dict())
+                d = {"role": m.role, "content": m.to_anthropic_content()}
+                api_messages.append(d)
 
         payload = {
             "model": self.config.model,
