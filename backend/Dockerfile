@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM python:3.11-slim AS builder
 
 WORKDIR /app/backend
@@ -7,14 +8,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 第一层：只复制依赖声明，安装依赖
-# pyproject.toml 不变则命中 Docker 缓存，不会重下 torch 等大包
+# 第一层：只复制依赖声明
 COPY pyproject.toml .
 
-# 提取 dependencies 列表并安装（不需要源码，不触发代码变更导致的缓存失效）
-RUN pip install --upgrade pip \
+# 安装依赖 — 使用 BuildKit cache mount 持久化 pip 下载缓存
+# 即使 pyproject.toml 改了（加新依赖），已有的包（torch 等）直接从缓存装，不重新下载
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip \
     && python -c "import tomllib,pathlib; d=tomllib.loads(pathlib.Path('pyproject.toml').read_text()); open('/tmp/reqs.txt','w').write('\n'.join(d['project']['dependencies']))" \
-    && pip install --prefix=/install -r /tmp/reqs.txt --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
+    && pip install --prefix=/install -r /tmp/reqs.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 
 FROM python:3.11-slim AS runtime
