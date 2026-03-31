@@ -721,16 +721,30 @@ class ExpertAgent:
 
             tool_calls = current_tool_calls
 
-            # ── 容错：LLM 有时幻觉出 data.query / quant.query / info.query / industry.query ──
-            # 这些 action 不存在，应重映射为 expert.{engine}（咨询对应引擎专家）
-            _EXPERT_ENGINES = {"data", "quant", "info", "industry"}
+            # ── 容错：LLM 幻觉出不存在的 engine.action（如 data.screen_stocks）──
+            # 凡是不在已知 action 白名单里的，都重映射为 expert.{engine}
+            _KNOWN_ACTIONS: dict[str, set[str]] = {
+                "data": {"get_current_date", "get_daily_history", "search_asset", "get_asset_profile",
+                         "get_asset_quote", "get_asset_daily_history", "get_company_profile", "search_stock"},
+                "quant": {"get_factor_scores", "get_technical_indicators"},
+                "cluster": {"get_terrain_data", "search_stocks"},
+                "industry": {"bridge_market_assets"},
+            }
             for tc in tool_calls:
-                if tc.engine in _EXPERT_ENGINES and tc.action == "query":
-                    original = f"{tc.engine}.query"
+                known = _KNOWN_ACTIONS.get(tc.engine)
+                if known is not None and tc.action not in known:
+                    original = f"{tc.engine}.{tc.action}"
                     tc.params.setdefault("question", analysis_message)
                     tc.action = tc.engine   # expert.data / expert.quant / ...
                     tc.engine = "expert"
                     logger.info(f"🔧 工具重映射: {original} → expert.{tc.action}")
+                elif tc.engine == "info":
+                    # info 引擎没有直接工具，全部走 expert.info
+                    original = f"info.{tc.action}"
+                    tc.params.setdefault("question", analysis_message)
+                    tc.action = "info"
+                    tc.engine = "expert"
+                    logger.info(f"🔧 工具重映射: {original} → expert.info")
 
             # ── 去重：当已有 expert.data 调用时，过滤掉多余的 data.get_daily_history ──
             has_data_expert = any(tc.engine == "expert" and tc.action == "data" for tc in tool_calls)
