@@ -24,6 +24,12 @@ data/chromadb/
 data/chromadb_rag/
 data/expert_kg.json
 
+# 前端运行时快照（后端生成，每次更新都变）
+frontend/public/terrain_snapshot.json
+
+# 根目录误生成的 package-lock
+package-lock.json
+
 # 误用 pip = 语法产生的垃圾文件
 =*
 
