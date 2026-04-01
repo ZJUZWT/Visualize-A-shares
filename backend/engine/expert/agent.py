@@ -625,6 +625,24 @@ class ExpertAgent:
                         max_rounds=max_rounds,
                         multi_select=multi_select,
                     )
+
+                logger.warning(
+                    f"clarify LLM 返回空 options，启用安全兜底选项 (persona={persona}, round={current_round})"
+                )
+                return ClarificationOutput(
+                    should_clarify=True,
+                    question_summary=parsed.get("question_summary", f"你在问：{clean_message[:60]}"),
+                    options=fallback_options,
+                    reasoning=parsed.get("reasoning", "LLM 未给出可选方向，已切换到安全兜底选项。"),
+                    skip_option=ClarificationOption(
+                        id="skip", label="S", title="跳过，直接分析",
+                        description="不做澄清，直接进入完整分析。", focus="完整分析",
+                    ),
+                    needs_more=needs_more,
+                    round=current_round,
+                    max_rounds=max_rounds,
+                    multi_select=True,
+                )
         except Exception as e:
             logger.warning(f"clarify LLM 生成失败，降级到预设选项: {e}")
 

@@ -290,6 +290,52 @@ async def test_resume_completion_check_marks_failed_when_provider_exception(tmp_
     mock_tools.execute.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_clarify_true_without_options_falls_back_to_safe_options(tmp_path):
+    from engine.expert.agent import ExpertAgent
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            _ = messages
+            yield (
+                '{"should_clarify": true, "question_summary": "还需要进一步聚焦", '
+                '"multi_select": false, "options": [], "reasoning": "需要继续确认重点", '
+                '"needs_more": true}'
+            )
+
+    mock_tools = Mock()
+    mock_tools.llm_engine = _MockLLM()
+    mock_tools.execute = AsyncMock(return_value="tool result")
+    agent = ExpertAgent(mock_tools, kg_path=str(tmp_path / "kg.json"))
+
+    result = await agent.clarify(
+        "继续帮我细化分析角度",
+        history=[{"role": "user", "content": "先看估值和行业逻辑"}],
+        persona="rag",
+        previous_selections=[
+            {
+                "round": 1,
+                "selections": [
+                    {
+                        "option_id": "valuation",
+                        "label": "A",
+                        "title": "先看估值",
+                        "focus": "估值、安全边际",
+                        "skip": False,
+                    }
+                ],
+            }
+        ],
+    )
+
+    assert result.should_clarify is True
+    assert result.round == 2
+    assert len(result.options) >= 3
+    assert result.skip_option.id == "skip"
+    assert result.multi_select is True
+    assert result.options[0].id == "valuation"
+
+
 async def _async_gen(items):
     for item in items:
         yield item

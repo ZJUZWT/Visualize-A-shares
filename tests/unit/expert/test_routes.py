@@ -128,6 +128,54 @@ def test_clarify_short_term_uses_short_term_persona(client):
         )
 
 
+def test_clarify_rag_empty_options_falls_back_to_safe_options(client, tmp_path):
+    from engine.expert.agent import ExpertAgent
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            _ = messages
+            yield (
+                '{"should_clarify": true, "question_summary": "还需要进一步聚焦", '
+                '"multi_select": false, "options": [], "reasoning": "需要继续确认重点", '
+                '"needs_more": true}'
+            )
+
+    mock_tools = Mock()
+    mock_tools.llm_engine = _MockLLM()
+    mock_tools.execute = AsyncMock(return_value="tool result")
+    agent = ExpertAgent(mock_tools, kg_path=str(tmp_path / "kg.json"))
+
+    with patch("engine.expert.routes.get_expert_agent", return_value=agent):
+        response = client.post(
+            "/api/v1/expert/clarify/rag",
+            json={
+                "message": "继续帮我细化分析角度",
+                "previous_selections": [
+                    {
+                        "round": 1,
+                        "selections": [
+                            {
+                                "option_id": "valuation",
+                                "label": "A",
+                                "title": "先看估值",
+                                "focus": "估值、安全边际",
+                                "skip": False,
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["should_clarify"] is True
+    assert data["round"] == 2
+    assert len(data["options"]) >= 3
+    assert data["skip_option"]["id"] == "skip"
+    assert data["multi_select"] is True
+
+
 def _init_test_expert_db(
     db_path: Path,
     session_id: str = "session-1",
