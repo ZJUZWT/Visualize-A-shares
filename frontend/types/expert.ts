@@ -21,6 +21,24 @@ export type ExpertEventType =
   | "belief_updated"
   | "error";
 
+export type ExpertFeedbackIssueType =
+  | "load_failed"
+  | "llm_truncated"
+  | "resume_misjudged_complete"
+  | "clarify_missing_options"
+  | "clarify_auto_advance"
+  | "clarify_subchoice_stuck"
+  | "other";
+
+export type ExpertFeedbackSource = "reply" | "clarification" | "resume";
+
+export interface ResumeCompletionCheckResult {
+  is_complete: boolean;
+  reason: string;
+  confidence: number;
+  check_failed?: boolean;
+}
+
 export interface GraphNode {
   id: string;
   type: "stock" | "sector" | "event" | "belief" | "stance";
@@ -182,6 +200,83 @@ export interface PendingClarification {
   originalMessage: string;
   /** 多轮澄清：之前所有轮次的用户选择 */
   previousSelections: ClarificationRoundSelection[];
+}
+
+export interface ExpertFeedbackCreatePayload {
+  session_id: string;
+  message_id: string;
+  expert_type: ExpertType;
+  report_source: ExpertFeedbackSource;
+  issue_type: ExpertFeedbackIssueType;
+  user_note: string;
+  context: {
+    message: {
+      id: string;
+      db_message_id?: string;
+      role: "user" | "expert";
+      content: string;
+      status?: "completed" | "partial";
+      send_status?: "pending" | "sent" | "failed";
+      is_streaming: boolean;
+      thinking: ThinkingItem[];
+    };
+    previous_user_message: {
+      id: string;
+      content: string;
+    } | null;
+    history: Array<{
+      id: string;
+      db_message_id?: string;
+      role: "user" | "expert";
+      content: string;
+      status?: "completed" | "partial";
+      send_status?: "pending" | "sent" | "failed";
+      is_streaming: boolean;
+      thinking: ThinkingItem[];
+    }>;
+    pending_clarification: PendingClarification | null;
+    expert_status: ExpertStatus;
+    latest_error: string | null;
+  };
+}
+
+export interface ExpertFeedbackSubmitResponse {
+  ok: boolean;
+  feedback_id: string;
+}
+
+export interface ExpertFeedbackSummary {
+  id: string;
+  user_id: string;
+  session_id: string;
+  message_id: string;
+  expert_type: string;
+  report_source: ExpertFeedbackSource;
+  issue_type: ExpertFeedbackIssueType;
+  user_note: string;
+  message_status: string;
+  created_at: string;
+  resolved_at: string | null;
+  resolver: string | null;
+}
+
+export interface ExpertFeedbackDetail extends ExpertFeedbackSummary {
+  user_message: string;
+  assistant_content: string;
+  thinking_json: unknown[];
+  context_json: Record<string, unknown>;
+  resolution_note: string;
+}
+
+export interface ExpertFeedbackResolveResponse {
+  ok: boolean;
+}
+
+export interface ExpertFeedbackSubmitOptions {
+  userNote?: string;
+  issueType: ExpertFeedbackIssueType;
+  reportSource?: ExpertFeedbackSource;
+  checkResumeAfterSubmit?: boolean;
 }
 
 /** 对话 Session */

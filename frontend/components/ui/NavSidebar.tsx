@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Mountain, Scale, BrainCircuit, TrendingUp, ClipboardList, GitBranch, FileText, Bot, LogOut, User } from "lucide-react";
+import { Mountain, Scale, BrainCircuit, TrendingUp, ClipboardList, GitBranch, FileText, Bot, LogOut, User, AlertTriangle } from "lucide-react";
 import { useConnectionStore } from "@/stores/useConnectionStore";
 
 const NAV_ITEMS = [
   { href: "/", icon: Mountain, label: "地形图", feature: "terrain" },
   { href: "/debate", icon: Scale, label: "专家辩论", feature: "debate" },
   { href: "/expert", icon: BrainCircuit, label: "投资专家", feature: "expert" },
+  { href: "/admin/feedback", icon: AlertTriangle, label: "反馈后台", feature: "expert", adminOnly: true },
   { href: "/plans", icon: FileText, label: "交易计划", feature: "plans" },
   { href: "/agent", icon: Bot, label: "Agent", feature: "agent" },
   { href: "/tasks", icon: ClipboardList, label: "事务管理", feature: "tasks" },
@@ -19,12 +20,18 @@ const NAV_ITEMS = [
 export default function NavSidebar() {
   const pathname = usePathname();
   const features = useConnectionStore((s) => s.features);
+  const userId = useConnectionStore((s) => s.userId);
   const username = useConnectionStore((s) => s.username);
   const logout = useConnectionStore((s) => s.logout);
 
   // features 为 null（未加载）→ 全部显示；后端明确返回 false → 隐藏
   const visibleItems = NAV_ITEMS.filter(
-    (item) => !features || features[item.feature] !== false
+    (item) => {
+      if (item.adminOnly && userId !== "Admin") {
+        return false;
+      }
+      return !features || features[item.feature] !== false;
+    }
   );
 
   return (

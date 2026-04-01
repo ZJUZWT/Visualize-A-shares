@@ -1,5 +1,6 @@
 import { create, type StoreApi } from "zustand";
 import { getApiBase, getSseBase, apiFetch, getAuthHeaders } from "@/lib/api-base";
+import { buildExpertFeedbackPayload } from "@/lib/expertFeedback";
 import type {
   ExpertMessage,
   ExpertStatus,
@@ -17,6 +18,11 @@ import type {
   PendingClarification,
   ReasoningSummaryData,
   SelfCritiqueData,
+  ExpertFeedbackDetail,
+  ExpertFeedbackResolveResponse,
+  ExpertFeedbackSubmitOptions,
+  ExpertFeedbackSubmitResponse,
+  ExpertFeedbackSummary,
 } from "@/types/expert";
 import { DEFAULT_EXPERT_PROFILES } from "@/types/expert";
 
@@ -63,6 +69,14 @@ interface ExpertStore {
   submitClarification: (selection: ClarificationSelection) => Promise<void>;
   /** 提交多选 clarification 选项并继续分析 */
   submitClarifications: (selections: ClarificationSelection[]) => Promise<void>;
+  /** 提交 expert 消息反馈 */
+  submitFeedback: (messageId: string, options: ExpertFeedbackSubmitOptions) => Promise<ExpertFeedbackSubmitResponse | null>;
+  /** 管理员读取反馈列表 */
+  listAdminFeedbackReports: (unresolvedOnly?: boolean, limit?: number) => Promise<ExpertFeedbackSummary[]>;
+  /** 管理员读取反馈详情 */
+  getAdminFeedbackReport: (feedbackId: string) => Promise<ExpertFeedbackDetail | null>;
+  /** 管理员标记反馈已处理 */
+  resolveAdminFeedbackReport: (feedbackId: string, resolutionNote?: string) => Promise<boolean>;
   /** 停止当前流式请求 */
   stopStreaming: () => void;
   /** 重试失败的消息 */
@@ -88,7 +102,7 @@ interface ExpertStore {
   /** 删除 session */
   deleteSession: (sessionId: string) => Promise<void>;
   /** 续写被中断的 expert 回复 */
-  resumeReply: (messageId: string) => Promise<void>;
+  resumeReply: (messageId: string, options?: { checkCompleted?: boolean }) => Promise<void>;
 }
 
 function newId() {
@@ -1068,18 +1082,137 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     }
   },
 
-  resumeReply: async (messageId: string) => {
+  submitFeedback: async (messageId: string, options: ExpertFeedbackSubmitOptions) => {
+    const { activeExpert, activeSessions, chatHistories, pendingClarifications, statusMap, errorMap } = get();
+    const sessionId = activeSessions[activeExpert];
+    if (!sessionId) return null;
+
+    const history = chatHistories[activeExpert] ?? [];
+    const messageIndex = history.findIndex((item) => item.id === messageId || item.dbMessageId === messageId);
+    const currentMessage = messageIndex >= 0 ? history[messageIndex] : null;
+    if (!currentMessage || currentMessage.role !== "expert") {
+      throw new Error("未找到可反馈的 expert 消息");
+    }
+    let message = currentMessage;
+
+    if (!message.dbMessageId) {
+      const syncResponse = await apiFetch(`${getApiBase()}/api/v1/expert/sessions/${sessionId}/messages`);
+      if (syncResponse.ok) {
+        const serverMessages = await syncResponse.json() as Array<{
+          id: string;
+          role: "user" | "expert";
+          content: string;
+          status?: "completed" | "partial";
+        }>;
+        const matchedMessage = [...serverMessages].reverse().find(
+          (item) =>
+            item.role === "expert" &&
+            item.content === message.content &&
+            (item.status || "completed") === (message.status || "completed"),
+        );
+        if (matchedMessage?.id) {
+          message = { ...message, dbMessageId: matchedMessage.id };
+          set((s) => {
+            const nextHistory = [...(s.chatHistories[activeExpert] ?? [])];
+            if (messageIndex >= 0 && nextHistory[messageIndex]) {
+              nextHistory[messageIndex] = {
+                ...nextHistory[messageIndex],
+                dbMessageId: matchedMessage.id,
+              };
+            }
+            return {
+              chatHistories: { ...s.chatHistories, [activeExpert]: nextHistory },
+            };
+          });
+        }
+      }
+    }
+    if (!message.dbMessageId) {
+      throw new Error("消息尚未落库，请稍后再试");
+    }
+
+    const payload = buildExpertFeedbackPayload({
+      sessionId,
+      expertType: activeExpert,
+      issueType: options.issueType,
+      userNote: options.userNote,
+      reportSource: options.reportSource,
+      message,
+      history,
+      pendingClarification: pendingClarifications[activeExpert],
+      expertStatus: statusMap[activeExpert],
+      error: errorMap[activeExpert],
+    });
+
+    const response = await apiFetch(`${getApiBase()}/api/v1/expert/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.detail || `反馈提交失败 (${response.status})`);
+    }
+
+    const data = await response.json() as ExpertFeedbackSubmitResponse;
+    if (options.checkResumeAfterSubmit) {
+      await get().resumeReply(messageId, {
+        checkCompleted: message.status === "completed",
+      });
+    }
+    return data;
+  },
+
+  listAdminFeedbackReports: async (unresolvedOnly = true, limit = 50) => {
+    const params = new URLSearchParams({
+      unresolved_only: unresolvedOnly ? "true" : "false",
+      limit: String(limit),
+    });
+    const response = await apiFetch(`${getApiBase()}/api/v1/expert/feedback/admin?${params.toString()}`);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.detail || `反馈列表加载失败 (${response.status})`);
+    }
+    return await response.json() as ExpertFeedbackSummary[];
+  },
+
+  getAdminFeedbackReport: async (feedbackId: string) => {
+    const response = await apiFetch(`${getApiBase()}/api/v1/expert/feedback/admin/${feedbackId}`);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.detail || `反馈详情加载失败 (${response.status})`);
+    }
+    return await response.json() as ExpertFeedbackDetail;
+  },
+
+  resolveAdminFeedbackReport: async (feedbackId: string, resolutionNote = "") => {
+    const response = await apiFetch(`${getApiBase()}/api/v1/expert/feedback/admin/${feedbackId}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolution_note: resolutionNote }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.detail || `反馈处理失败 (${response.status})`);
+    }
+    const data = await response.json() as ExpertFeedbackResolveResponse;
+    return data.ok === true;
+  },
+
+  resumeReply: async (messageId: string, options?: { checkCompleted?: boolean }) => {
     const { activeExpert, activeSessions } = get();
     const expertType = activeExpert;
     const sessionId = activeSessions[expertType];
     if (!sessionId) return;
+    const checkCompleted = options?.checkCompleted ?? false;
 
     // 找到这条 partial 消息
     const history = get().chatHistories[expertType] ?? [];
     const msgIdx = history.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
     if (msgIdx === -1) return;
     const msg = history[msgIdx];
-    if (msg.role !== "expert" || msg.status !== "partial") return;
+    if (msg.role !== "expert") return;
+    if (msg.status !== "partial" && !(checkCompleted && msg.status === "completed")) return;
 
     const dbMsgId = msg.dbMessageId;
     if (!dbMsgId) return;
@@ -1101,7 +1234,11 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       const res = await fetch(`${getSseBase()}/api/v1/expert/chat/resume`, {
         method: "POST",
         headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, message_id: dbMsgId }),
+        body: JSON.stringify({
+          session_id: sessionId,
+          message_id: dbMsgId,
+          check_completed: checkCompleted,
+        }),
         signal: ac.signal,
       });
 

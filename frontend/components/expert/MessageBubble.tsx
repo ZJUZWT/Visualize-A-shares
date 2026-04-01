@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import type { ExpertMessage, ThinkingItem, ClarificationSelection, ClarificationOption } from "@/types/expert";
+import type { ExpertMessage, ThinkingItem, ClarificationSelection, ClarificationOption, ExpertFeedbackIssueType } from "@/types/expert";
 import { useExpertStore } from "@/stores/useExpertStore";
 import { ThinkingPanel } from "./ThinkingPanel";
 import { AlertCircle, RotateCw, CheckCircle2, ChevronDown, ChevronRight, Check, PlayCircle, AlertTriangle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { splitByTradePlan, hasTradePlan } from "@/lib/parseTradePlan";
+import { FEEDBACK_ISSUE_LABELS, shouldOfferResumeCheck } from "@/lib/expertFeedback";
 import TradePlanCard from "@/components/plans/TradePlanCard";
 import { getApiBase, apiFetch } from "@/lib/api-base";
 
@@ -17,6 +18,16 @@ interface MessageBubbleProps {
   expertIcon: string;
   expertName: string;
 }
+
+const FEEDBACK_ISSUE_OPTIONS: ExpertFeedbackIssueType[] = [
+  "load_failed",
+  "llm_truncated",
+  "resume_misjudged_complete",
+  "clarify_missing_options",
+  "clarify_auto_advance",
+  "clarify_subchoice_stuck",
+  "other",
+];
 
 /** 单轮澄清卡片 — 支持单选 / 多选 / 子选项 */
 function ClarificationCard({
@@ -453,6 +464,127 @@ function PartialBanner({
   );
 }
 
+function ExpertFeedbackPanel({
+  message,
+  expertColor,
+}: {
+  message: ExpertMessage;
+  expertColor: string;
+}) {
+  const { submitFeedback } = useExpertStore();
+  const [open, setOpen] = useState(false);
+  const [issueType, setIssueType] = useState<ExpertFeedbackIssueType>(
+    message.status === "partial" ? "llm_truncated" : "other",
+  );
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [submittedLabel, setSubmittedLabel] = useState<string | null>(null);
+
+  const canResumeCheck = shouldOfferResumeCheck(issueType, message);
+
+  const handleSubmit = useCallback(async (checkResumeAfterSubmit: boolean) => {
+    const targetId = message.dbMessageId || message.id;
+    if (!targetId) return;
+    setSubmitting(true);
+    setFeedbackError(null);
+    setSubmittedLabel(null);
+    try {
+      await submitFeedback(targetId, {
+        issueType,
+        userNote: note,
+        checkResumeAfterSubmit,
+      });
+      setSubmittedLabel(checkResumeAfterSubmit ? "已反馈，并发起完整性检查" : "已提交反馈");
+      setOpen(false);
+      setNote("");
+    } catch (error) {
+      setFeedbackError(error instanceof Error ? error.message : "反馈提交失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [issueType, message.dbMessageId, message.id, note, submitFeedback]);
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-red-500 transition-colors hover:text-red-400"
+        >
+          <AlertTriangle size={13} />
+          反馈问题
+        </button>
+        {submittedLabel && (
+          <span className="text-xs text-emerald-500">{submittedLabel}</span>
+        )}
+        {feedbackError && (
+          <span className="text-xs text-red-500">{feedbackError}</span>
+        )}
+      </div>
+
+      {open && (
+        <div className="mt-2 rounded-2xl border border-red-500/20 bg-red-500/5 p-3">
+          <div className="grid gap-3">
+            <label className="grid gap-1">
+              <span className="text-[11px] font-semibold text-[var(--text-secondary)]">
+                问题类型
+              </span>
+              <select
+                value={issueType}
+                onChange={(event) => setIssueType(event.target.value as ExpertFeedbackIssueType)}
+                className="rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+              >
+                {FEEDBACK_ISSUE_OPTIONS.map((item) => (
+                  <option key={item} value={item}>
+                    {FEEDBACK_ISSUE_LABELS[item]}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-[11px] font-semibold text-[var(--text-secondary)]">
+                备注
+              </span>
+              <textarea
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+                rows={3}
+                placeholder="可选：补充你看到的现象、重现步骤或报错文案"
+                className="resize-none rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+              />
+            </label>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleSubmit(false)}
+                className="rounded-xl border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] transition-colors hover:border-[var(--border-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                提交反馈
+              </button>
+              {canResumeCheck && (
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => handleSubmit(true)}
+                  className="rounded-xl px-3 py-2 text-xs font-medium text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{ backgroundColor: expertColor }}
+                >
+                  提交并检查续写
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MessageBubble({
   message,
   expertColor,
@@ -580,6 +712,8 @@ export function MessageBubble({
             expertColor={expertColor}
           />
         )}
+
+        <ExpertFeedbackPanel message={message} expertColor={expertColor} />
       </div>
     </div>
   );
