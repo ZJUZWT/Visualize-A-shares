@@ -7,6 +7,11 @@ import { ThinkingPanel } from "./ThinkingPanel";
 import { AlertCircle, RotateCw, CheckCircle2, ChevronDown, ChevronRight, Check, PlayCircle, AlertTriangle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  buildClarificationSelections,
+  toggleClarificationOption,
+  toggleClarificationSubChoice,
+} from "@/lib/clarificationSelection";
 import { splitByTradePlan, hasTradePlan } from "@/lib/parseTradePlan";
 import { FEEDBACK_ISSUE_LABELS, shouldOfferResumeCheck } from "@/lib/expertFeedback";
 import TradePlanCard from "@/components/plans/TradePlanCard";
@@ -40,7 +45,7 @@ function ClarificationCard({
   /** 是否是最后一个 pending 的轮次（只有它可交互） */
   isLastPending: boolean;
 }) {
-  const { submitClarification, submitClarifications, pendingClarifications, activeExpert } = useExpertStore();
+  const { submitClarifications, pendingClarifications, activeExpert } = useExpertStore();
   const isPending = item.status === "pending";
   const canSubmit = isPending && isLastPending && !!pendingClarifications[activeExpert];
   const isResolved = item.status === "selected" || item.status === "skipped";
@@ -61,84 +66,25 @@ function ClarificationCard({
 
   const roundLabel = item.round ?? item.data.round;
 
-  // 切换选中状态（多选模式）
   const toggleOption = useCallback((option: ClarificationOption) => {
-    if (!canSubmit || !multiSelect) return;
+    if (!canSubmit) return;
     if (option.sub_choices && option.sub_choices.length > 0) {
-      // 有子选项：展开/折叠子选项面板（不直接选中）
       setExpandedSubId(prev => prev === option.id ? null : option.id);
       return;
     }
-    setSelectedMap(prev => {
-      const next = new Map(prev);
-      if (next.has(option.id)) {
-        next.delete(option.id);
-      } else {
-        next.set(option.id, {
-          option_id: option.id,
-          label: option.label,
-          title: option.title,
-          focus: option.focus,
-          skip: false,
-        });
-      }
-      return next;
-    });
+    setSelectedMap((prev) => toggleClarificationOption(prev, option, multiSelect));
   }, [canSubmit, multiSelect]);
 
-  // 选择子选项（多选模式下的子选项互斥）
   const selectSubChoice = useCallback((option: ClarificationOption, subId: string, subText: string) => {
     if (!canSubmit) return;
-    setSelectedMap(prev => {
-      const next = new Map(prev);
-      next.set(option.id, {
-        option_id: option.id,
-        label: option.label,
-        title: option.title,
-        focus: option.focus,
-        skip: false,
-        sub_choice_id: subId,
-        sub_choice_text: subText,
-      });
-      return next;
-    });
-  }, [canSubmit]);
+    setSelectedMap((prev) =>
+      toggleClarificationSubChoice(prev, option, subId, subText, multiSelect),
+    );
+  }, [canSubmit, multiSelect]);
 
-  // 单选模式：直接提交
-  const handleSingleSelect = useCallback((option: ClarificationOption) => {
-    if (!canSubmit) return;
-    // 如果有子选项，展开子选项而不是直接提交
-    if (option.sub_choices && option.sub_choices.length > 0) {
-      setExpandedSubId(prev => prev === option.id ? null : option.id);
-      return;
-    }
-    submitClarification({
-      option_id: option.id,
-      label: option.label,
-      title: option.title,
-      focus: option.focus,
-      skip: false,
-    });
-  }, [canSubmit, submitClarification]);
-
-  // 单选模式下的子选项选择（直接提交）
-  const handleSingleSubChoice = useCallback((option: ClarificationOption, subId: string, subText: string) => {
-    if (!canSubmit) return;
-    submitClarification({
-      option_id: option.id,
-      label: option.label,
-      title: option.title,
-      focus: option.focus,
-      skip: false,
-      sub_choice_id: subId,
-      sub_choice_text: subText,
-    });
-  }, [canSubmit, submitClarification]);
-
-  // 确认多选
-  const handleConfirmMultiSelect = useCallback(() => {
+  const handleConfirmSelection = useCallback(() => {
     if (!canSubmit || selectedMap.size === 0) return;
-    submitClarifications(Array.from(selectedMap.values()));
+    submitClarifications(buildClarificationSelections(selectedMap));
   }, [canSubmit, selectedMap, submitClarifications]);
 
   // 构建已选摘要文本
@@ -220,7 +166,7 @@ function ClarificationCard({
               return (
                 <div key={option.id}>
                   <button
-                    onClick={() => multiSelect ? toggleOption(option) : handleSingleSelect(option)}
+                    onClick={() => toggleOption(option)}
                     disabled={!canSubmit}
                     className={`w-full rounded-xl border px-3 py-2.5 text-left transition-all duration-150 ${
                       isSelected
@@ -271,10 +217,7 @@ function ClarificationCard({
                         return (
                           <button
                             key={sc.id}
-                            onClick={() => multiSelect
-                              ? selectSubChoice(option, sc.id, sc.text)
-                              : handleSingleSubChoice(option, sc.id, sc.text)
-                            }
+                            onClick={() => selectSubChoice(option, sc.id, sc.text)}
                             className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${
                               isSubSelected
                                 ? "border-transparent text-white"
@@ -293,10 +236,9 @@ function ClarificationCard({
             })}
           </div>
 
-          {/* 多选确认按钮 */}
-          {multiSelect && canSubmit && (
+          {canSubmit && (
             <button
-              onClick={handleConfirmMultiSelect}
+              onClick={handleConfirmSelection}
               disabled={selectedMap.size === 0}
               className={`mt-3 rounded-xl border px-4 py-2 text-sm font-medium transition-all ${
                 selectedMap.size > 0
@@ -312,21 +254,13 @@ function ClarificationCard({
           <button
             onClick={() =>
               canSubmit &&
-              (multiSelect
-                ? submitClarifications([{
-                    option_id: item.data.skip_option.id,
-                    label: item.data.skip_option.label,
-                    title: item.data.skip_option.title,
-                    focus: item.data.skip_option.focus,
-                    skip: true,
-                  }])
-                : submitClarification({
-                    option_id: item.data.skip_option.id,
-                    label: item.data.skip_option.label,
-                    title: item.data.skip_option.title,
-                    focus: item.data.skip_option.focus,
-                    skip: true,
-                  }))
+              submitClarifications([{
+                option_id: item.data.skip_option.id,
+                label: item.data.skip_option.label,
+                title: item.data.skip_option.title,
+                focus: item.data.skip_option.focus,
+                skip: true,
+              }])
             }
             disabled={!canSubmit}
             className={`mt-3 inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${

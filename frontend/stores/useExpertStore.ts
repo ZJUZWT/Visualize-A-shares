@@ -1,5 +1,6 @@
 import { create, type StoreApi } from "zustand";
 import { getApiBase, getSseBase, apiFetch, getAuthHeaders } from "@/lib/api-base";
+import { shouldAutoAdvanceClarification } from "@/lib/clarificationSelection";
 import { buildExpertFeedbackPayload } from "@/lib/expertFeedback";
 import type {
   ExpertMessage,
@@ -978,8 +979,9 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       const nextData = await res.json() as ClarificationRequestData;
       const nextRound = nextData.round ?? (currentRound + 1);
 
-      // 如果后端返回 should_clarify=false 或没有选项，直接进入 chat
-      if (!nextData.should_clarify || !nextData.options?.length) {
+      // 只有后端明确说无需澄清时才自动进入 chat。
+      // should_clarify=true 但 options 为空时，前端保持在澄清态，等待用户手动处理/反馈。
+      if (shouldAutoAdvanceClarification(nextData)) {
         set((s) => ({
           pendingClarifications: { ...s.pendingClarifications, [expertType]: null },
         }));
