@@ -127,7 +127,12 @@ def test_clarify_short_term_uses_short_term_persona(client):
         )
 
 
-def _init_test_expert_db(db_path: Path, session_id: str = "session-1", expert_type: str = "data") -> None:
+def _init_test_expert_db(
+    db_path: Path,
+    session_id: str = "session-1",
+    expert_type: str = "data",
+    session_user_id: str = "anonymous",
+) -> None:
     con = duckdb.connect(str(db_path))
     con.execute("CREATE SCHEMA expert")
     con.execute(
@@ -180,7 +185,7 @@ def _init_test_expert_db(db_path: Path, session_id: str = "session-1", expert_ty
     )
     con.execute(
         "INSERT INTO expert.sessions (id, expert_type, title, user_id) VALUES (?, ?, ?, ?)",
-        [session_id, expert_type, "测试会话", "anonymous"],
+        [session_id, expert_type, "测试会话", session_user_id],
     )
     con.close()
 
@@ -259,7 +264,12 @@ def test_feedback_report_is_persisted_with_full_context(client, tmp_path):
 
     db_path = tmp_path / "expert_chat.duckdb"
     session_id = "session-feedback"
-    _init_test_expert_db(db_path, session_id=session_id, expert_type="rag")
+    _init_test_expert_db(
+        db_path,
+        session_id=session_id,
+        expert_type="rag",
+        session_user_id="alice",
+    )
     con = duckdb.connect(str(db_path))
     con.execute(
         """
@@ -321,6 +331,59 @@ def test_feedback_report_is_persisted_with_full_context(client, tmp_path):
     assert "load failed" in str(rows[0][4])
 
 
+def test_feedback_submit_forbidden_for_non_owner_session(client, tmp_path):
+    from engine.expert import routes as routes_module
+
+    db_path = tmp_path / "expert_chat.duckdb"
+    session_id = "session-owner-locked"
+    _init_test_expert_db(
+        db_path,
+        session_id=session_id,
+        expert_type="rag",
+        session_user_id="alice",
+    )
+    con = duckdb.connect(str(db_path))
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'user', ?, '[]', 'completed')
+        """,
+        ["u-owner", session_id, "owner 用户问题"],
+    )
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'expert', ?, '[]', 'partial')
+        """,
+        ["e-owner", session_id, "owner 的专家回复"],
+    )
+    con.close()
+
+    payload = {
+        "session_id": session_id,
+        "message_id": "e-owner",
+        "expert_type": "rag",
+        "report_source": "reply",
+        "issue_type": "llm_truncated",
+        "user_note": "非 owner 尝试提交",
+        "context": {"raw_error": "permission denied"},
+    }
+
+    with patch.object(routes_module, "_get_db", side_effect=lambda: duckdb.connect(str(db_path))):
+        resp = client.post(
+            "/api/v1/expert/feedback",
+            json=payload,
+            headers={"X-User-Id": "bob"},
+        )
+
+    assert resp.status_code == 403
+
+    con2 = duckdb.connect(str(db_path))
+    count = con2.execute("SELECT COUNT(*) FROM expert.feedback_reports").fetchone()[0]
+    con2.close()
+    assert count == 0
+
+
 def test_feedback_admin_endpoint_requires_admin_user(client, tmp_path):
     from engine.expert import routes as routes_module
 
@@ -353,7 +416,12 @@ def test_feedback_admin_endpoints_support_list_detail_and_resolve(client, tmp_pa
 
     db_path = tmp_path / "expert_chat.duckdb"
     session_id = "session-admin-success"
-    _init_test_expert_db(db_path, session_id=session_id, expert_type="rag")
+    _init_test_expert_db(
+        db_path,
+        session_id=session_id,
+        expert_type="rag",
+        session_user_id="alice",
+    )
     con = duckdb.connect(str(db_path))
     con.execute(
         """
@@ -435,7 +503,12 @@ async def test_feedback_route_functions_return_response_models(tmp_path):
 
     db_path = tmp_path / "expert_chat.duckdb"
     session_id = "session-model-types"
-    _init_test_expert_db(db_path, session_id=session_id, expert_type="rag")
+    _init_test_expert_db(
+        db_path,
+        session_id=session_id,
+        expert_type="rag",
+        session_user_id="alice",
+    )
     con = duckdb.connect(str(db_path))
     con.execute(
         """

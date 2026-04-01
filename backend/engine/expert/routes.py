@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
-from auth import get_current_user
+from auth import DEFAULT_ADMIN_USER, get_current_user
 
 from config import settings, DB_PATH, DATA_DIR
 from engine.expert.agent import ExpertAgent
@@ -377,6 +377,16 @@ async def submit_feedback(req: FeedbackReportCreateRequest, user_id: str = Depen
     con = None
     try:
         con = _get_db()
+        session_row = con.execute(
+            "SELECT user_id FROM expert.sessions WHERE id = ?",
+            [req.session_id],
+        ).fetchone()
+        if not session_row:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        session_owner = session_row[0] or "anonymous"
+        if user_id != DEFAULT_ADMIN_USER and session_owner != user_id:
+            raise HTTPException(status_code=403, detail="无权反馈此会话")
+
         msg_row = con.execute(
             "SELECT role, content, thinking, status, created_at FROM expert.messages WHERE id = ? AND session_id = ?",
             [req.message_id, req.session_id],
@@ -629,7 +639,7 @@ def _auto_title(session_id: str, user_message: str):
 
 def _require_admin(user_id: str) -> None:
     """仅允许默认管理员访问反馈管理接口。"""
-    if user_id != "Admin":
+    if user_id != DEFAULT_ADMIN_USER:
         raise HTTPException(status_code=403, detail="仅管理员可访问")
 
 
