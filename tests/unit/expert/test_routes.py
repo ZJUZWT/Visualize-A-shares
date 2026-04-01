@@ -7,10 +7,19 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import duckdb
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from engine.expert.routes import router, _init_db, get_expert_agent
-from engine.expert.schemas import ExpertChatRequest
+from engine.expert.schemas import (
+    ExpertChatRequest,
+    FeedbackReportCreateRequest,
+    FeedbackReportDetail,
+    FeedbackReportSummary,
+    FeedbackResolveRequest,
+    FeedbackResolveResponse,
+    FeedbackSubmitResponse,
+)
 
 
 @pytest.fixture
@@ -324,3 +333,163 @@ def test_feedback_admin_endpoint_requires_admin_user(client, tmp_path):
             headers={"X-User-Id": "bob"},
         )
     assert resp.status_code == 403
+
+
+def test_feedback_routes_declare_response_models(client):
+    route_map = {
+        route.path: route
+        for route in client.app.routes
+        if isinstance(route, APIRoute)
+    }
+
+    assert route_map["/api/v1/expert/feedback"].response_model is not None
+    assert route_map["/api/v1/expert/feedback/admin"].response_model is not None
+    assert route_map["/api/v1/expert/feedback/admin/{feedback_id}"].response_model is not None
+    assert route_map["/api/v1/expert/feedback/admin/{feedback_id}/resolve"].response_model is not None
+
+
+def test_feedback_admin_endpoints_support_list_detail_and_resolve(client, tmp_path):
+    from engine.expert import routes as routes_module
+
+    db_path = tmp_path / "expert_chat.duckdb"
+    session_id = "session-admin-success"
+    _init_test_expert_db(db_path, session_id=session_id, expert_type="rag")
+    con = duckdb.connect(str(db_path))
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'user', ?, '[]', 'completed')
+        """,
+        ["u-admin", session_id, "管理员排查问题"],
+    )
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'expert', ?, ?, 'partial')
+        """,
+        ["e-admin", session_id, "管理员看到的半截回复", '[{"type":"tool_call","data":{"engine":"expert","action":"data"}}]'],
+    )
+    con.close()
+
+    payload = {
+        "session_id": session_id,
+        "message_id": "e-admin",
+        "expert_type": "rag",
+        "report_source": "reply",
+        "issue_type": "load_failed",
+        "user_note": "管理后台回归",
+        "context": {"raw_error": "load failed"},
+    }
+
+    with patch.object(routes_module, "_get_db", side_effect=lambda: duckdb.connect(str(db_path))):
+        create_resp = client.post(
+            "/api/v1/expert/feedback",
+            json=payload,
+            headers={"X-User-Id": "alice"},
+        )
+        assert create_resp.status_code == 200
+        feedback_id = create_resp.json()["feedback_id"]
+
+        list_resp = client.get(
+            "/api/v1/expert/feedback/admin",
+            headers={"X-User-Id": "Admin"},
+        )
+        assert list_resp.status_code == 200
+        list_data = list_resp.json()
+        assert len(list_data) == 1
+        assert list_data[0]["id"] == feedback_id
+        assert list_data[0]["issue_type"] == "load_failed"
+
+        detail_resp = client.get(
+            f"/api/v1/expert/feedback/admin/{feedback_id}",
+            headers={"X-User-Id": "Admin"},
+        )
+        assert detail_resp.status_code == 200
+        detail_data = detail_resp.json()
+        assert detail_data["id"] == feedback_id
+        assert detail_data["assistant_content"] == "管理员看到的半截回复"
+        assert detail_data["context_json"]["raw_error"] == "load failed"
+
+        resolve_resp = client.post(
+            f"/api/v1/expert/feedback/admin/{feedback_id}/resolve",
+            json={"resolution_note": "已处理"},
+            headers={"X-User-Id": "Admin"},
+        )
+        assert resolve_resp.status_code == 200
+        assert resolve_resp.json()["ok"] is True
+
+    con2 = duckdb.connect(str(db_path))
+    row = con2.execute(
+        "SELECT resolver, resolution_note, resolved_at FROM expert.feedback_reports WHERE id = ?",
+        [feedback_id],
+    ).fetchone()
+    con2.close()
+    assert row[0] == "Admin"
+    assert row[1] == "已处理"
+    assert row[2] is not None
+
+
+@pytest.mark.asyncio
+async def test_feedback_route_functions_return_response_models(tmp_path):
+    from engine.expert import routes as routes_module
+
+    db_path = tmp_path / "expert_chat.duckdb"
+    session_id = "session-model-types"
+    _init_test_expert_db(db_path, session_id=session_id, expert_type="rag")
+    con = duckdb.connect(str(db_path))
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'user', ?, '[]', 'completed')
+        """,
+        ["u-model", session_id, "模型类型校验问题"],
+    )
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'expert', ?, ?, 'partial')
+        """,
+        ["e-model", session_id, "模型类型校验半截回复", '[{"type":"tool_call","data":{"engine":"expert","action":"data"}}]'],
+    )
+    con.close()
+
+    with patch.object(routes_module, "_get_db", side_effect=lambda: duckdb.connect(str(db_path))):
+        submit_resp = await routes_module.submit_feedback(
+            FeedbackReportCreateRequest(
+                session_id=session_id,
+                message_id="e-model",
+                expert_type="rag",
+                report_source="reply",
+                issue_type="llm_truncated",
+                user_note="类型测试",
+                context={"raw_error": "load failed"},
+            ),
+            user_id="alice",
+        )
+        assert isinstance(submit_resp, FeedbackSubmitResponse)
+        assert submit_resp.feedback_id
+
+        list_resp = await routes_module.list_feedback_reports(
+            unresolved_only=True,
+            limit=10,
+            user_id="Admin",
+        )
+        assert isinstance(list_resp, list)
+        assert list_resp
+        assert isinstance(list_resp[0], FeedbackReportSummary)
+        feedback_id = list_resp[0].id
+
+        detail_resp = await routes_module.get_feedback_report(
+            feedback_id=feedback_id,
+            user_id="Admin",
+        )
+        assert isinstance(detail_resp, FeedbackReportDetail)
+        assert detail_resp.assistant_content == "模型类型校验半截回复"
+
+        resolve_resp = await routes_module.resolve_feedback_report(
+            feedback_id=feedback_id,
+            req=FeedbackResolveRequest(resolution_note="已核实"),
+            user_id="Admin",
+        )
+        assert isinstance(resolve_resp, FeedbackResolveResponse)
+        assert resolve_resp.ok is True

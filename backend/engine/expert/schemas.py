@@ -235,6 +235,50 @@ class FeedbackResolveRequest(BaseModel):
     resolution_note: str = ""
 
 
+class FeedbackSubmitResponse(BaseModel):
+    ok: bool = True
+    feedback_id: str
+
+
+class FeedbackReportSummary(BaseModel):
+    id: str
+    user_id: str
+    session_id: str
+    message_id: str
+    expert_type: str
+    report_source: FeedbackSourceType
+    issue_type: FeedbackIssueType
+    user_note: str = ""
+    message_status: str = "completed"
+    created_at: str
+    resolved_at: str | None = None
+    resolver: str | None = None
+
+
+class FeedbackReportDetail(BaseModel):
+    id: str
+    user_id: str
+    session_id: str
+    message_id: str
+    expert_type: str
+    report_source: FeedbackSourceType
+    issue_type: FeedbackIssueType
+    user_note: str = ""
+    user_message: str
+    assistant_content: str
+    message_status: str = "completed"
+    thinking_json: list = Field(default_factory=list)
+    context_json: dict = Field(default_factory=dict)
+    created_at: str
+    resolved_at: str | None = None
+    resolver: str | None = None
+    resolution_note: str = ""
+
+
+class FeedbackResolveResponse(BaseModel):
+    ok: bool = True
+
+
 class SessionCreateRequest(BaseModel):
     """创建 session 请求体"""
     expert_type: str = "rag"

@@ -20,8 +20,12 @@ from engine.expert.schemas import (
     ClarifyRequest,
     ExpertChatRequest,
     ExpertResumeRequest,
+    FeedbackReportDetail,
+    FeedbackReportSummary,
     FeedbackReportCreateRequest,
+    FeedbackResolveResponse,
     FeedbackResolveRequest,
+    FeedbackSubmitResponse,
     ScheduledTaskRequest,
     SessionCreateRequest,
 )
@@ -367,7 +371,7 @@ async def save_user_message(session_id: str, body: dict):
     return {"ok": True}
 
 
-@router.post("/feedback")
+@router.post("/feedback", response_model=FeedbackSubmitResponse)
 async def submit_feedback(req: FeedbackReportCreateRequest, user_id: str = Depends(get_current_user)):
     """提交 expert 对话问题反馈。"""
     con = None
@@ -404,13 +408,13 @@ async def submit_feedback(req: FeedbackReportCreateRequest, user_id: str = Depen
                 thinking_json or "[]", json.dumps(req.context, ensure_ascii=False), datetime.now(),
             ],
         )
-        return {"ok": True, "feedback_id": feedback_id}
+        return FeedbackSubmitResponse(ok=True, feedback_id=feedback_id)
     finally:
         if con:
             con.close()
 
 
-@router.get("/feedback/admin")
+@router.get("/feedback/admin", response_model=list[FeedbackReportSummary])
 async def list_feedback_reports(
     unresolved_only: bool = Query(default=True),
     limit: int = Query(default=50, ge=1, le=200),
@@ -434,20 +438,20 @@ async def list_feedback_reports(
             [limit],
         ).fetchall()
         return [
-            {
-                "id": r[0],
-                "user_id": r[1],
-                "session_id": r[2],
-                "message_id": r[3],
-                "expert_type": r[4],
-                "report_source": r[5],
-                "issue_type": r[6],
-                "user_note": r[7],
-                "message_status": r[8],
-                "created_at": str(r[9]),
-                "resolved_at": str(r[10]) if r[10] else None,
-                "resolver": r[11],
-            }
+            FeedbackReportSummary(
+                id=r[0],
+                user_id=r[1],
+                session_id=r[2],
+                message_id=r[3],
+                expert_type=r[4],
+                report_source=r[5],
+                issue_type=r[6],
+                user_note=r[7],
+                message_status=r[8],
+                created_at=str(r[9]),
+                resolved_at=str(r[10]) if r[10] else None,
+                resolver=r[11],
+            )
             for r in rows
         ]
     finally:
@@ -455,7 +459,7 @@ async def list_feedback_reports(
             con.close()
 
 
-@router.get("/feedback/admin/{feedback_id}")
+@router.get("/feedback/admin/{feedback_id}", response_model=FeedbackReportDetail)
 async def get_feedback_report(feedback_id: str, user_id: str = Depends(get_current_user)):
     """管理员查看反馈详情。"""
     _require_admin(user_id)
@@ -474,31 +478,31 @@ async def get_feedback_report(feedback_id: str, user_id: str = Depends(get_curre
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="反馈不存在")
-        return {
-            "id": row[0],
-            "user_id": row[1],
-            "session_id": row[2],
-            "message_id": row[3],
-            "expert_type": row[4],
-            "report_source": row[5],
-            "issue_type": row[6],
-            "user_note": row[7],
-            "user_message": row[8],
-            "assistant_content": row[9],
-            "message_status": row[10],
-            "thinking_json": json.loads(row[11]) if row[11] else [],
-            "context_json": json.loads(row[12]) if row[12] else {},
-            "created_at": str(row[13]),
-            "resolved_at": str(row[14]) if row[14] else None,
-            "resolver": row[15],
-            "resolution_note": row[16] or "",
-        }
+        return FeedbackReportDetail(
+            id=row[0],
+            user_id=row[1],
+            session_id=row[2],
+            message_id=row[3],
+            expert_type=row[4],
+            report_source=row[5],
+            issue_type=row[6],
+            user_note=row[7],
+            user_message=row[8],
+            assistant_content=row[9],
+            message_status=row[10],
+            thinking_json=json.loads(row[11]) if row[11] else [],
+            context_json=json.loads(row[12]) if row[12] else {},
+            created_at=str(row[13]),
+            resolved_at=str(row[14]) if row[14] else None,
+            resolver=row[15],
+            resolution_note=row[16] or "",
+        )
     finally:
         if con:
             con.close()
 
 
-@router.post("/feedback/admin/{feedback_id}/resolve")
+@router.post("/feedback/admin/{feedback_id}/resolve", response_model=FeedbackResolveResponse)
 async def resolve_feedback_report(
     feedback_id: str,
     req: FeedbackResolveRequest,
@@ -519,7 +523,7 @@ async def resolve_feedback_report(
             "UPDATE expert.feedback_reports SET resolved_at = ?, resolver = ?, resolution_note = ? WHERE id = ?",
             [datetime.now(), user_id, req.resolution_note, feedback_id],
         )
-        return {"ok": True}
+        return FeedbackResolveResponse(ok=True)
     finally:
         if con:
             con.close()
