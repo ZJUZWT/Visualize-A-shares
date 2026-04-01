@@ -866,7 +866,12 @@ async def expert_chat_resume(req: ExpertResumeRequest):
         )
 
     msg_id, session_id, role, partial_content, thinking_json, status = row
-    if status != "partial":
+    if status not in ("partial", "completed"):
+        return StreamingResponse(
+            _error_stream(f"消息状态为 {status}，无需续写"),
+            media_type="text/event-stream",
+        )
+    if status == "completed" and not req.check_completed:
         return StreamingResponse(
             _error_stream(f"消息状态为 {status}，无需续写"),
             media_type="text/event-stream",
@@ -904,10 +909,39 @@ async def expert_chat_resume(req: ExpertResumeRequest):
         pass
 
     agent = get_expert_agent()
+    check_result = await agent.check_resume_completion(
+        user_message=user_message,
+        partial_content=partial_content,
+        history=history,
+        persona=persona,
+    )
+    is_complete = bool(check_result.get("is_complete", False))
+    if is_complete:
+        _update_message(msg_id, partial_content, thinking_items, status="completed")
+        logger.info(
+            "✅ resume 完整性检查通过，直接标记 completed "
+            f"(msg={msg_id}, confidence={check_result.get('confidence', 0.0)})"
+        )
+
+        async def completed_event_stream():
+            yield (
+                "event: resume_completion_check\n"
+                f"data: {json.dumps(check_result, ensure_ascii=False)}\n\n"
+            )
+            yield (
+                "event: resume_complete\n"
+                f"data: {json.dumps({'continuation': '', 'skipped_resume': True}, ensure_ascii=False)}\n\n"
+            )
+
+        return StreamingResponse(completed_event_stream(), media_type="text/event-stream")
 
     async def event_stream():
         continuation = ""
         try:
+            yield (
+                "event: resume_completion_check\n"
+                f"data: {json.dumps(check_result, ensure_ascii=False)}\n\n"
+            )
             async for event in agent.resume_reply(
                 message=user_message,
                 partial_content=partial_content,

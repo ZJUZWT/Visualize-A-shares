@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from engine.expert.routes import router, _init_db, get_expert_agent
 from engine.expert.schemas import (
     ExpertChatRequest,
+    ExpertResumeRequest,
     FeedbackReportCreateRequest,
     FeedbackReportDetail,
     FeedbackReportSummary,
@@ -566,3 +567,126 @@ async def test_feedback_route_functions_return_response_models(tmp_path):
         )
         assert isinstance(resolve_resp, FeedbackResolveResponse)
         assert resolve_resp.ok is True
+
+
+@pytest.mark.asyncio
+async def test_resume_marks_message_completed_when_completion_check_says_complete(tmp_path):
+    from engine.expert import routes as routes_module
+
+    db_path = tmp_path / "expert_chat_resume_complete.duckdb"
+    session_id = "session-resume-complete"
+    message_id = "e-resume-complete"
+    _init_test_expert_db(
+        db_path,
+        session_id=session_id,
+        expert_type="rag",
+        session_user_id="alice",
+    )
+    con = duckdb.connect(str(db_path))
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'user', ?, '[]', 'completed')
+        """,
+        ["u-resume-complete", session_id, "这个回复是不是已经完整了？"],
+    )
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'expert', ?, '[]', 'partial')
+        """,
+        [message_id, session_id, "结论：继续持有，等待业绩验证。"],
+    )
+    con.close()
+
+    async def _unexpected_resume_reply(*args, **kwargs):
+        yield {"event": "resume_complete", "data": {"continuation": "不应该被续写"}}
+
+    mock_agent = Mock()
+    mock_agent.check_resume_completion = AsyncMock(return_value={
+        "is_complete": True,
+        "reason": "末尾已经是完整结论",
+        "confidence": 0.96,
+    })
+    mock_agent.resume_reply = Mock(side_effect=_unexpected_resume_reply)
+
+    with patch.object(routes_module, "_get_db", side_effect=lambda: duckdb.connect(str(db_path))):
+        with patch.object(routes_module, "get_expert_agent", return_value=mock_agent):
+            response = await routes_module.expert_chat_resume(
+                ExpertResumeRequest(session_id=session_id, message_id=message_id)
+            )
+            async for _ in response.body_iterator:
+                pass
+
+    con2 = duckdb.connect(str(db_path))
+    row = con2.execute(
+        "SELECT content, status FROM expert.messages WHERE id = ?",
+        [message_id],
+    ).fetchone()
+    con2.close()
+
+    assert row == ("结论：继续持有，等待业绩验证。", "completed")
+    mock_agent.check_resume_completion.assert_awaited_once()
+    assert mock_agent.resume_reply.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_resume_calls_resume_reply_when_completion_check_says_incomplete(tmp_path):
+    from engine.expert import routes as routes_module
+
+    db_path = tmp_path / "expert_chat_resume_incomplete.duckdb"
+    session_id = "session-resume-incomplete"
+    message_id = "e-resume-incomplete"
+    _init_test_expert_db(
+        db_path,
+        session_id=session_id,
+        expert_type="rag",
+        session_user_id="alice",
+    )
+    con = duckdb.connect(str(db_path))
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'user', ?, '[]', 'completed')
+        """,
+        ["u-resume-incomplete", session_id, "这段回复没写完，帮我续上"],
+    )
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'expert', ?, '[]', 'partial')
+        """,
+        [message_id, session_id, "结论：短期看震荡，"],
+    )
+    con.close()
+
+    async def _resume_reply(*args, **kwargs):
+        yield {"event": "resume_token", "data": {"token": "建议等待回踩确认后再分批。"}}
+        yield {"event": "resume_complete", "data": {"continuation": "建议等待回踩确认后再分批。"}}
+
+    mock_agent = Mock()
+    mock_agent.check_resume_completion = AsyncMock(return_value={
+        "is_complete": False,
+        "reason": "句子未结束",
+        "confidence": 0.95,
+    })
+    mock_agent.resume_reply = Mock(side_effect=_resume_reply)
+
+    with patch.object(routes_module, "_get_db", side_effect=lambda: duckdb.connect(str(db_path))):
+        with patch.object(routes_module, "get_expert_agent", return_value=mock_agent):
+            response = await routes_module.expert_chat_resume(
+                ExpertResumeRequest(session_id=session_id, message_id=message_id)
+            )
+            async for _ in response.body_iterator:
+                pass
+
+    con2 = duckdb.connect(str(db_path))
+    row = con2.execute(
+        "SELECT content, status FROM expert.messages WHERE id = ?",
+        [message_id],
+    ).fetchone()
+    con2.close()
+
+    assert row == ("结论：短期看震荡，建议等待回踩确认后再分批。", "completed")
+    mock_agent.check_resume_completion.assert_awaited_once()
+    assert mock_agent.resume_reply.call_count == 1

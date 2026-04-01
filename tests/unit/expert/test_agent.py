@@ -157,6 +157,58 @@ async def test_agent_chat_emits_self_critique_before_reply_complete(tmp_path):
     assert event_types.index("self_critique") < event_types.index("reply_complete")
 
 
+@pytest.mark.asyncio
+async def test_resume_completion_check_returns_complete_when_llm_says_complete(tmp_path):
+    from engine.expert.agent import ExpertAgent
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            _ = messages
+            yield '{"is_complete": true, "reason": "回复已完整", "confidence": 0.91}'
+
+    mock_tools = Mock()
+    mock_tools.llm_engine = _MockLLM()
+    mock_tools.execute = AsyncMock(return_value="tool result")
+    agent = ExpertAgent(mock_tools, kg_path=str(tmp_path / "kg.json"))
+
+    result = await agent.check_resume_completion(
+        user_message="帮我看看这段回复是否完整",
+        partial_content="结论：当前估值合理，建议持有。",
+        history=[{"role": "user", "content": "怎么看这只票"}],
+        persona="rag",
+    )
+
+    assert result["is_complete"] is True
+    assert result["reason"] == "回复已完整"
+    assert result["confidence"] == pytest.approx(0.91, rel=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_resume_completion_check_returns_incomplete_when_llm_says_incomplete(tmp_path):
+    from engine.expert.agent import ExpertAgent
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            _ = messages
+            yield '{"is_complete": false, "reason": "句子未结束", "confidence": 0.95}'
+
+    mock_tools = Mock()
+    mock_tools.llm_engine = _MockLLM()
+    mock_tools.execute = AsyncMock(return_value="tool result")
+    agent = ExpertAgent(mock_tools, kg_path=str(tmp_path / "kg.json"))
+
+    result = await agent.check_resume_completion(
+        user_message="这段话是不是中断了？",
+        partial_content="建议重点关注量价配合，若",
+        history=[{"role": "user", "content": "短线怎么看"}],
+        persona="rag",
+    )
+
+    assert result["is_complete"] is False
+    assert result["reason"] == "句子未结束"
+    assert result["confidence"] == pytest.approx(0.95, rel=1e-6)
+
+
 async def _async_gen(items):
     for item in items:
         yield item

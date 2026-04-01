@@ -33,6 +33,7 @@ from engine.expert.schemas import (
     GraphEdge,
     MaterialNode,
     RegionNode,
+    ResumeCompletionCheckResult,
     SelfCritiqueOutput,
     SectorNode,
     StockNode,
@@ -1968,6 +1969,95 @@ class ExpertAgent:
         except Exception as e:
             logger.error(f"resume_reply 失败: {e}")
             yield {"event": "error", "data": {"message": f"续写失败: {e}"}}
+
+    async def check_resume_completion(
+        self,
+        user_message: str,
+        partial_content: str,
+        history: list[dict] | None = None,
+        persona: str = "rag",
+    ) -> dict:
+        """仅做完整性判断（不调用工具），返回结构化 JSON 结果。"""
+        from llm.providers import ChatMessage
+
+        t0 = time.monotonic()
+        llm = self._get_quality_llm()
+        if not llm:
+            return ResumeCompletionCheckResult(
+                is_complete=False,
+                reason="LLM 未配置，默认视为未完成",
+                confidence=0.0,
+            ).model_dump()
+
+        system = build_reply_system(
+            persona,
+            current_date=get_current_date_context(),
+        )
+        system += (
+            "\n\n## 完整性检查任务（禁止续写）\n"
+            "你只判断 assistant 已有回复是否已经完整，不要改写、不要补写。\n"
+            "必须输出 JSON："
+            '{"is_complete": boolean, "reason": string, "confidence": number}\n'
+            "其中 confidence 范围是 0 到 1。"
+        )
+
+        prompt = (
+            "请判断 assistant 当前内容是否已经完整：\n"
+            f"[用户原问题]\n{user_message}\n\n"
+            f"[assistant 当前内容]\n{partial_content}\n"
+        )
+
+        messages = [ChatMessage("system", system)]
+        for h in (history or []):
+            role = "assistant" if h["role"] == "expert" else h["role"]
+            messages.append(ChatMessage(role, h.get("content", "")))
+        messages.append(ChatMessage("user", prompt))
+
+        msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
+        msg_dicts = self._context_guard.guard_messages(msg_dicts)
+        messages = [ChatMessage(m["role"], m["content"]) for m in msg_dicts]
+
+        raw = ""
+        try:
+            async for token in llm.chat_stream(messages):
+                raw += token
+
+            text = raw.strip()
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+            text = re.sub(r"<minimax:.*?</minimax:[^>]+>", "", text, flags=re.DOTALL).strip()
+
+            json_text = text
+            if "```" in text:
+                parts = re.findall(r"```(?:json)?\s*([\s\S]*?)```", text)
+                if parts:
+                    json_text = parts[0].strip()
+            if not json_text.startswith("{"):
+                m = re.search(r"\{[\s\S]*\}", json_text)
+                if m:
+                    json_text = m.group(0)
+
+            data = json.loads(json_text)
+            result = ResumeCompletionCheckResult(**data)
+
+            elapsed = (time.monotonic() - t0) * 1000
+            logger.info(
+                f"⏱️ check_resume_completion 耗时 {elapsed:.1f}ms "
+                f"(token_count={len(raw)}, model={getattr(llm, 'model', 'unknown')}, "
+                f"is_complete={result.is_complete}, confidence={result.confidence:.2f})"
+            )
+            return result.model_dump()
+        except Exception as e:
+            elapsed = (time.monotonic() - t0) * 1000
+            logger.warning(f"check_resume_completion 失败，默认未完成: {e}")
+            logger.info(
+                f"⏱️ check_resume_completion 耗时 {elapsed:.1f}ms "
+                f"(token_count={len(raw)}, model={getattr(llm, 'model', 'unknown')}, fallback=incomplete)"
+            )
+            return ResumeCompletionCheckResult(
+                is_complete=False,
+                reason=f"完整性检查失败，保守判定未完成: {e}",
+                confidence=0.0,
+            ).model_dump()
 
     async def _belief_update(
         self,

@@ -206,6 +206,14 @@ class ExpertResumeRequest(BaseModel):
     """续写被中断的 expert 回复"""
     session_id: str
     message_id: str  # partial 消息的 DB id
+    check_completed: bool = False  # 可选：对已 completed 但疑似截断的消息也执行完整性检查
+
+
+class ResumeCompletionCheckResult(BaseModel):
+    """resume 前的完整性检查结果"""
+    is_complete: bool = False
+    reason: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 FeedbackIssueType = Literal[
