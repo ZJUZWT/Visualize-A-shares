@@ -1,12 +1,13 @@
 """投资专家 Agent 路由 — 多专家统一入口 + Session 管理"""
 
+import asyncio
 import json
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 import duckdb
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
@@ -15,7 +16,15 @@ from auth import get_current_user
 from config import settings, DB_PATH, DATA_DIR
 from engine.expert.agent import ExpertAgent
 from engine.expert.engine_experts import EngineExpert, ExpertType, get_expert_profiles
-from engine.expert.schemas import ExpertChatRequest, ExpertResumeRequest, SessionCreateRequest, ScheduledTaskRequest, ClarifyRequest
+from engine.expert.schemas import (
+    ClarifyRequest,
+    ExpertChatRequest,
+    ExpertResumeRequest,
+    FeedbackReportCreateRequest,
+    FeedbackResolveRequest,
+    ScheduledTaskRequest,
+    SessionCreateRequest,
+)
 from engine.expert.scheduler import ScheduledTaskManager
 from engine.expert.tools import ExpertTools
 from engine.expert.tool_tracker import ToolOutcomeTracker
@@ -97,6 +106,29 @@ async def _init_db():
             )
         """)
         logger.info("expert.sessions + expert.messages 表初始化完成")
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS expert.feedback_reports (
+                id VARCHAR PRIMARY KEY,
+                user_id VARCHAR NOT NULL,
+                session_id VARCHAR NOT NULL,
+                message_id VARCHAR NOT NULL,
+                expert_type VARCHAR NOT NULL,
+                report_source VARCHAR NOT NULL,
+                issue_type VARCHAR NOT NULL,
+                user_note VARCHAR DEFAULT '',
+                user_message VARCHAR NOT NULL,
+                assistant_content VARCHAR NOT NULL,
+                message_status VARCHAR DEFAULT 'completed',
+                thinking_json JSON,
+                context_json JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TIMESTAMP,
+                resolver VARCHAR,
+                resolution_note VARCHAR DEFAULT ''
+            )
+        """)
+        logger.info("expert.feedback_reports 表初始化完成")
 
         # ── Phase 2: 用户隔离 — 顶级资源表加 user_id ──
         try:
@@ -335,6 +367,164 @@ async def save_user_message(session_id: str, body: dict):
     return {"ok": True}
 
 
+@router.post("/feedback")
+async def submit_feedback(req: FeedbackReportCreateRequest, user_id: str = Depends(get_current_user)):
+    """提交 expert 对话问题反馈。"""
+    con = None
+    try:
+        con = _get_db()
+        msg_row = con.execute(
+            "SELECT role, content, thinking, status, created_at FROM expert.messages WHERE id = ? AND session_id = ?",
+            [req.message_id, req.session_id],
+        ).fetchone()
+        if not msg_row:
+            raise HTTPException(status_code=404, detail="消息不存在")
+        role, assistant_content, thinking_json, status, created_at = msg_row
+        if role != "expert":
+            raise HTTPException(status_code=400, detail="仅支持反馈 expert 消息")
+
+        user_row = con.execute(
+            "SELECT content FROM expert.messages WHERE session_id = ? AND role = 'user' AND created_at <= ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            [req.session_id, created_at],
+        ).fetchone()
+        user_message = user_row[0] if user_row else ""
+
+        feedback_id = str(uuid.uuid4())
+        con.execute(
+            """
+            INSERT INTO expert.feedback_reports
+            (id, user_id, session_id, message_id, expert_type, report_source, issue_type,
+             user_note, user_message, assistant_content, message_status, thinking_json, context_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                feedback_id, user_id, req.session_id, req.message_id, req.expert_type, req.report_source,
+                req.issue_type, req.user_note, user_message, assistant_content, status or "completed",
+                thinking_json or "[]", json.dumps(req.context, ensure_ascii=False), datetime.now(),
+            ],
+        )
+        return {"ok": True, "feedback_id": feedback_id}
+    finally:
+        if con:
+            con.close()
+
+
+@router.get("/feedback/admin")
+async def list_feedback_reports(
+    unresolved_only: bool = Query(default=True),
+    limit: int = Query(default=50, ge=1, le=200),
+    user_id: str = Depends(get_current_user),
+):
+    """管理员查看反馈列表。"""
+    _require_admin(user_id)
+    con = None
+    try:
+        con = _get_db()
+        where_sql = "WHERE resolved_at IS NULL" if unresolved_only else ""
+        rows = con.execute(
+            f"""
+            SELECT id, user_id, session_id, message_id, expert_type, report_source, issue_type,
+                   user_note, message_status, created_at, resolved_at, resolver
+            FROM expert.feedback_reports
+            {where_sql}
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            [limit],
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "user_id": r[1],
+                "session_id": r[2],
+                "message_id": r[3],
+                "expert_type": r[4],
+                "report_source": r[5],
+                "issue_type": r[6],
+                "user_note": r[7],
+                "message_status": r[8],
+                "created_at": str(r[9]),
+                "resolved_at": str(r[10]) if r[10] else None,
+                "resolver": r[11],
+            }
+            for r in rows
+        ]
+    finally:
+        if con:
+            con.close()
+
+
+@router.get("/feedback/admin/{feedback_id}")
+async def get_feedback_report(feedback_id: str, user_id: str = Depends(get_current_user)):
+    """管理员查看反馈详情。"""
+    _require_admin(user_id)
+    con = None
+    try:
+        con = _get_db()
+        row = con.execute(
+            """
+            SELECT id, user_id, session_id, message_id, expert_type, report_source, issue_type, user_note,
+                   user_message, assistant_content, message_status, thinking_json, context_json,
+                   created_at, resolved_at, resolver, resolution_note
+            FROM expert.feedback_reports
+            WHERE id = ?
+            """,
+            [feedback_id],
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="反馈不存在")
+        return {
+            "id": row[0],
+            "user_id": row[1],
+            "session_id": row[2],
+            "message_id": row[3],
+            "expert_type": row[4],
+            "report_source": row[5],
+            "issue_type": row[6],
+            "user_note": row[7],
+            "user_message": row[8],
+            "assistant_content": row[9],
+            "message_status": row[10],
+            "thinking_json": json.loads(row[11]) if row[11] else [],
+            "context_json": json.loads(row[12]) if row[12] else {},
+            "created_at": str(row[13]),
+            "resolved_at": str(row[14]) if row[14] else None,
+            "resolver": row[15],
+            "resolution_note": row[16] or "",
+        }
+    finally:
+        if con:
+            con.close()
+
+
+@router.post("/feedback/admin/{feedback_id}/resolve")
+async def resolve_feedback_report(
+    feedback_id: str,
+    req: FeedbackResolveRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """管理员标记反馈为已处理。"""
+    _require_admin(user_id)
+    con = None
+    try:
+        con = _get_db()
+        exists = con.execute(
+            "SELECT 1 FROM expert.feedback_reports WHERE id = ?",
+            [feedback_id],
+        ).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="反馈不存在")
+        con.execute(
+            "UPDATE expert.feedback_reports SET resolved_at = ?, resolver = ?, resolution_note = ? WHERE id = ?",
+            [datetime.now(), user_id, req.resolution_note, feedback_id],
+        )
+        return {"ok": True}
+    finally:
+        if con:
+            con.close()
+
+
 def _get_session_history(session_id: str, limit: int = MAX_CONTEXT_TURNS) -> list[dict]:
     """获取指定 session 的最近 N 轮对话（用于注入 LLM 上下文）"""
     if not session_id:
@@ -402,6 +592,14 @@ def _update_message(message_id: str, content: str, thinking: list | None = None,
             con.close()
 
 
+def _save_partial_message(session_id: str, content: str, thinking_items: list | None = None, *, context: str = "stream") -> None:
+    """在流式中断时保存 partial 消息，避免已生成内容丢失。"""
+    if not session_id or not content.strip():
+        return
+    _save_message(session_id, "expert", content, thinking_items, status="partial")
+    logger.info(f"💾 {context} 中断，已保存 partial 消息 (session={session_id}, len={len(content)})")
+
+
 def _auto_title(session_id: str, user_message: str):
     """首条消息时自动设置 session 标题（取前 30 字）"""
     con = None
@@ -423,6 +621,12 @@ def _auto_title(session_id: str, user_message: str):
     finally:
         if con:
             con.close()
+
+
+def _require_admin(user_id: str) -> None:
+    """仅允许默认管理员访问反馈管理接口。"""
+    if user_id != "Admin":
+        raise HTTPException(status_code=403, detail="仅管理员可访问")
 
 
 # ══════════════════════════════════════════════════════════
@@ -501,12 +705,12 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
                 elif evt_type == "self_critique":
                     thinking_items.append({"type": "self_critique", "data": event["data"]})
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+        except asyncio.CancelledError:
+            _save_partial_message(session_id, full_reply, thinking_items, context=f"{expert_type} expert chat")
+            raise
         except Exception as e:
             logger.error(f"{expert_type} expert chat 错误: {e}")
-            # 流中断时保存部分消息
-            if session_id and full_reply.strip():
-                _save_message(session_id, "expert", full_reply, thinking_items, status="partial")
-                logger.info(f"💾 流中断，已保存 partial 消息 (session={session_id}, len={len(full_reply)})")
+            _save_partial_message(session_id, full_reply, thinking_items, context=f"{expert_type} expert chat")
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
@@ -599,12 +803,12 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
                 elif evt_type == "self_critique":
                     thinking_items.append({"type": "self_critique", "data": event["data"]})
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+        except asyncio.CancelledError:
+            _save_partial_message(session_id, full_reply, thinking_items, context="expert chat")
+            raise
         except Exception as e:
             logger.error(f"expert chat 错误: {e}")
-            # 流中断时保存部分消息
-            if session_id and full_reply.strip():
-                _save_message(session_id, "expert", full_reply, thinking_items, status="partial")
-                logger.info(f"💾 流中断，已保存 partial 消息 (session={session_id}, len={len(full_reply)})")
+            _save_partial_message(session_id, full_reply, thinking_items, context="expert chat")
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
@@ -706,6 +910,12 @@ async def expert_chat_resume(req: ExpertResumeRequest):
                     _update_message(msg_id, full_content, thinking_items, status="completed")
                     logger.info(f"✅ 续写完成 (msg={msg_id}, partial_len={len(partial_content)}, continuation_len={len(continuation_text)})")
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+        except asyncio.CancelledError:
+            if continuation.strip():
+                full_content = partial_content + continuation
+                _update_message(msg_id, full_content, thinking_items, status="partial")
+                logger.info(f"💾 续写中断，已更新 partial 消息 (msg={msg_id}, added_len={len(continuation)})")
+            raise
         except Exception as e:
             logger.error(f"resume stream 错误: {e}")
             # 续写也中断了：更新 partial 内容（追加已续写部分）

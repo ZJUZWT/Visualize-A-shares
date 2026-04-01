@@ -27,6 +27,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET_FILE = DATA_DIR / ".jwt_secret"
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 7
+DEFAULT_ADMIN_USER = "Admin"
+DEFAULT_ADMIN_PASSWORD = "WeigongAdmin"
 
 
 def _load_jwt_secret() -> str:
@@ -101,6 +103,17 @@ def ensure_users_table() -> None:
         )
     """)
     logger.info("   Users 表: 已就绪")
+
+
+def ensure_default_admin() -> None:
+    """确保默认管理员账号存在（幂等）"""
+    ensure_users_table()
+    admin = get_user(DEFAULT_ADMIN_USER)
+    if admin:
+        logger.info("   默认管理员账号: 已存在")
+        return
+    create_user(DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USER)
+    logger.info("   默认管理员账号: 已创建")
 
 
 # ─── 用户 CRUD ────────────────────────────────────────

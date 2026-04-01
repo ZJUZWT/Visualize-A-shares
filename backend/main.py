@@ -100,8 +100,9 @@ async def _startup() -> None:
 
     # 初始化 users 表
     try:
-        from auth import ensure_users_table
+        from auth import ensure_default_admin, ensure_users_table
         ensure_users_table()
+        ensure_default_admin()
     except Exception as e:
         logger.warning(f"⚠️ Users 表初始化失败: {e}")
 

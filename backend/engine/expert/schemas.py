@@ -208,6 +208,33 @@ class ExpertResumeRequest(BaseModel):
     message_id: str  # partial 消息的 DB id
 
 
+FeedbackIssueType = Literal[
+    "load_failed",
+    "llm_truncated",
+    "resume_misjudged_complete",
+    "clarify_missing_options",
+    "clarify_auto_advance",
+    "clarify_subchoice_stuck",
+    "other",
+]
+
+FeedbackSourceType = Literal["reply", "clarification", "resume"]
+
+
+class FeedbackReportCreateRequest(BaseModel):
+    session_id: str
+    message_id: str
+    expert_type: str = "rag"
+    report_source: FeedbackSourceType = "reply"
+    issue_type: FeedbackIssueType
+    user_note: str = ""
+    context: dict = Field(default_factory=dict)
+
+
+class FeedbackResolveRequest(BaseModel):
+    resolution_note: str = ""
+
+
 class SessionCreateRequest(BaseModel):
     """创建 session 请求体"""
     expert_type: str = "rag"
