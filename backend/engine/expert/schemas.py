@@ -212,6 +212,7 @@ class ExpertResumeRequest(BaseModel):
 class ResumeCompletionCheckResult(BaseModel):
     """resume 前的完整性检查结果"""
     is_complete: bool = False
+    check_failed: bool = False
     reason: str = ""
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 

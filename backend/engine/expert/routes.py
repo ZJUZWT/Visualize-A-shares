@@ -866,6 +866,12 @@ async def expert_chat_resume(req: ExpertResumeRequest):
         )
 
     msg_id, session_id, role, partial_content, thinking_json, status = row
+    if role != "expert":
+        return StreamingResponse(
+            _error_stream("仅支持续写 expert 消息"),
+            media_type="text/event-stream",
+        )
+
     if status not in ("partial", "completed"):
         return StreamingResponse(
             _error_stream(f"消息状态为 {status}，无需续写"),
@@ -915,6 +921,29 @@ async def expert_chat_resume(req: ExpertResumeRequest):
         history=history,
         persona=persona,
     )
+    check_failed = bool(check_result.get("check_failed", False))
+    if check_failed:
+        logger.warning(
+            "⚠️ resume 完整性检查失败，保持原消息状态不变 "
+            f"(msg={msg_id}, status={status}, reason={check_result.get('reason', '')})"
+        )
+
+        async def failed_check_event_stream():
+            error_message = (
+                "完整性检查失败，已保持原消息不变："
+                f"{check_result.get('reason', '')}"
+            )
+            yield (
+                "event: resume_completion_check\n"
+                f"data: {json.dumps(check_result, ensure_ascii=False)}\n\n"
+            )
+            yield (
+                "event: error\n"
+                f"data: {json.dumps({'message': error_message}, ensure_ascii=False)}\n\n"
+            )
+
+        return StreamingResponse(failed_check_event_stream(), media_type="text/event-stream")
+
     is_complete = bool(check_result.get("is_complete", False))
     if is_complete:
         _update_message(msg_id, partial_content, thinking_items, status="completed")

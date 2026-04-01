@@ -181,6 +181,8 @@ async def test_resume_completion_check_returns_complete_when_llm_says_complete(t
     assert result["is_complete"] is True
     assert result["reason"] == "回复已完整"
     assert result["confidence"] == pytest.approx(0.91, rel=1e-6)
+    assert result["check_failed"] is False
+    mock_tools.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -207,6 +209,85 @@ async def test_resume_completion_check_returns_incomplete_when_llm_says_incomple
     assert result["is_complete"] is False
     assert result["reason"] == "句子未结束"
     assert result["confidence"] == pytest.approx(0.95, rel=1e-6)
+    assert result["check_failed"] is False
+    mock_tools.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_completion_check_marks_failed_when_provider_returns_invalid_json(tmp_path):
+    from engine.expert.agent import ExpertAgent
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            _ = messages
+            yield "这不是合法 JSON"
+
+    mock_tools = Mock()
+    mock_tools.llm_engine = _MockLLM()
+    mock_tools.execute = AsyncMock(return_value="tool result")
+    agent = ExpertAgent(mock_tools, kg_path=str(tmp_path / "kg.json"))
+
+    result = await agent.check_resume_completion(
+        user_message="这段话是不是中断了？",
+        partial_content="建议重点关注量价配合，若",
+        history=[{"role": "user", "content": "短线怎么看"}],
+        persona="rag",
+    )
+
+    assert result["is_complete"] is False
+    assert result["check_failed"] is True
+    assert "完整性检查失败" in result["reason"]
+    mock_tools.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_completion_check_marks_failed_when_llm_missing(tmp_path):
+    from engine.expert.agent import ExpertAgent
+
+    mock_tools = Mock()
+    mock_tools.llm_engine = None
+    mock_tools.execute = AsyncMock(return_value="tool result")
+    agent = ExpertAgent(mock_tools, kg_path=str(tmp_path / "kg.json"))
+
+    result = await agent.check_resume_completion(
+        user_message="这段话是不是中断了？",
+        partial_content="建议重点关注量价配合，若",
+        history=[{"role": "user", "content": "短线怎么看"}],
+        persona="rag",
+    )
+
+    assert result["is_complete"] is False
+    assert result["check_failed"] is True
+    assert "LLM 未配置" in result["reason"]
+    mock_tools.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resume_completion_check_marks_failed_when_provider_exception(tmp_path):
+    from engine.expert.agent import ExpertAgent
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            _ = messages
+            raise RuntimeError("provider load failed")
+            yield ""  # pragma: no cover
+
+    mock_tools = Mock()
+    mock_tools.llm_engine = _MockLLM()
+    mock_tools.execute = AsyncMock(return_value="tool result")
+    agent = ExpertAgent(mock_tools, kg_path=str(tmp_path / "kg.json"))
+
+    result = await agent.check_resume_completion(
+        user_message="这段话是不是中断了？",
+        partial_content="建议重点关注量价配合，若",
+        history=[{"role": "user", "content": "短线怎么看"}],
+        persona="rag",
+    )
+
+    assert result["is_complete"] is False
+    assert result["check_failed"] is True
+    assert "provider load failed" in result["reason"]
+    mock_tools.execute.assert_not_awaited()
 
 
 async def _async_gen(items):

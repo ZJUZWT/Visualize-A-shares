@@ -1985,6 +1985,7 @@ class ExpertAgent:
         if not llm:
             return ResumeCompletionCheckResult(
                 is_complete=False,
+                check_failed=True,
                 reason="LLM 未配置，默认视为未完成",
                 confidence=0.0,
             ).model_dump()
@@ -2043,18 +2044,19 @@ class ExpertAgent:
             logger.info(
                 f"⏱️ check_resume_completion 耗时 {elapsed:.1f}ms "
                 f"(token_count={len(raw)}, model={getattr(llm, 'model', 'unknown')}, "
-                f"is_complete={result.is_complete}, confidence={result.confidence:.2f})"
+                f"is_complete={result.is_complete}, check_failed={result.check_failed}, confidence={result.confidence:.2f})"
             )
             return result.model_dump()
         except Exception as e:
             elapsed = (time.monotonic() - t0) * 1000
-            logger.warning(f"check_resume_completion 失败，默认未完成: {e}")
+            logger.warning(f"check_resume_completion 失败，保持原消息状态: {e}")
             logger.info(
                 f"⏱️ check_resume_completion 耗时 {elapsed:.1f}ms "
-                f"(token_count={len(raw)}, model={getattr(llm, 'model', 'unknown')}, fallback=incomplete)"
+                f"(token_count={len(raw)}, model={getattr(llm, 'model', 'unknown')}, fallback=check_failed)"
             )
             return ResumeCompletionCheckResult(
                 is_complete=False,
+                check_failed=True,
                 reason=f"完整性检查失败，保守判定未完成: {e}",
                 confidence=0.0,
             ).model_dump()
