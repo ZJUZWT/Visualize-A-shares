@@ -779,6 +779,28 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         });
         const data = await res.json() as ClarificationRequestData;
         const currentRound = data.round ?? 1;
+
+        if (shouldAutoAdvanceClarification(data)) {
+          setExpertStatus(set, expertType, "thinking");
+          await streamExpertReply({
+            expertType,
+            expertMessageId: expertMsg.id,
+            sessionId,
+            userMessageId: userMsg.id,
+            payload: {
+              message: text,
+              images: msgImages || [],
+              session_id: sessionId,
+              deep_think: deepThink,
+              use_clarification: useClarification,
+              enable_trade_plan: useTradePlan,
+            },
+            set,
+            get,
+          });
+          return;
+        }
+
         set((s) => {
           const history = [...(s.chatHistories[expertType] ?? [])];
           const idx = history.findIndex((m) => m.id === expertMsg.id);

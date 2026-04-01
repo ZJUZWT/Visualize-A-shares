@@ -115,7 +115,7 @@ export default function AdminFeedbackPage() {
           <div className="max-w-md rounded-[28px] border border-red-500/20 bg-red-500/5 p-8 text-center">
             <div className="text-sm font-semibold text-red-500">仅 Admin 可访问反馈后台</div>
             <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
-              请先使用 `Admin / WeigongAdmin` 登录，再查看反馈列表和上下文详情。
+              请先使用管理员账号登录，再查看反馈列表和上下文详情。
             </p>
           </div>
         </div>
