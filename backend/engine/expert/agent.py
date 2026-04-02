@@ -1988,6 +1988,54 @@ class ExpertAgent:
             logger.error(f"resume_reply 失败: {e}")
             yield {"event": "error", "data": {"message": f"续写失败: {e}"}}
 
+    async def direct_reply(
+        self,
+        message: str,
+        history: list[dict] | None = None,
+        persona: str = "rag",
+        images: list[str] | None = None,
+    ) -> AsyncGenerator[dict, None]:
+        """概念解释 / 教学类问题的无工具直答。"""
+        from llm.providers import ChatMessage
+
+        llm = self._get_quality_llm()
+        if not llm:
+            yield {"event": "error", "data": {"message": "LLM 未配置"}}
+            return
+
+        yield {"event": "reasoning_summary", "data": {"summary": "已切换到概念讲解模式，不调用分析工具链。"}}
+
+        system = build_reply_system(
+            persona,
+            current_date=get_current_date_context(),
+        )
+        system += (
+            "\n\n## 当前任务\n"
+            "当前问题属于概念解释、方法教学或轻量市场聊天。"
+            "请直接解释概念、适用场景和常见误区。"
+            "如果合适，可以结合 A 股举一个简短例子，但不要扩展成完整个股分析流程。"
+            "不要调用工具，不要生成交易计划卡片。"
+        )
+
+        messages = [ChatMessage("system", system)]
+        for item in history or []:
+            role = "assistant" if item["role"] == "expert" else item["role"]
+            messages.append(ChatMessage(role, item.get("content", "")))
+        messages.append(ChatMessage("user", message, images=images or []))
+
+        msg_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
+        msg_dicts = self._context_guard.guard_messages(msg_dicts)
+        messages = [ChatMessage(msg["role"], msg["content"]) for msg in msg_dicts]
+
+        full_text = ""
+        async for token in llm.chat_stream(messages):
+            if "<think>" in token or "</think>" in token:
+                continue
+            full_text += token
+            yield {"event": "reply_token", "data": {"token": token}}
+
+        yield {"event": "reply_complete", "data": {"full_text": full_text}}
+
     async def check_resume_completion(
         self,
         user_message: str,

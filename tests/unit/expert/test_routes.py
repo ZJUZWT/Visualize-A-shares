@@ -286,6 +286,262 @@ async def test_expert_chat_persists_partial_message_when_stream_cancelled(tmp_pa
     assert rows == [("expert", "半截内容", "partial")]
 
 
+@pytest.mark.asyncio
+async def test_data_expert_concept_question_routes_to_direct_reply_without_tool_chat():
+    from engine.expert import routes as routes_module
+
+    async def _direct_reply(message, history=None):
+        assert message == "什么是市盈率？"
+        assert history == []
+        yield {"event": "reasoning_summary", "data": {"summary": "已切换到概念讲解模式"}}
+        yield {"event": "reply_token", "data": {"token": "市盈率是股价与每股收益的比值。"}}
+        yield {
+            "event": "reply_complete",
+            "data": {"full_text": "市盈率是股价与每股收益的比值。"},
+        }
+
+    mock_expert = Mock()
+    mock_expert.direct_reply = Mock(side_effect=_direct_reply)
+    mock_expert.chat = Mock(side_effect=AssertionError("概念问题不应进入工具分析链"))
+
+    with patch.dict(routes_module._engine_experts, {"data": mock_expert}, clear=True):
+        response = await routes_module.expert_chat_by_type(
+            "data",
+            ExpertChatRequest(message="什么是市盈率？"),
+        )
+        body = await _collect_stream_text(response)
+
+    assert "concept_mode" in body or "概念讲解模式" in body
+    assert mock_expert.direct_reply.call_count == 1
+    assert mock_expert.chat.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_rag_concept_question_routes_to_direct_reply_without_analysis_chat():
+    from engine.expert import routes as routes_module
+
+    async def _direct_reply(message, history=None, persona="rag", images=None):
+        assert message == "什么是市盈率？"
+        assert history == []
+        assert persona == "rag"
+        assert images == []
+        yield {"event": "reasoning_summary", "data": {"summary": "已切换到概念讲解模式"}}
+        yield {"event": "reply_token", "data": {"token": "市盈率常用来衡量估值高低。"}}
+        yield {
+            "event": "reply_complete",
+            "data": {"full_text": "市盈率常用来衡量估值高低。"},
+        }
+
+    mock_agent = Mock()
+    mock_agent.direct_reply = Mock(side_effect=_direct_reply)
+    mock_agent.chat = Mock(side_effect=AssertionError("概念问题不应进入 Agent 分析链"))
+
+    with patch.object(routes_module, "get_expert_agent", return_value=mock_agent):
+        response = await routes_module.expert_chat_by_type(
+            "rag",
+            ExpertChatRequest(message="什么是市盈率？"),
+        )
+        body = await _collect_stream_text(response)
+
+    assert "concept_mode" in body or "概念讲解模式" in body
+    assert mock_agent.direct_reply.call_count == 1
+    assert mock_agent.chat.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_rag_stock_question_keeps_analysis_chat_path():
+    from engine.expert import routes as routes_module
+
+    async def _chat(*args, **kwargs):
+        yield {"event": "reply_token", "data": {"token": "建议先看量价配合。"}}
+        yield {"event": "reply_complete", "data": {"full_text": "建议先看量价配合。"}}
+
+    mock_agent = Mock()
+    mock_agent.direct_reply = Mock(side_effect=AssertionError("个股分析不应走概念直答"))
+    mock_agent.chat = Mock(side_effect=_chat)
+
+    with patch.object(routes_module, "get_expert_agent", return_value=mock_agent):
+        response = await routes_module.expert_chat_by_type(
+            "rag",
+            ExpertChatRequest(message="宁德时代现在能买吗？"),
+        )
+        body = await _collect_stream_text(response)
+
+    assert "建议先看量价配合" in body
+    assert mock_agent.chat.call_count == 1
+    assert mock_agent.direct_reply.call_count == 0
+
+
+def test_learning_profile_endpoint_aggregates_reviews_memories_and_reflections(client):
+    from engine.expert import routes as routes_module
+
+    mock_service = Mock()
+    mock_service.list_review_records = AsyncMock(return_value=[
+        {"id": "rr-1", "status": "win", "pnl_pct": 0.08},
+        {"id": "rr-2", "status": "loss", "pnl_pct": -0.03},
+    ])
+    mock_service.get_review_stats = AsyncMock(return_value={
+        "portfolio_id": "paper-1",
+        "days": 60,
+        "total_reviews": 2,
+        "win_count": 1,
+        "loss_count": 1,
+        "holding_count": 0,
+        "win_rate": 0.5,
+        "total_pnl_pct": 0.05,
+        "avg_pnl_pct": 0.025,
+    })
+    mock_service.list_memories = AsyncMock(return_value=[
+        {
+            "id": "mem-1",
+            "rule_text": "放量突破前先确认成交额质量",
+            "category": "data_validation",
+            "confidence": 0.82,
+            "verify_count": 4,
+            "verify_win": 3,
+            "status": "active",
+        },
+        {
+            "id": "mem-2",
+            "rule_text": "逆势追高容易放大回撤",
+            "category": "risk",
+            "confidence": 0.9,
+            "verify_count": 5,
+            "verify_win": 4,
+            "status": "active",
+        },
+    ])
+    mock_service.list_reflections = AsyncMock(return_value=[
+        {
+            "id": "ref-1",
+            "kind": "daily",
+            "date": "2026-04-01",
+            "summary": "当日复盘提示追涨动作过急。",
+            "metrics": {"win_rate": 0.5, "total_pnl_pct": 0.02},
+            "details": {},
+        }
+    ])
+    mock_db = Mock()
+    mock_db.execute_read = AsyncMock(side_effect=[
+        [{"user_id": "alice"}],
+        [{"total": 0}],
+    ])
+
+    with patch.object(routes_module, "_get_agent_service", return_value=mock_service, create=True):
+        with patch.object(routes_module.AgentDB, "get_instance", return_value=mock_db):
+            resp = client.get(
+                "/api/v1/expert/learning/profile?expert_type=data&portfolio_id=paper-1&days=60",
+                headers={"X-User-Id": "alice"},
+            )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["portfolio_id"] == "paper-1"
+    assert data["expert_type"] == "data"
+    assert len(data["score_cards"]) == 5
+    assert data["verified_knowledge"]
+    assert data["recent_lessons"]
+    assert data["common_mistakes"]
+    assert data["source_summary"]["review_count"] == 2
+    assert data["source_summary"]["memory_count"] == 2
+
+
+def test_learning_profile_endpoint_reorders_verified_knowledge_by_expert_focus(client):
+    from engine.expert import routes as routes_module
+
+    mock_service = Mock()
+    mock_service.list_review_records = AsyncMock(return_value=[])
+    mock_service.get_review_stats = AsyncMock(return_value={
+        "portfolio_id": "paper-1",
+        "days": 30,
+        "total_reviews": 0,
+        "win_count": 0,
+        "loss_count": 0,
+        "holding_count": 0,
+        "win_rate": 0.0,
+        "total_pnl_pct": 0.0,
+        "avg_pnl_pct": 0.0,
+    })
+    mock_service.list_memories = AsyncMock(return_value=[
+        {
+            "id": "mem-risk",
+            "rule_text": "短线不能逆势追高",
+            "category": "risk",
+            "confidence": 0.91,
+            "verify_count": 6,
+            "verify_win": 5,
+            "status": "active",
+        },
+        {
+            "id": "mem-data",
+            "rule_text": "成交额不够时先别把突破当确认",
+            "category": "data_validation",
+            "confidence": 0.84,
+            "verify_count": 5,
+            "verify_win": 4,
+            "status": "active",
+        },
+    ])
+    mock_service.list_reflections = AsyncMock(return_value=[])
+    mock_db = Mock()
+    mock_db.execute_read = AsyncMock(side_effect=[
+        [{"user_id": "alice"}],
+        [{"total": 0}],
+        [{"user_id": "alice"}],
+        [{"total": 0}],
+    ])
+
+    with patch.object(routes_module, "_get_agent_service", return_value=mock_service, create=True):
+        with patch.object(routes_module.AgentDB, "get_instance", return_value=mock_db):
+            data_resp = client.get(
+                "/api/v1/expert/learning/profile?expert_type=data&portfolio_id=paper-1",
+                headers={"X-User-Id": "alice"},
+            )
+            short_resp = client.get(
+                "/api/v1/expert/learning/profile?expert_type=short_term&portfolio_id=paper-1",
+                headers={"X-User-Id": "alice"},
+            )
+
+    assert data_resp.status_code == 200
+    assert short_resp.status_code == 200
+    assert data_resp.json()["verified_knowledge"][0]["id"] == "mem-data"
+    assert short_resp.json()["verified_knowledge"][0]["id"] == "mem-risk"
+
+
+def test_learning_profile_endpoint_forbids_non_owner_portfolio_access(client):
+    from engine.expert import routes as routes_module
+
+    mock_service = Mock()
+    mock_service.list_review_records = AsyncMock(return_value=[])
+    mock_service.get_review_stats = AsyncMock(return_value={
+        "portfolio_id": "paper-1",
+        "days": 30,
+        "total_reviews": 0,
+        "win_count": 0,
+        "loss_count": 0,
+        "holding_count": 0,
+        "win_rate": 0.0,
+        "total_pnl_pct": 0.0,
+        "avg_pnl_pct": 0.0,
+    })
+    mock_service.list_memories = AsyncMock(return_value=[])
+    mock_service.list_reflections = AsyncMock(return_value=[])
+
+    mock_db = Mock()
+    mock_db.execute_read = AsyncMock(return_value=[{"user_id": "bob"}])
+
+    with patch.object(routes_module, "_get_agent_service", return_value=mock_service, create=True):
+        with patch.object(routes_module.AgentDB, "get_instance", return_value=mock_db):
+            resp = client.get(
+                "/api/v1/expert/learning/profile?expert_type=data&portfolio_id=paper-1",
+                headers={"X-User-Id": "alice"},
+            )
+
+    assert resp.status_code == 403
+    mock_service.list_review_records.assert_not_awaited()
+    mock_service.get_review_stats.assert_not_awaited()
+
+
 def test_default_admin_is_bootstrapped(tmp_path):
     db_path = tmp_path / "users.duckdb"
     con = duckdb.connect(str(db_path))

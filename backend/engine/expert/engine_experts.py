@@ -11,6 +11,7 @@ from typing import AsyncGenerator, Literal
 
 import pandas as pd
 from loguru import logger
+from llm.providers import ChatMessage
 
 # ─── LLM 原始输出调试开关 ───────────────────────────────
 # 设置环境变量 LLM_DEBUG_RAW=true 可打印 LLM 的完整原始输出（含 <think> 等被过滤的内容）
@@ -635,6 +636,42 @@ class EngineExpert:
                         yield {"event": "reply_token", "data": {"token": delta}}
             except Exception as e:
                 logger.error(f"非流式重生成失败: {e}")
+
+        yield {"event": "reply_complete", "data": {"full_text": full_text}}
+
+    async def direct_reply(
+        self,
+        message: str,
+        history: list[dict] | None = None,
+    ) -> AsyncGenerator[dict, None]:
+        """概念解释 / 教学类问题的无工具直答。"""
+        if not self._llm:
+            yield {"event": "error", "data": {"message": "LLM 未配置"}}
+            return
+
+        yield {"event": "reasoning_summary", "data": {"summary": "已切换到概念讲解模式，不调用选股工具。"}}
+
+        system = (
+            self.profile["system_prompt"]
+            + "\n\n## 当前任务\n"
+            "当前问题属于概念解释、方法教学或轻量市场聊天。"
+            "请直接用中文讲清定义、适用场景和常见误区。"
+            "如果合适，可以给一个 A 股里的简短例子，但不要扩展成完整选股/荐股流程。"
+            "不要调用工具，不要输出交易计划卡片。"
+        )
+
+        messages = [ChatMessage("system", system)]
+        for item in history or []:
+            role = "assistant" if item["role"] == "expert" else item["role"]
+            messages.append(ChatMessage(role, item.get("content", "")))
+        messages.append(ChatMessage("user", message))
+
+        full_text = ""
+        async for token in self._llm.chat_stream(messages):
+            if "<think>" in token or "</think>" in token:
+                continue
+            full_text += token
+            yield {"event": "reply_token", "data": {"token": token}}
 
         yield {"event": "reply_complete", "data": {"full_text": full_text}}
 

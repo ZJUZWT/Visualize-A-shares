@@ -48,6 +48,7 @@ import {
   type CreatePortfolioDraft,
   type PortfolioSummary,
 } from "./lib/portfolioWorkspace";
+import { readRememberedAgentPortfolio, rememberActiveAgentPortfolio } from "@/lib/activePortfolio";
 import { normalizeWatchlist } from "./lib/watchlist";
 import {
   buildMemoRequestConfig,
@@ -859,12 +860,22 @@ export default function AgentPage() {
     const raw = await fetchJson<unknown>(`${getApiBase()}/api/v1/agent/portfolio`);
     const nextPortfolios = normalizePortfolioSummaries(raw);
     setPortfolios(nextPortfolios);
-    setPortfolioId((current) => pickActivePortfolioId(nextPortfolios, current, preferredPortfolioId ?? null));
+    setPortfolioId((current) =>
+      pickActivePortfolioId(
+        nextPortfolios,
+        current,
+        preferredPortfolioId ?? readRememberedAgentPortfolio(),
+      ),
+    );
     if (nextPortfolios.length === 0) {
       setLoading(false);
     }
     return nextPortfolios;
   }, []);
+
+  useEffect(() => {
+    rememberActiveAgentPortfolio(portfolioId);
+  }, [portfolioId]);
 
   useEffect(() => {
     fetchPortfolios().catch(() => {

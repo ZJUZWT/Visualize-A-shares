@@ -288,6 +288,45 @@ class FeedbackResolveResponse(BaseModel):
     ok: bool = True
 
 
+class ExpertLearningScoreCard(BaseModel):
+    id: str
+    label: str
+    score: int
+    summary: str = ""
+
+
+class ExpertLearningItem(BaseModel):
+    id: str
+    title: str
+    category: str | None = None
+    confidence: float | None = None
+    verify_count: int | None = None
+    date: str | None = None
+
+
+class ExpertLearningSourceSummary(BaseModel):
+    review_count: int = 0
+    memory_count: int = 0
+    reflection_count: int = 0
+    win_rate: float = 0.0
+
+
+class ExpertLearningPendingPlanSummary(BaseModel):
+    expert_plan_count: int = 0
+
+
+class ExpertLearningProfileResponse(BaseModel):
+    portfolio_id: str
+    expert_type: str
+    score_cards: list[ExpertLearningScoreCard] = Field(default_factory=list)
+    verified_knowledge: list[ExpertLearningItem] = Field(default_factory=list)
+    recent_lessons: list[ExpertLearningItem] = Field(default_factory=list)
+    common_mistakes: list[ExpertLearningItem] = Field(default_factory=list)
+    applicability_boundaries: list[ExpertLearningItem] = Field(default_factory=list)
+    source_summary: ExpertLearningSourceSummary
+    pending_plan_summary: ExpertLearningPendingPlanSummary
+
+
 class SessionCreateRequest(BaseModel):
     """创建 session 请求体"""
     expert_type: str = "rag"

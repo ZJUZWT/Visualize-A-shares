@@ -14,10 +14,16 @@ from loguru import logger
 from auth import DEFAULT_ADMIN_USER, get_current_user
 
 from config import settings, DB_PATH, DATA_DIR
+from engine.agent.db import AgentDB
+from engine.agent.service import AgentService
+from engine.agent.validator import TradeValidator
 from engine.expert.agent import ExpertAgent
 from engine.expert.engine_experts import EngineExpert, ExpertType, get_expert_profiles
+from engine.expert.intent import classify_expert_intent, should_use_direct_reply
+from engine.expert.learning import build_expert_learning_profile
 from engine.expert.schemas import (
     ClarifyRequest,
+    ExpertLearningProfileResponse,
     ExpertChatRequest,
     ExpertResumeRequest,
     FeedbackReportDetail,
@@ -229,6 +235,19 @@ def get_tool_tracker() -> ToolOutcomeTracker | None:
 def get_user_profile_tracker() -> UserProfileTracker | None:
     """获取用户偏好追踪器"""
     return _user_profile_tracker
+
+
+async def _verify_learning_profile_portfolio_owner(portfolio_id: str, user_id: str) -> None:
+    """校验学习画像请求的 portfolio 归属当前用户。"""
+    db = AgentDB.get_instance()
+    rows = await db.execute_read(
+        "SELECT user_id FROM agent.portfolio_config WHERE id = ?",
+        [portfolio_id],
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"Portfolio 不存在: {portfolio_id}")
+    if rows[0].get("user_id") != user_id:
+        raise HTTPException(status_code=403, detail="无权访问此 Portfolio")
 
 
 # ══════════════════════════════════════════════════════════
@@ -643,6 +662,31 @@ def _require_admin(user_id: str) -> None:
         raise HTTPException(status_code=403, detail="仅管理员可访问")
 
 
+def _get_agent_service() -> AgentService:
+    db = AgentDB.get_instance()
+    return AgentService(db=db, validator=TradeValidator())
+
+
+async def _count_pending_expert_plans(user_id: str) -> int:
+    try:
+        db = AgentDB.get_instance()
+    except RuntimeError:
+        return 0
+    rows = await db.execute_read(
+        """
+        SELECT COUNT(*) AS total
+        FROM agent.trade_plans
+        WHERE source_type = 'expert'
+          AND status IN ('pending', 'executing')
+          AND user_id = ?
+        """,
+        [user_id],
+    )
+    if not rows:
+        return 0
+    return int(rows[0].get("total") or 0)
+
+
 # ══════════════════════════════════════════════════════════
 # 多专家统一入口
 # ══════════════════════════════════════════════════════════
@@ -652,6 +696,33 @@ def _require_admin(user_id: str) -> None:
 async def list_expert_profiles():
     """返回所有专家配置信息（前端用于渲染专家选择器）"""
     return get_expert_profiles()
+
+
+@router.get("/learning/profile", response_model=ExpertLearningProfileResponse)
+async def get_learning_profile(
+    expert_type: ExpertType,
+    portfolio_id: str,
+    days: int = Query(default=60, ge=1, le=3650),
+    user_id: str = Depends(get_current_user),
+):
+    """聚合 Expert 可见的复盘学习画像。"""
+    await _verify_learning_profile_portfolio_owner(portfolio_id, user_id)
+    svc = _get_agent_service()
+    review_records = await svc.list_review_records(portfolio_id, days=days)
+    review_stats = await svc.get_review_stats(portfolio_id, days=days)
+    memories = await svc.list_memories(status="all", portfolio_id=portfolio_id)
+    reflections = await svc.list_reflections(limit=8, portfolio_id=portfolio_id)
+    pending_plan_count = await _count_pending_expert_plans(user_id)
+    payload = build_expert_learning_profile(
+        expert_type=expert_type,
+        portfolio_id=portfolio_id,
+        review_records=review_records,
+        review_stats=review_stats,
+        memories=memories,
+        reflections=reflections,
+        pending_plan_count=pending_plan_count,
+    )
+    return ExpertLearningProfileResponse(**payload)
 
 
 @router.post("/chat/{expert_type}")
@@ -674,17 +745,23 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
     # 确保有 session
     session_id = req.session_id or ""
     history = _get_session_history(session_id) if session_id else []
+    intent = classify_expert_intent(req.message)
+    use_direct_reply = should_use_direct_reply(intent) and hasattr(expert, "direct_reply")
 
     async def event_stream():
         full_reply = ""
         tools_used = []
         thinking_items = []
         try:
-            async for event in expert.chat(
-                req.message, history=history,
-                deep_think=req.deep_think, max_rounds=req.max_rounds,
-                enable_trade_plan=req.enable_trade_plan,
-            ):
+            if use_direct_reply:
+                stream = expert.direct_reply(req.message, history=history)
+            else:
+                stream = expert.chat(
+                    req.message, history=history,
+                    deep_think=req.deep_think, max_rounds=req.max_rounds,
+                    enable_trade_plan=req.enable_trade_plan,
+                )
+            async for event in stream:
                 evt_type = event["event"]
                 if evt_type == "reply_token":
                     full_reply += event["data"].get("token", "")
@@ -769,6 +846,8 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
     agent = get_expert_agent()
     session_id = req.session_id or ""
     history = _get_session_history(session_id) if session_id else []
+    intent = classify_expert_intent(req.message)
+    use_direct_reply = should_use_direct_reply(intent) and hasattr(agent, "direct_reply")
 
     async def event_stream():
         full_reply = ""
@@ -776,14 +855,23 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
         tools_used = []
         thinking_items = []
         try:
-            async for event in agent.chat(
-                req.message, history=history, persona=persona,
-                deep_think=req.deep_think, max_rounds=req.max_rounds,
-                clarification_selection=req.clarification_selection,
-                clarification_chain=req.clarification_chain,
-                enable_trade_plan=req.enable_trade_plan,
-                images=req.images,
-            ):
+            if use_direct_reply:
+                stream = agent.direct_reply(
+                    req.message,
+                    history=history,
+                    persona=persona,
+                    images=req.images,
+                )
+            else:
+                stream = agent.chat(
+                    req.message, history=history, persona=persona,
+                    deep_think=req.deep_think, max_rounds=req.max_rounds,
+                    clarification_selection=req.clarification_selection,
+                    clarification_chain=req.clarification_chain,
+                    enable_trade_plan=req.enable_trade_plan,
+                    images=req.images,
+                )
+            async for event in stream:
                 evt_type = event["event"]
                 if evt_type == "reply_token":
                     full_reply += event["data"].get("token", "")

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import NavSidebar from "@/components/ui/NavSidebar";
 import { ExpertSidebar } from "@/components/expert/ExpertSidebar";
 import { ChatArea } from "@/components/expert/ChatArea";
+import { ExpertLearningRail } from "@/components/expert/ExpertLearningRail";
 import { InputBar } from "@/components/expert/InputBar";
 import { ExportChatModal } from "@/components/expert/ExportChatModal";
 import { useExpertStore } from "@/stores/useExpertStore";
@@ -93,6 +94,8 @@ export default function ExpertPageRoute() {
           onClose={() => setShowExportModal(false)}
         />
       )}
+
+      <ExpertLearningRail expertType={activeExpert} profile={profile} />
     </main>
   );
 }

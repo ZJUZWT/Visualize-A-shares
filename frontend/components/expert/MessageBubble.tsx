@@ -12,6 +12,7 @@ import {
   toggleClarificationOption,
   toggleClarificationSubChoice,
 } from "@/lib/clarificationSelection";
+import { buildExpertTradePlanPayload } from "@/lib/expertTradePlan";
 import { splitByTradePlan, hasTradePlan } from "@/lib/parseTradePlan";
 import { FEEDBACK_ISSUE_LABELS, shouldOfferResumeCheck } from "@/lib/expertFeedback";
 import TradePlanCard from "@/components/plans/TradePlanCard";
@@ -525,8 +526,10 @@ export function MessageBubble({
   expertIcon,
   expertName,
 }: MessageBubbleProps) {
+  const { activeExpert, activeSessions } = useExpertStore();
   const isUser = message.role === "user";
   const thinkingItems = message.thinking.filter((item) => item.type !== "clarification_request");
+  const sourceConversationId = activeSessions[activeExpert];
 
   if (isUser) {
     const isFailed = message.sendStatus === "failed";
@@ -608,7 +611,9 @@ export function MessageBubble({
                         const resp = await apiFetch(`${getApiBase()}/api/v1/agent/plans`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify(plan),
+                          body: JSON.stringify(
+                            buildExpertTradePlanPayload(plan, sourceConversationId),
+                          ),
                         });
                         if (!resp.ok) {
                           console.error("收藏失败:", resp.status, await resp.text());
