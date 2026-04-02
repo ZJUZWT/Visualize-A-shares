@@ -31,6 +31,13 @@ export type ExpertFeedbackIssueType =
   | "other";
 
 export type ExpertFeedbackSource = "reply" | "clarification" | "resume";
+export type ExpertInterruptionReason =
+  | "user_cancelled"
+  | "client_disconnected"
+  | "server_error"
+  | "provider_error"
+  | "resume_interrupted"
+  | "unknown_interrupted";
 
 export interface ResumeCompletionCheckResult {
   is_complete: boolean;
@@ -186,6 +193,10 @@ export interface ExpertMessage {
   status?: "completed" | "partial";
   /** DB 中的消息 ID（用于 resume 续写） */
   dbMessageId?: string;
+  /** 中断原因（仅 role=expert 且 partial 时常见） */
+  interruptionReason?: ExpertInterruptionReason;
+  interruptionDetail?: string;
+  lastStreamEventAt?: string | null;
   /** 用户发送的图片（base64，仅 role=user 时有值） */
   images?: string[];
 }
@@ -216,6 +227,8 @@ export interface ExpertFeedbackCreatePayload {
       role: "user" | "expert";
       content: string;
       status?: "completed" | "partial";
+      interruption_reason?: ExpertInterruptionReason;
+      interruption_detail?: string;
       send_status?: "pending" | "sent" | "failed";
       is_streaming: boolean;
       thinking: ThinkingItem[];
@@ -230,6 +243,8 @@ export interface ExpertFeedbackCreatePayload {
       role: "user" | "expert";
       content: string;
       status?: "completed" | "partial";
+      interruption_reason?: ExpertInterruptionReason;
+      interruption_detail?: string;
       send_status?: "pending" | "sent" | "failed";
       is_streaming: boolean;
       thinking: ThinkingItem[];

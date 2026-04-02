@@ -25,6 +25,7 @@ from engine.expert.schemas import (
     ClarifyRequest,
     ExpertLearningProfileResponse,
     ExpertChatRequest,
+    ExpertCancelRequest,
     ExpertResumeRequest,
     FeedbackReportDetail,
     FeedbackReportSummary,
@@ -53,6 +54,8 @@ _task_manager: ScheduledTaskManager | None = None
 
 # WebSocket 通知客户端集合
 _ws_notify_clients: set[WebSocket] = set()
+# 显式取消请求标记：前端先上报取消，再由流协程消费该原因
+_pending_cancel_requests: dict[str, dict[str, str | datetime | None]] = {}
 
 # 专家对话历史使用独立数据库，避免与 stockterrain.duckdb 的 WAL 冲突
 EXPERT_DB_PATH = DATA_DIR / "expert_chat.duckdb"
@@ -92,6 +95,9 @@ async def _init_db():
                 content VARCHAR NOT NULL DEFAULT '',
                 thinking JSON,
                 status VARCHAR DEFAULT 'completed',
+                interruption_reason VARCHAR,
+                interruption_detail VARCHAR,
+                last_stream_event_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -99,6 +105,9 @@ async def _init_db():
         # 迁移：为已有表添加 status 列
         try:
             con.execute("ALTER TABLE expert.messages ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'completed'")
+            con.execute("ALTER TABLE expert.messages ADD COLUMN IF NOT EXISTS interruption_reason VARCHAR")
+            con.execute("ALTER TABLE expert.messages ADD COLUMN IF NOT EXISTS interruption_detail VARCHAR")
+            con.execute("ALTER TABLE expert.messages ADD COLUMN IF NOT EXISTS last_stream_event_at TIMESTAMP")
         except Exception:
             pass
 
@@ -360,7 +369,7 @@ async def get_session_messages(session_id: str):
     try:
         con = _get_db()
         rows = con.execute(
-            "SELECT id, role, content, thinking, status, created_at "
+            "SELECT id, role, content, thinking, status, interruption_reason, interruption_detail, last_stream_event_at, created_at "
             "FROM expert.messages WHERE session_id = ? ORDER BY created_at ASC",
             [session_id],
         ).fetchall()
@@ -368,7 +377,10 @@ async def get_session_messages(session_id: str):
             {"id": r[0], "role": r[1], "content": r[2],
              "thinking": json.loads(r[3]) if r[3] else [],
              "status": r[4] or "completed",
-             "created_at": str(r[5])}
+             "interruption_reason": r[5],
+             "interruption_detail": r[6] or "",
+             "last_stream_event_at": str(r[7]) if r[7] else None,
+             "created_at": str(r[8])}
             for r in rows
         ]
     except Exception as e:
@@ -388,6 +400,59 @@ async def save_user_message(session_id: str, body: dict):
     _save_message(session_id, "user", content)
     _auto_title(session_id, content)
     return {"ok": True}
+
+
+@router.post("/chat/cancel")
+async def cancel_expert_chat(
+    req: ExpertCancelRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """显式记录用户停止生成，供后续流中断分类使用。"""
+    con = None
+    try:
+        con = _get_db()
+        session_row = con.execute(
+            "SELECT user_id FROM expert.sessions WHERE id = ?",
+            [req.session_id],
+        ).fetchone()
+        if not session_row:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        session_owner = session_row[0] or "anonymous"
+        if user_id != DEFAULT_ADMIN_USER and session_owner != user_id:
+            raise HTTPException(status_code=403, detail="无权操作此会话")
+
+        _pending_cancel_requests[req.session_id] = {
+            "reason": req.reason,
+            "detail": req.detail,
+            "message_id": req.message_id,
+            "expert_type": req.expert_type,
+            "created_at": datetime.now(),
+        }
+
+        updated = False
+        if req.message_id:
+            row = con.execute(
+                "SELECT content, thinking FROM expert.messages WHERE id = ? AND session_id = ? AND role = 'expert'",
+                [req.message_id, req.session_id],
+            ).fetchone()
+            if row:
+                content, thinking_json = row
+                thinking_items = json.loads(thinking_json) if thinking_json else []
+                _update_message(
+                    req.message_id,
+                    content or "",
+                    thinking_items,
+                    status="partial",
+                    interruption_reason=req.reason,
+                    interruption_detail=req.detail or None,
+                    last_stream_event_at=datetime.now(),
+                )
+                updated = True
+
+        return {"ok": True, "updated": updated}
+    finally:
+        if con:
+            con.close()
 
 
 @router.post("/feedback", response_model=FeedbackSubmitResponse)
@@ -580,7 +645,54 @@ def _get_session_history(session_id: str, limit: int = MAX_CONTEXT_TURNS) -> lis
             con.close()
 
 
-def _save_message(session_id: str, role: str, content: str, thinking: list | None = None, status: str = "completed") -> str | None:
+def _pop_cancel_request(session_id: str) -> tuple[str | None, str | None]:
+    """消费显式取消标记，避免后续新请求误用旧原因。"""
+    marker = _pending_cancel_requests.pop(session_id, None)
+    if not marker:
+        return None, None
+    reason = marker.get("reason")
+    detail = marker.get("detail")
+    return (
+        str(reason) if isinstance(reason, str) and reason else None,
+        str(detail) if isinstance(detail, str) and detail else None,
+    )
+
+
+def _classify_exception_reason(exc: Exception) -> tuple[str, str]:
+    """尽量区分 provider 错误与服务端错误，方便后续排查反馈。"""
+    detail = str(exc) or exc.__class__.__name__
+    signature = f"{exc.__class__.__name__} {detail}".lower()
+    provider_keywords = (
+        "provider",
+        "openai",
+        "anthropic",
+        "deepseek",
+        "qwen",
+        "glm",
+        "moonshot",
+        "siliconflow",
+        "dashscope",
+        "doubao",
+        "volcengine",
+        "rate limit",
+        "api key",
+        "model",
+    )
+    if any(keyword in signature for keyword in provider_keywords):
+        return "provider_error", detail
+    return "server_error", detail
+
+
+def _save_message(
+    session_id: str,
+    role: str,
+    content: str,
+    thinking: list | None = None,
+    status: str = "completed",
+    interruption_reason: str | None = None,
+    interruption_detail: str | None = None,
+    last_stream_event_at: datetime | None = None,
+) -> str | None:
     """将消息写入 messages 表，返回消息 ID"""
     if not session_id:
         return None
@@ -589,10 +701,12 @@ def _save_message(session_id: str, role: str, content: str, thinking: list | Non
     try:
         con = _get_db()
         con.execute(
-            "INSERT INTO expert.messages (id, session_id, role, content, thinking, status, created_at) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO expert.messages "
+            "(id, session_id, role, content, thinking, status, interruption_reason, interruption_detail, last_stream_event_at, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             [msg_id, session_id, role, content,
-             json.dumps(thinking or [], ensure_ascii=False), status, datetime.now()],
+             json.dumps(thinking or [], ensure_ascii=False), status,
+             interruption_reason, interruption_detail, last_stream_event_at, datetime.now()],
         )
         con.execute(
             "UPDATE expert.sessions SET updated_at = ? WHERE id = ?",
@@ -607,16 +721,39 @@ def _save_message(session_id: str, role: str, content: str, thinking: list | Non
             con.close()
 
 
-def _update_message(message_id: str, content: str, thinking: list | None = None, status: str = "completed"):
-    """更新已有消息的 content、thinking 和 status"""
+def _update_message(
+    message_id: str,
+    content: str,
+    thinking: list | None = None,
+    status: str = "completed",
+    interruption_reason: str | None = None,
+    interruption_detail: str | None = None,
+    last_stream_event_at: datetime | None = None,
+):
+    """更新已有消息的 content、thinking、status 和中断元数据"""
     if not message_id:
         return
     con = None
     try:
         con = _get_db()
         con.execute(
-            "UPDATE expert.messages SET content = ?, thinking = ?, status = ? WHERE id = ?",
-            [content, json.dumps(thinking or [], ensure_ascii=False), status, message_id],
+            "UPDATE expert.messages "
+            "SET content = ?, thinking = ?, status = ?, interruption_reason = ?, interruption_detail = ?, last_stream_event_at = ? "
+            "WHERE id = ?",
+            [
+                content,
+                json.dumps(thinking or [], ensure_ascii=False),
+                status,
+                interruption_reason,
+                interruption_detail,
+                last_stream_event_at,
+                message_id,
+            ],
+        )
+        con.execute(
+            "UPDATE expert.sessions SET updated_at = ? "
+            "WHERE id = (SELECT session_id FROM expert.messages WHERE id = ?)",
+            [datetime.now(), message_id],
         )
     except Exception as e:
         logger.warning(f"消息更新失败: {e}")
@@ -625,12 +762,52 @@ def _update_message(message_id: str, content: str, thinking: list | None = None,
             con.close()
 
 
-def _save_partial_message(session_id: str, content: str, thinking_items: list | None = None, *, context: str = "stream") -> None:
-    """在流式中断时保存 partial 消息，避免已生成内容丢失。"""
-    if not session_id or not content.strip():
+def _save_partial_message(
+    session_id: str,
+    content: str,
+    thinking_items: list | None = None,
+    *,
+    message_id: str | None = None,
+    reason: str = "unknown_interrupted",
+    detail: str | None = None,
+    context: str = "stream",
+) -> None:
+    """在流式中断时保存或更新 partial 消息，避免已生成内容丢失。"""
+    if not session_id:
         return
-    _save_message(session_id, "expert", content, thinking_items, status="partial")
-    logger.info(f"💾 {context} 中断，已保存 partial 消息 (session={session_id}, len={len(content)})")
+    now = datetime.now()
+    normalized_content = content or ""
+    if message_id:
+        _update_message(
+            message_id,
+            normalized_content,
+            thinking_items,
+            status="partial",
+            interruption_reason=reason,
+            interruption_detail=detail,
+            last_stream_event_at=now,
+        )
+        logger.info(
+            f"💾 {context} 中断，已更新 partial 消息 "
+            f"(session={session_id}, msg={message_id}, reason={reason}, len={len(normalized_content)})"
+        )
+        return
+    if not normalized_content.strip():
+        return
+    _save_message(
+        session_id,
+        "expert",
+        normalized_content,
+        thinking_items,
+        status="partial",
+        interruption_reason=reason,
+        interruption_detail=detail,
+        last_stream_event_at=now,
+    )
+    logger.info(
+        f"💾 {context} 中断，已保存 partial 消息 "
+        f"(session={session_id}, reason={reason}, len={len(normalized_content)})"
+    )
 
 
 def _auto_title(session_id: str, user_message: str):
@@ -797,16 +974,33 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
                     thinking_items.append({"type": "self_critique", "data": event["data"]})
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
         except asyncio.CancelledError:
-            _save_partial_message(session_id, full_reply, thinking_items, context=f"{expert_type} expert chat")
+            interruption_reason, interruption_detail = _pop_cancel_request(session_id)
+            _save_partial_message(
+                session_id,
+                full_reply,
+                thinking_items,
+                reason=interruption_reason or "client_disconnected",
+                detail=interruption_detail,
+                context=f"{expert_type} expert chat",
+            )
             raise
         except Exception as e:
             logger.error(f"{expert_type} expert chat 错误: {e}")
-            _save_partial_message(session_id, full_reply, thinking_items, context=f"{expert_type} expert chat")
+            interruption_reason, interruption_detail = _classify_exception_reason(e)
+            _save_partial_message(
+                session_id,
+                full_reply,
+                thinking_items,
+                reason=interruption_reason,
+                detail=interruption_detail,
+                context=f"{expert_type} expert chat",
+            )
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
         # 存入 session 消息（用户消息已由前端 save-user 接口写入，此处只存 expert 回复）
         if session_id:
+            _pending_cancel_requests.pop(session_id, None)
             _save_message(session_id, "expert", full_reply, thinking_items, status="completed")
             _auto_title(session_id, req.message)
 
@@ -906,16 +1100,33 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
                     thinking_items.append({"type": "self_critique", "data": event["data"]})
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
         except asyncio.CancelledError:
-            _save_partial_message(session_id, full_reply, thinking_items, context="expert chat")
+            interruption_reason, interruption_detail = _pop_cancel_request(session_id)
+            _save_partial_message(
+                session_id,
+                full_reply,
+                thinking_items,
+                reason=interruption_reason or "client_disconnected",
+                detail=interruption_detail,
+                context="expert chat",
+            )
             raise
         except Exception as e:
             logger.error(f"expert chat 错误: {e}")
-            _save_partial_message(session_id, full_reply, thinking_items, context="expert chat")
+            interruption_reason, interruption_detail = _classify_exception_reason(e)
+            _save_partial_message(
+                session_id,
+                full_reply,
+                thinking_items,
+                reason=interruption_reason,
+                detail=interruption_detail,
+                context="expert chat",
+            )
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
             return
 
         # 存入 session 消息（用户消息已由前端 save-user 接口写入，此处只存 expert 回复）
         if session_id:
+            _pending_cancel_requests.pop(session_id, None)
             _save_message(session_id, "expert", full_reply, thinking_items, status="completed")
             _auto_title(session_id, req.message)
 
@@ -1072,22 +1283,37 @@ async def expert_chat_resume(req: ExpertResumeRequest):
                     continuation_text = event["data"].get("continuation", "")
                     # 合并: 原有 partial + 续写部分
                     full_content = partial_content + continuation_text
+                    _pending_cancel_requests.pop(session_id, None)
                     _update_message(msg_id, full_content, thinking_items, status="completed")
                     logger.info(f"✅ 续写完成 (msg={msg_id}, partial_len={len(partial_content)}, continuation_len={len(continuation_text)})")
                 yield f"event: {evt_type}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
         except asyncio.CancelledError:
-            if continuation.strip():
-                full_content = partial_content + continuation
-                _update_message(msg_id, full_content, thinking_items, status="partial")
-                logger.info(f"💾 续写中断，已更新 partial 消息 (msg={msg_id}, added_len={len(continuation)})")
+            interruption_reason, interruption_detail = _pop_cancel_request(session_id)
+            full_content = partial_content + continuation
+            _save_partial_message(
+                session_id,
+                full_content,
+                thinking_items,
+                message_id=msg_id,
+                reason=interruption_reason or "resume_interrupted",
+                detail=interruption_detail,
+                context="resume stream",
+            )
             raise
         except Exception as e:
             logger.error(f"resume stream 错误: {e}")
             # 续写也中断了：更新 partial 内容（追加已续写部分）
-            if continuation.strip():
-                full_content = partial_content + continuation
-                _update_message(msg_id, full_content, thinking_items, status="partial")
-                logger.info(f"💾 续写中断，已更新 partial 消息 (msg={msg_id}, added_len={len(continuation)})")
+            interruption_reason, interruption_detail = _classify_exception_reason(e)
+            full_content = partial_content + continuation
+            _save_partial_message(
+                session_id,
+                full_content,
+                thinking_items,
+                message_id=msg_id,
+                reason=interruption_reason,
+                detail=interruption_detail,
+                context="resume stream",
+            )
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

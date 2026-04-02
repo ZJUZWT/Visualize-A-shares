@@ -2,6 +2,16 @@ import { create, type StoreApi } from "zustand";
 import { getApiBase, getSseBase, apiFetch, getAuthHeaders } from "@/lib/api-base";
 import { shouldAutoAdvanceClarification } from "@/lib/clarificationSelection";
 import { buildExpertFeedbackPayload } from "@/lib/expertFeedback";
+import {
+  buildVisibleSessionState,
+  reportCancelThenAbort,
+  updateSessionHistory,
+  type ActiveSessions,
+  type SessionErrorMap,
+  type SessionHistories,
+  type SessionPendingMap,
+  type SessionStatusMap,
+} from "@/lib/expertSessionContinuity";
 import type {
   ExpertMessage,
   ExpertStatus,
@@ -27,14 +37,14 @@ import type {
 } from "@/types/expert";
 import { DEFAULT_EXPERT_PROFILES } from "@/types/expert";
 
-/** 每个专家独立的 AbortController（支持并行生成） */
-const _abortMap: Map<ExpertType, AbortController> = new Map();
+/** 每个 session 独立的 AbortController（同一专家切换会话时不中断原流） */
+const _abortMap: Map<string, AbortController> = new Map();
+/** 记录每个专家当前运行中的 session，用于保证同专家单流和显示侧边状态。 */
+const _streamSessionMap: Map<ExpertType, string> = new Map();
 const CLARIFICATION_EXPERTS = new Set<ExpertType>(["rag", "short_term"]);
 
 /** 每个专家独立的对话历史 */
 type ChatHistory = Record<ExpertType, ExpertMessage[]>;
-/** 每个专家的当前 session ID */
-type ActiveSessions = Record<ExpertType, string | null>;
 
 interface ExpertStore {
   /** 当前选中的专家类型 */
@@ -61,6 +71,11 @@ interface ExpertStore {
   activeSessions: ActiveSessions;
   /** 每个专家是否有待确认的 clarification */
   pendingClarifications: Record<ExpertType, PendingClarification | null>;
+  /** session 级缓存：后台流继续时，原会话仍能积累最新内容 */
+  sessionHistories: SessionHistories;
+  sessionPendingClarifications: SessionPendingMap;
+  sessionStatusMap: SessionStatusMap;
+  sessionErrorMap: SessionErrorMap;
 
   /** 切换专家 */
   setActiveExpert: (type: ExpertType) => void;
@@ -79,7 +94,7 @@ interface ExpertStore {
   /** 管理员标记反馈已处理 */
   resolveAdminFeedbackReport: (feedbackId: string, resolutionNote?: string) => Promise<boolean>;
   /** 停止当前流式请求 */
-  stopStreaming: () => void;
+  stopStreaming: () => Promise<void>;
   /** 重试失败的消息 */
   retryMessage: (messageId: string) => Promise<void>;
   /** 清除当前专家的对话（新建对话） */
@@ -164,21 +179,36 @@ const EMPTY_PENDING: Record<ExpertType, PendingClarification | null> = {
   short_term: null,
 };
 
+const EMPTY_SESSION_HISTORIES: SessionHistories = {};
+const EMPTY_SESSION_PENDING: SessionPendingMap = {};
+const EMPTY_SESSION_STATUS: SessionStatusMap = {};
+const EMPTY_SESSION_ERRORS: SessionErrorMap = {};
+
 type ExpertSetState = StoreApi<ExpertStore>["setState"];
 
 function setExpertStatus(
   set: ExpertSetState,
   expertType: ExpertType,
+  sessionId: string | null,
   status: ExpertStatus,
   error: string | null = null
 ) {
   set((prev) => {
     const newStatusMap = { ...prev.statusMap, [expertType]: status };
     const newErrorMap = { ...prev.errorMap, [expertType]: error };
+    const newSessionStatusMap = sessionId
+      ? { ...prev.sessionStatusMap, [sessionId]: status }
+      : prev.sessionStatusMap;
+    const newSessionErrorMap = sessionId
+      ? { ...prev.sessionErrorMap, [sessionId]: error }
+      : prev.sessionErrorMap;
+    const isVisibleSession = sessionId && prev.activeSessions[expertType] === sessionId;
     return {
       statusMap: newStatusMap,
       errorMap: newErrorMap,
-      ...(prev.activeExpert === expertType ? { status, error } : {}),
+      sessionStatusMap: newSessionStatusMap,
+      sessionErrorMap: newSessionErrorMap,
+      ...(prev.activeExpert === expertType && isVisibleSession ? { status, error } : {}),
     };
   });
 }
@@ -289,8 +319,33 @@ async function streamExpertReply(opts: {
   get: () => ExpertStore;
 }) {
   const { expertType, expertMessageId, sessionId, userMessageId, payload, set, get } = opts;
+  const streamKey = sessionId || `${expertType}:${expertMessageId}`;
   const ac = new AbortController();
-  _abortMap.set(expertType, ac);
+  _abortMap.set(streamKey, ac);
+  if (sessionId) {
+    _streamSessionMap.set(expertType, sessionId);
+  }
+
+  const applyHistoryUpdate = (updater: (history: ExpertMessage[]) => ExpertMessage[]) => {
+    set((s) => {
+      if (!sessionId) {
+        return {
+          chatHistories: {
+            ...s.chatHistories,
+            [expertType]: updater(s.chatHistories[expertType] ?? []),
+          },
+        };
+      }
+      return updateSessionHistory({
+        expertType,
+        sessionId,
+        activeSessions: s.activeSessions,
+        chatHistories: s.chatHistories,
+        sessionHistories: s.sessionHistories,
+        updater,
+      });
+    });
+  };
 
   try {
     const res = await fetch(`${getSseBase()}/api/v1/expert/chat/${expertType}`, {
@@ -327,31 +382,25 @@ async function streamExpertReply(opts: {
             continue;
           }
 
-          set((s) => {
-            const history = [...(s.chatHistories[expertType] ?? [])];
-            const idx = history.findIndex((m) => m.id === expertMessageId);
-            if (idx === -1) return s;
-            history[idx] = applyEventToMessage(history[idx], eventType, data);
-            return {
-              chatHistories: {
-                ...s.chatHistories,
-                [expertType]: history,
-              },
-            };
+          applyHistoryUpdate((history) => {
+            const nextHistory = [...history];
+            const idx = nextHistory.findIndex((m) => m.id === expertMessageId);
+            if (idx === -1) return history;
+            nextHistory[idx] = applyEventToMessage(nextHistory[idx], eventType, data);
+            return nextHistory;
           });
         }
       }
     }
 
     // 流结束后确保 isStreaming=false（防止 reply_complete 事件未到达）
-    set((s) => {
-      const history = [...(s.chatHistories[expertType] ?? [])];
-      const idx = history.findIndex((m) => m.id === expertMessageId);
-      if (idx !== -1 && history[idx].isStreaming) {
-        history[idx] = { ...history[idx], isStreaming: false };
-        return { chatHistories: { ...s.chatHistories, [expertType]: history } };
+    applyHistoryUpdate((history) => {
+      const nextHistory = [...history];
+      const idx = nextHistory.findIndex((m) => m.id === expertMessageId);
+      if (idx !== -1 && nextHistory[idx].isStreaming) {
+        nextHistory[idx] = { ...nextHistory[idx], isStreaming: false };
       }
-      return s;
+      return nextHistory;
     });
 
     if (sessionId) {
@@ -359,57 +408,61 @@ async function streamExpertReply(opts: {
     }
   } catch (e: unknown) {
     if ((e as Error).name === "AbortError") {
-      set((s) => {
-        const history = [...(s.chatHistories[expertType] ?? [])];
-        const idx = history.findIndex((m) => m.id === expertMessageId);
+      applyHistoryUpdate((history) => {
+        const nextHistory = [...history];
+        const idx = nextHistory.findIndex((m) => m.id === expertMessageId);
         if (idx !== -1) {
-          history[idx] = {
-            ...history[idx],
+          nextHistory[idx] = {
+            ...nextHistory[idx],
             isStreaming: false,
-            content: history[idx].content || "（已停止生成）",
+            content: nextHistory[idx].content || "（已停止生成）",
           };
         }
-        return {
-          chatHistories: { ...s.chatHistories, [expertType]: history },
-        };
+        return nextHistory;
       });
       return;
     }
 
     const errMsg = (e as Error).message;
-    set((s) => {
-      const history = [...(s.chatHistories[expertType] ?? [])];
+    applyHistoryUpdate((history) => {
+      const nextHistory = [...history];
       if (userMessageId) {
-        const userIdx = history.findIndex((m) => m.id === userMessageId);
+        const userIdx = nextHistory.findIndex((m) => m.id === userMessageId);
         if (userIdx !== -1) {
-          history[userIdx] = { ...history[userIdx], sendStatus: "failed" };
+          nextHistory[userIdx] = { ...nextHistory[userIdx], sendStatus: "failed" };
         }
       }
-      const expIdx = history.findIndex((m) => m.id === expertMessageId);
+      const expIdx = nextHistory.findIndex((m) => m.id === expertMessageId);
       if (expIdx !== -1) {
-        history[expIdx] = {
-          ...history[expIdx],
+        nextHistory[expIdx] = {
+          ...nextHistory[expIdx],
           content: `请求失败: ${errMsg}`,
           isStreaming: false,
+          interruptionReason: "server_error",
+          interruptionDetail: errMsg,
         };
       }
-      const newStatusMap = { ...s.statusMap, [expertType]: "error" as ExpertStatus };
-      const newErrorMap = { ...s.errorMap, [expertType]: errMsg };
-      return {
-        chatHistories: { ...s.chatHistories, [expertType]: history },
-        statusMap: newStatusMap,
-        errorMap: newErrorMap,
-        ...(s.activeExpert === expertType ? { status: "error" as ExpertStatus, error: errMsg } : {}),
-      };
+      return nextHistory;
     });
+    setExpertStatus(set, expertType, sessionId, "error", errMsg);
   } finally {
-    _abortMap.delete(expertType);
+    _abortMap.delete(streamKey);
+    if (sessionId && _streamSessionMap.get(expertType) === sessionId) {
+      _streamSessionMap.delete(expertType);
+    }
     set((s) => {
-      if (s.statusMap[expertType] !== "error" && !s.pendingClarifications[expertType]) {
+      if (
+        sessionId
+        && s.sessionStatusMap[sessionId] !== "error"
+        && !s.sessionPendingClarifications[sessionId]
+      ) {
         const newStatusMap = { ...s.statusMap, [expertType]: "idle" as ExpertStatus };
+        const newSessionStatusMap = { ...s.sessionStatusMap, [sessionId]: "idle" as ExpertStatus };
+        const isVisibleSession = s.activeSessions[expertType] === sessionId;
         return {
           statusMap: newStatusMap,
-          ...(s.activeExpert === expertType ? { status: "idle" as ExpertStatus } : {}),
+          sessionStatusMap: newSessionStatusMap,
+          ...(s.activeExpert === expertType && isVisibleSession ? { status: "idle" as ExpertStatus } : {}),
         };
       }
       return s;
@@ -431,43 +484,87 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   sessions: { ...EMPTY_SESSIONS },
   activeSessions: { ...EMPTY_ACTIVE },
   pendingClarifications: { ...EMPTY_PENDING },
+  sessionHistories: { ...EMPTY_SESSION_HISTORIES },
+  sessionPendingClarifications: { ...EMPTY_SESSION_PENDING },
+  sessionStatusMap: { ...EMPTY_SESSION_STATUS },
+  sessionErrorMap: { ...EMPTY_SESSION_ERRORS },
 
   setActiveExpert: (type: ExpertType) => {
     // 切换专家时 **不中止** 任何请求，让其在后台继续生成
-    set((s) => ({
-      activeExpert: type,
-      // 同步更新便捷 getter 到目标专家的状态
-      status: s.statusMap[type],
-      error: s.errorMap[type],
-    }));
+    set((s) => {
+      const sessionId = s.activeSessions[type];
+      return {
+        activeExpert: type,
+        ...buildVisibleSessionState({
+          expertType: type,
+          sessionId,
+          activeExpert: type,
+          chatHistories: s.chatHistories,
+          pendingClarifications: s.pendingClarifications,
+          sessionHistories: s.sessionHistories,
+          sessionPendingClarifications: s.sessionPendingClarifications,
+          sessionStatusMap: s.sessionStatusMap,
+          sessionErrorMap: s.sessionErrorMap,
+        }),
+      };
+    });
     // 加载该专家的 sessions
     get().fetchSessions(type);
   },
 
   clearChat: () => {
     const { activeExpert } = get();
-    // 中止当前专家的请求
-    const ac = _abortMap.get(activeExpert);
-    if (ac) { ac.abort(); _abortMap.delete(activeExpert); }
-    set((s) => ({
-      chatHistories: { ...s.chatHistories, [activeExpert]: [] },
-      activeSessions: { ...s.activeSessions, [activeExpert]: null },
-      pendingClarifications: { ...s.pendingClarifications, [activeExpert]: null },
-      statusMap: { ...s.statusMap, [activeExpert]: "idle" },
-      errorMap: { ...s.errorMap, [activeExpert]: null },
-      status: "idle",
-      error: null,
-    }));
+    const activeSessionId = get().activeSessions[activeExpert];
+    if (activeSessionId) {
+      const ac = _abortMap.get(activeSessionId);
+      if (ac) {
+        ac.abort();
+        _abortMap.delete(activeSessionId);
+      }
+      if (_streamSessionMap.get(activeExpert) === activeSessionId) {
+        _streamSessionMap.delete(activeExpert);
+      }
+    }
+    set((s) => {
+      const nextSessionHistories = { ...s.sessionHistories };
+      const nextSessionPending = { ...s.sessionPendingClarifications };
+      const nextSessionStatus = { ...s.sessionStatusMap };
+      const nextSessionErrors = { ...s.sessionErrorMap };
+      if (activeSessionId) {
+        delete nextSessionHistories[activeSessionId];
+        delete nextSessionPending[activeSessionId];
+        delete nextSessionStatus[activeSessionId];
+        delete nextSessionErrors[activeSessionId];
+      }
+      return {
+        chatHistories: { ...s.chatHistories, [activeExpert]: [] },
+        activeSessions: { ...s.activeSessions, [activeExpert]: null },
+        pendingClarifications: { ...s.pendingClarifications, [activeExpert]: null },
+        sessionHistories: nextSessionHistories,
+        sessionPendingClarifications: nextSessionPending,
+        sessionStatusMap: nextSessionStatus,
+        sessionErrorMap: nextSessionErrors,
+        statusMap: { ...s.statusMap, [activeExpert]: "idle" },
+        errorMap: { ...s.errorMap, [activeExpert]: null },
+        status: "idle",
+        error: null,
+      };
+    });
   },
 
   reset: () => {
     // 中止所有专家的请求
     for (const ac of _abortMap.values()) ac.abort();
     _abortMap.clear();
+    _streamSessionMap.clear();
     set({
       chatHistories: { ...EMPTY_HISTORY },
       activeSessions: { ...EMPTY_ACTIVE },
       pendingClarifications: { ...EMPTY_PENDING },
+      sessionHistories: { ...EMPTY_SESSION_HISTORIES },
+      sessionPendingClarifications: { ...EMPTY_SESSION_PENDING },
+      sessionStatusMap: { ...EMPTY_SESSION_STATUS },
+      sessionErrorMap: { ...EMPTY_SESSION_ERRORS },
       statusMap: { ...EMPTY_STATUS },
       errorMap: { ...EMPTY_ERRORS },
       status: "idle",
@@ -536,6 +633,14 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
             },
             activeSessions: { ...s.activeSessions, [type]: session.id },
             chatHistories: { ...s.chatHistories, [type]: [] },
+            sessionHistories: { ...s.sessionHistories, [session.id]: [] },
+            sessionPendingClarifications: {
+              ...s.sessionPendingClarifications,
+              [session.id]: null,
+            },
+            sessionStatusMap: { ...s.sessionStatusMap, [session.id]: "idle" },
+            sessionErrorMap: { ...s.sessionErrorMap, [session.id]: null },
+            ...(s.activeExpert === type ? { status: "idle" as ExpertStatus, error: null } : {}),
           }));
           return session.id;
         }
@@ -548,17 +653,28 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
 
   switchSession: async (sessionId: string) => {
     const { activeExpert } = get();
-    // 中止当前专家的流式请求（同一专家内切 session 才需要停）
-    const ac = _abortMap.get(activeExpert);
-    if (ac) { ac.abort(); _abortMap.delete(activeExpert); }
     set((s) => ({
       activeSessions: { ...s.activeSessions, [activeExpert]: sessionId },
-      pendingClarifications: { ...s.pendingClarifications, [activeExpert]: null },
-      statusMap: { ...s.statusMap, [activeExpert]: "idle" },
-      errorMap: { ...s.errorMap, [activeExpert]: null },
-      status: "idle",
-      error: null,
+      ...buildVisibleSessionState({
+        expertType: activeExpert,
+        sessionId,
+        activeExpert: s.activeExpert,
+        chatHistories: s.chatHistories,
+        pendingClarifications: s.pendingClarifications,
+        sessionHistories: s.sessionHistories,
+        sessionPendingClarifications: s.sessionPendingClarifications,
+        sessionStatusMap: s.sessionStatusMap,
+        sessionErrorMap: s.sessionErrorMap,
+      }),
     }));
+
+    const currentState = get();
+    const hasCachedHistory = (currentState.sessionHistories[sessionId]?.length ?? 0) > 0;
+    const hasCachedPending = !!currentState.sessionPendingClarifications[sessionId];
+    const isStreamingSession = _streamSessionMap.get(activeExpert) === sessionId;
+    if (hasCachedHistory || hasCachedPending || isStreamingSession) {
+      return;
+    }
 
     // 加载该 session 的消息
     try {
@@ -572,6 +688,9 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           content: string;
           thinking: ThinkingItem[];
           status?: string;
+          interruption_reason?: ExpertMessage["interruptionReason"];
+          interruption_detail?: string;
+          last_stream_event_at?: string | null;
         }> = await res.json();
         const expertMessages: ExpertMessage[] = messages.map((m) => ({
           id: m.id,
@@ -579,6 +698,9 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           role: m.role as "user" | "expert",
           content: m.content,
           status: (m.role === "expert" ? (m.status as "completed" | "partial") || "completed" : undefined),
+          interruptionReason: m.interruption_reason,
+          interruptionDetail: m.interruption_detail,
+          lastStreamEventAt: m.last_stream_event_at,
           thinking: (m.thinking || []).map((t: any) => {
             // 兼容旧数据：tool_call 缺少 status 字段时默认设为 "done"（历史数据肯定已完成）
             if (t.type === "tool_call" && !t.status) {
@@ -604,10 +726,24 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         // 只有当 activeSession 还是这个 session 时才更新（防止用户快速切换导致数据错乱）
         if (get().activeSessions[activeExpert] === sessionId) {
           set((s) => ({
-            chatHistories: {
-              ...s.chatHistories,
-              [activeExpert]: expertMessages,
+            sessionHistories: {
+              ...s.sessionHistories,
+              [sessionId]: expertMessages,
             },
+            ...buildVisibleSessionState({
+              expertType: activeExpert,
+              sessionId,
+              activeExpert: s.activeExpert,
+              chatHistories: s.chatHistories,
+              pendingClarifications: s.pendingClarifications,
+              sessionHistories: {
+                ...s.sessionHistories,
+                [sessionId]: expertMessages,
+              },
+              sessionPendingClarifications: s.sessionPendingClarifications,
+              sessionStatusMap: s.sessionStatusMap,
+              sessionErrorMap: s.sessionErrorMap,
+            }),
           }));
         }
       }
@@ -622,12 +758,32 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       await apiFetch(`${getApiBase()}/api/v1/expert/sessions/${sessionId}`, {
         method: "DELETE",
       });
+      const ac = _abortMap.get(sessionId);
+      if (ac) {
+        ac.abort();
+        _abortMap.delete(sessionId);
+      }
+      if (_streamSessionMap.get(activeExpert) === sessionId) {
+        _streamSessionMap.delete(activeExpert);
+      }
       set((s) => {
         const filtered = (s.sessions[activeExpert] || []).filter(
           (sess) => sess.id !== sessionId
         );
+        const nextSessionHistories = { ...s.sessionHistories };
+        const nextSessionPending = { ...s.sessionPendingClarifications };
+        const nextSessionStatus = { ...s.sessionStatusMap };
+        const nextSessionErrors = { ...s.sessionErrorMap };
+        delete nextSessionHistories[sessionId];
+        delete nextSessionPending[sessionId];
+        delete nextSessionStatus[sessionId];
+        delete nextSessionErrors[sessionId];
         const newState: Partial<ExpertStore> = {
           sessions: { ...s.sessions, [activeExpert]: filtered },
+          sessionHistories: nextSessionHistories,
+          sessionPendingClarifications: nextSessionPending,
+          sessionStatusMap: nextSessionStatus,
+          sessionErrorMap: nextSessionErrors,
         };
         // 如果删除的是当前激活的 session，清空对话
         if (activeSessions[activeExpert] === sessionId) {
@@ -643,6 +799,8 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
             ...s.chatHistories,
             [activeExpert]: [],
           };
+          newState.status = "idle";
+          newState.error = null;
         }
         return newState;
       });
@@ -651,35 +809,75 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     }
   },
 
-  stopStreaming: () => {
-    const { activeExpert } = get();
-    // 只中止当前专家的网络请求
-    const ac = _abortMap.get(activeExpert);
-    if (ac) { ac.abort(); _abortMap.delete(activeExpert); }
-    // 将当前专家的 streaming 消息标记为完成
+  stopStreaming: async () => {
+    const { activeExpert, activeSessions, chatHistories } = get();
+    const sessionId = activeSessions[activeExpert];
+    if (!sessionId) return;
+
+    const ac = _abortMap.get(sessionId);
+    if (!ac) return;
+
+    const streamingMessage = [...(chatHistories[activeExpert] ?? [])]
+      .reverse()
+      .find((message) => message.role === "expert" && message.isStreaming);
+
+    await reportCancelThenAbort({
+      reportCancel: async () => {
+        await apiFetch(`${getApiBase()}/api/v1/expert/chat/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            expert_type: activeExpert,
+            message_id: streamingMessage?.dbMessageId ?? undefined,
+            reason: "user_cancelled",
+          }),
+        }).catch(() => null);
+      },
+      abort: () => {
+        ac.abort();
+        _abortMap.delete(sessionId);
+      },
+    });
+
     set((s) => {
-      const history = [...(s.chatHistories[activeExpert] ?? [])];
-      const streamIdx = history.findIndex((m) => m.isStreaming);
-      if (streamIdx !== -1) {
-        history[streamIdx] = {
-          ...history[streamIdx],
-          isStreaming: false,
-          content: history[streamIdx].content || "（已停止生成）",
-        };
-      }
+      const updated = updateSessionHistory({
+        expertType: activeExpert,
+        sessionId,
+        activeSessions: s.activeSessions,
+        chatHistories: s.chatHistories,
+        sessionHistories: s.sessionHistories,
+        updater: (history) => {
+          const nextHistory = [...history];
+          const idx = nextHistory.findLastIndex((message) => message.role === "expert" && message.isStreaming);
+          if (idx !== -1) {
+            nextHistory[idx] = {
+              ...nextHistory[idx],
+              isStreaming: false,
+              content: nextHistory[idx].content || "（已停止生成）",
+              interruptionReason: "user_cancelled",
+            };
+          }
+          return nextHistory;
+        },
+      });
       return {
-        chatHistories: { ...s.chatHistories, [activeExpert]: history },
+        ...updated,
+        sessionStatusMap: { ...s.sessionStatusMap, [sessionId]: "idle" },
         statusMap: { ...s.statusMap, [activeExpert]: "idle" },
-        status: "idle",
+        ...(s.activeExpert === activeExpert && s.activeSessions[activeExpert] === sessionId
+          ? { status: "idle" as ExpertStatus }
+          : {}),
       };
     });
   },
 
   retryMessage: async (messageId: string) => {
-    const { activeExpert, chatHistories } = get();
+    const { activeExpert, chatHistories, activeSessions } = get();
     const history = chatHistories[activeExpert] ?? [];
     const failedMsg = history.find((m) => m.id === messageId);
     if (!failedMsg || failedMsg.role !== "user" || failedMsg.sendStatus !== "failed") return;
+    const sessionId = activeSessions[activeExpert];
 
     // 找到这条 user 消息和紧跟其后的 expert 消息并移除
     const userIdx = history.findIndex((m) => m.id === messageId);
@@ -691,6 +889,14 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     }
     set((s) => ({
       chatHistories: { ...s.chatHistories, [activeExpert]: newHistory },
+      ...(sessionId
+        ? {
+            sessionHistories: {
+              ...s.sessionHistories,
+              [sessionId]: newHistory,
+            },
+          }
+        : {}),
     }));
     // 重新发送
     await get().sendMessage(failedMsg.content, failedMsg.images);
@@ -703,8 +909,15 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     const msgImages = images && images.length > 0 ? images : undefined;
 
     // 如果该专家已有进行中的请求，先中止（同一专家不并发）
-    const existingAc = _abortMap.get(expertType);
-    if (existingAc) { existingAc.abort(); _abortMap.delete(expertType); }
+    const existingSessionId = _streamSessionMap.get(expertType);
+    if (existingSessionId) {
+      const existingAc = _abortMap.get(existingSessionId);
+      if (existingAc) {
+        existingAc.abort();
+        _abortMap.delete(existingSessionId);
+      }
+      _streamSessionMap.delete(expertType);
+    }
 
     // 自动创建 session（如果没有）
     let sessionId = activeSessions[expertType];
@@ -713,7 +926,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     }
 
     const shouldClarify = useClarification && CLARIFICATION_EXPERTS.has(expertType);
-    setExpertStatus(set, expertType, shouldClarify ? "clarifying" : "thinking");
+    setExpertStatus(set, expertType, sessionId, shouldClarify ? "clarifying" : "thinking");
 
     const userMsg: ExpertMessage = {
       id: newId(),
@@ -732,16 +945,43 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       isStreaming: true,  // 始终显示 loading 动画（clarify 返回后会关闭）
     };
 
-    set((s) => ({
-      chatHistories: {
-        ...s.chatHistories,
-        [expertType]: [
-          ...(s.chatHistories[expertType] ?? []),
-          userMsg,
-          expertMsg,
-        ],
-      },
-    }));
+    set((s) => {
+      if (!sessionId) {
+        return {
+          chatHistories: {
+            ...s.chatHistories,
+            [expertType]: [
+              ...(s.chatHistories[expertType] ?? []),
+              userMsg,
+              expertMsg,
+            ],
+          },
+        };
+      }
+      const nextHistory = [
+        ...(s.sessionHistories[sessionId] ?? []),
+        userMsg,
+        expertMsg,
+      ];
+      return {
+        sessionHistories: {
+          ...s.sessionHistories,
+          [sessionId]: nextHistory,
+        },
+        chatHistories: {
+          ...s.chatHistories,
+          [expertType]: nextHistory,
+        },
+        sessionPendingClarifications: {
+          ...s.sessionPendingClarifications,
+          [sessionId]: null,
+        },
+        sessionErrorMap: {
+          ...s.sessionErrorMap,
+          [sessionId]: null,
+        },
+      };
+    });
 
     // 立即将用户消息写入 DB
     if (sessionId) {
@@ -759,12 +999,26 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
 
     // 标记 user 消息为已发送
     set((s) => {
-      const history = [...(s.chatHistories[expertType] ?? [])];
-      const idx = history.findIndex((m) => m.id === userMsg.id);
-      if (idx !== -1) {
-        history[idx] = { ...history[idx], sendStatus: "sent" };
+      if (!sessionId) {
+        const history = [...(s.chatHistories[expertType] ?? [])];
+        const idx = history.findIndex((m) => m.id === userMsg.id);
+        if (idx !== -1) {
+          history[idx] = { ...history[idx], sendStatus: "sent" };
+        }
+        return { chatHistories: { ...s.chatHistories, [expertType]: history } };
       }
-      return { chatHistories: { ...s.chatHistories, [expertType]: history } };
+      return updateSessionHistory({
+        expertType,
+        sessionId,
+        activeSessions: s.activeSessions,
+        chatHistories: s.chatHistories,
+        sessionHistories: s.sessionHistories,
+        updater: (history) => history.map((message) =>
+          message.id === userMsg.id
+            ? { ...message, sendStatus: "sent" }
+            : message,
+        ),
+      });
     });
     if (shouldClarify) {
       try {
@@ -781,7 +1035,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         const currentRound = data.round ?? 1;
 
         if (shouldAutoAdvanceClarification(data)) {
-          setExpertStatus(set, expertType, "thinking");
+          setExpertStatus(set, expertType, sessionId, "thinking");
           await streamExpertReply({
             expertType,
             expertMessageId: expertMsg.id,
@@ -802,60 +1056,87 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         }
 
         set((s) => {
-          const history = [...(s.chatHistories[expertType] ?? [])];
-          const idx = history.findIndex((m) => m.id === expertMsg.id);
-          if (idx !== -1) {
-            history[idx] = {
-              ...history[idx],
-              thinking: [
-                {
-                  type: "clarification_request" as const,
-                  data,
-                  status: "pending" as const,
-                  round: currentRound,
-                },
-              ],
-              isStreaming: false,
-            };
+          if (!sessionId) {
+            return s;
           }
+          const updated = updateSessionHistory({
+            expertType,
+            sessionId,
+            activeSessions: s.activeSessions,
+            chatHistories: s.chatHistories,
+            sessionHistories: s.sessionHistories,
+            updater: (history) => history.map((message) =>
+              message.id === expertMsg.id
+                ? {
+                    ...message,
+                    thinking: [
+                      {
+                        type: "clarification_request" as const,
+                        data,
+                        status: "pending" as const,
+                        round: currentRound,
+                      },
+                    ],
+                    isStreaming: false,
+                  }
+                : message,
+            ),
+          });
+          const nextPending = {
+            sessionId,
+            userMessageId: userMsg.id,
+            expertMessageId: expertMsg.id,
+            request: data,
+            originalMessage: text,
+            previousSelections: [],
+          };
           return {
-            chatHistories: { ...s.chatHistories, [expertType]: history },
+            ...updated,
+            sessionPendingClarifications: {
+              ...s.sessionPendingClarifications,
+              [sessionId]: nextPending,
+            },
             pendingClarifications: {
               ...s.pendingClarifications,
-              [expertType]: {
-                sessionId,
-                userMessageId: userMsg.id,
-                expertMessageId: expertMsg.id,
-                request: data,
-                originalMessage: text,
-                previousSelections: [],
-              },
+              [expertType]: s.activeSessions[expertType] === sessionId ? nextPending : s.pendingClarifications[expertType],
             },
           };
         });
-        setExpertStatus(set, expertType, "idle");
+        setExpertStatus(set, expertType, sessionId, "idle");
         return;
       } catch (e: unknown) {
         const errMsg = (e as Error).message;
         set((s) => {
-          const history = [...(s.chatHistories[expertType] ?? [])];
-          const userIdx = history.findIndex((m) => m.id === userMsg.id);
-          if (userIdx !== -1) {
-            history[userIdx] = { ...history[userIdx], sendStatus: "failed" };
+          if (!sessionId) {
+            return s;
           }
-          const expIdx = history.findIndex((m) => m.id === expertMsg.id);
-          if (expIdx !== -1) {
-            history[expIdx] = {
-              ...history[expIdx],
-              content: `澄清阶段失败: ${errMsg}`,
-              isStreaming: false,
-            };
-          }
+          const updated = updateSessionHistory({
+            expertType,
+            sessionId,
+            activeSessions: s.activeSessions,
+            chatHistories: s.chatHistories,
+            sessionHistories: s.sessionHistories,
+            updater: (history) => history.map((message) => {
+              if (message.id === userMsg.id) {
+                return { ...message, sendStatus: "failed" };
+              }
+              if (message.id === expertMsg.id) {
+                return {
+                  ...message,
+                  content: `澄清阶段失败: ${errMsg}`,
+                  isStreaming: false,
+                  interruptionReason: "server_error",
+                  interruptionDetail: errMsg,
+                };
+              }
+              return message;
+            }),
+          });
           return {
-            chatHistories: { ...s.chatHistories, [expertType]: history },
+            ...updated,
           };
         });
-        setExpertStatus(set, expertType, "error", errMsg);
+        setExpertStatus(set, expertType, sessionId, "error", errMsg);
         return;
       }
     }
@@ -889,9 +1170,8 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     const expertType = activeExpert;
     const pending = pendingClarifications[expertType];
     if (!pending) return;
-
-    const existingAc = _abortMap.get(expertType);
-    if (existingAc) { existingAc.abort(); _abortMap.delete(expertType); }
+    const sessionId = pending.sessionId;
+    if (!sessionId) return;
 
     // 当前轮次（从 pending.request 取，默认1）
     const currentRound = pending.request.round ?? 1;
@@ -917,26 +1197,30 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
 
     // 标记当前轮为已选
     set((s) => {
-      const history = [...(s.chatHistories[expertType] ?? [])];
-      const idx = history.findIndex((m) => m.id === pending.expertMessageId);
-      if (idx !== -1) {
-        history[idx] = {
-          ...history[idx],
-          thinking: history[idx].thinking.map((item) =>
-            item.type === "clarification_request" && item.status === "pending"
-              ? {
-                  ...item,
-                  status: allSkip ? "skipped" as const : "selected" as const,
-                  selectedOption: firstSel,
-                  selectedOptions: selections,
-                }
-              : item
-          ),
-        };
-      }
-      return {
-        chatHistories: { ...s.chatHistories, [expertType]: history },
-      };
+      return updateSessionHistory({
+        expertType,
+        sessionId,
+        activeSessions: s.activeSessions,
+        chatHistories: s.chatHistories,
+        sessionHistories: s.sessionHistories,
+        updater: (history) => history.map((message) =>
+          message.id === pending.expertMessageId
+            ? {
+                ...message,
+                thinking: message.thinking.map((item) =>
+                  item.type === "clarification_request" && item.status === "pending"
+                    ? {
+                        ...item,
+                        status: allSkip ? "skipped" as const : "selected" as const,
+                        selectedOption: firstSel,
+                        selectedOptions: selections,
+                      }
+                    : item,
+                ),
+              }
+            : message,
+        ),
+      });
     });
 
     // 如果用户选了 skip，或者后端说不需要继续 (needs_more=false)，直接进入 chat
@@ -945,26 +1229,36 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       // 清除 pending，进入 chat
       set((s) => ({
         pendingClarifications: { ...s.pendingClarifications, [expertType]: null },
+        sessionPendingClarifications: {
+          ...s.sessionPendingClarifications,
+          [sessionId]: null,
+        },
       }));
-      setExpertStatus(set, expertType, "thinking");
+      setExpertStatus(set, expertType, sessionId, "thinking");
 
       // 设置 streaming 状态
       set((s) => {
-        const history = [...(s.chatHistories[expertType] ?? [])];
-        const idx = history.findIndex((m) => m.id === pending.expertMessageId);
-        if (idx !== -1) {
-          history[idx] = { ...history[idx], isStreaming: true };
-        }
-        return { chatHistories: { ...s.chatHistories, [expertType]: history } };
+        return updateSessionHistory({
+          expertType,
+          sessionId,
+          activeSessions: s.activeSessions,
+          chatHistories: s.chatHistories,
+          sessionHistories: s.sessionHistories,
+          updater: (history) => history.map((message) =>
+            message.id === pending.expertMessageId
+              ? { ...message, isStreaming: true }
+              : message,
+          ),
+        });
       });
 
       await streamExpertReply({
         expertType,
         expertMessageId: pending.expertMessageId,
-        sessionId: pending.sessionId,
+        sessionId,
         payload: {
           message: pending.originalMessage,
-          session_id: pending.sessionId,
+          session_id: sessionId,
           deep_think: deepThink,
           enable_trade_plan: useTradePlan,
           clarification_chain: allRoundSelections,
@@ -978,15 +1272,21 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     }
 
     // 需要继续追问：调用 /clarify 获取下一轮选项
-    setExpertStatus(set, expertType, "clarifying");
+    setExpertStatus(set, expertType, sessionId, "clarifying");
     // 显示 loading 动画等待下一轮选项
     set((s) => {
-      const history = [...(s.chatHistories[expertType] ?? [])];
-      const idx = history.findIndex((m) => m.id === pending.expertMessageId);
-      if (idx !== -1) {
-        history[idx] = { ...history[idx], isStreaming: true };
-      }
-      return { chatHistories: { ...s.chatHistories, [expertType]: history } };
+      return updateSessionHistory({
+        expertType,
+        sessionId,
+        activeSessions: s.activeSessions,
+        chatHistories: s.chatHistories,
+        sessionHistories: s.sessionHistories,
+        updater: (history) => history.map((message) =>
+          message.id === pending.expertMessageId
+            ? { ...message, isStreaming: true }
+            : message,
+        ),
+      });
     });
     try {
       const res = await fetch(`${getApiBase()}/api/v1/expert/clarify/${expertType}`, {
@@ -994,7 +1294,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: pending.originalMessage,
-          session_id: pending.sessionId,
+          session_id: sessionId,
           previous_selections: allRoundSelections,
         }),
       });
@@ -1006,25 +1306,35 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       if (shouldAutoAdvanceClarification(nextData)) {
         set((s) => ({
           pendingClarifications: { ...s.pendingClarifications, [expertType]: null },
+          sessionPendingClarifications: {
+            ...s.sessionPendingClarifications,
+            [sessionId]: null,
+          },
         }));
-        setExpertStatus(set, expertType, "thinking");
+        setExpertStatus(set, expertType, sessionId, "thinking");
 
         set((s) => {
-          const history = [...(s.chatHistories[expertType] ?? [])];
-          const idx = history.findIndex((m) => m.id === pending.expertMessageId);
-          if (idx !== -1) {
-            history[idx] = { ...history[idx], isStreaming: true };
-          }
-          return { chatHistories: { ...s.chatHistories, [expertType]: history } };
+          return updateSessionHistory({
+            expertType,
+            sessionId,
+            activeSessions: s.activeSessions,
+            chatHistories: s.chatHistories,
+            sessionHistories: s.sessionHistories,
+            updater: (history) => history.map((message) =>
+              message.id === pending.expertMessageId
+                ? { ...message, isStreaming: true }
+                : message,
+            ),
+          });
         });
 
         await streamExpertReply({
           expertType,
           expertMessageId: pending.expertMessageId,
-          sessionId: pending.sessionId,
+          sessionId,
           payload: {
             message: pending.originalMessage,
-            session_id: pending.sessionId,
+            session_id: sessionId,
             deep_think: deepThink,
             enable_trade_plan: useTradePlan,
             clarification_chain: allRoundSelections,
@@ -1038,64 +1348,86 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
 
       // 追加新一轮的 clarification_request ThinkingItem
       set((s) => {
-        const history = [...(s.chatHistories[expertType] ?? [])];
-        const idx = history.findIndex((m) => m.id === pending.expertMessageId);
-        if (idx !== -1) {
-          history[idx] = {
-            ...history[idx],
-            thinking: [
-              ...history[idx].thinking,
-              {
-                type: "clarification_request" as const,
-                data: nextData,
-                status: "pending" as const,
-                round: nextRound,
-              },
-            ],
-            isStreaming: false,
-          };
-        }
+        const updated = updateSessionHistory({
+          expertType,
+          sessionId,
+          activeSessions: s.activeSessions,
+          chatHistories: s.chatHistories,
+          sessionHistories: s.sessionHistories,
+          updater: (history) => history.map((message) =>
+            message.id === pending.expertMessageId
+              ? {
+                  ...message,
+                  thinking: [
+                    ...message.thinking,
+                    {
+                      type: "clarification_request" as const,
+                      data: nextData,
+                      status: "pending" as const,
+                      round: nextRound,
+                    },
+                  ],
+                  isStreaming: false,
+                }
+              : message,
+          ),
+        });
+        const nextPending = {
+          sessionId,
+          userMessageId: pending.userMessageId,
+          expertMessageId: pending.expertMessageId,
+          request: nextData,
+          originalMessage: pending.originalMessage,
+          previousSelections: allRoundSelections,
+        };
         return {
-          chatHistories: { ...s.chatHistories, [expertType]: history },
+          ...updated,
+          sessionPendingClarifications: {
+            ...s.sessionPendingClarifications,
+            [sessionId]: nextPending,
+          },
           pendingClarifications: {
             ...s.pendingClarifications,
-            [expertType]: {
-              sessionId: pending.sessionId,
-              userMessageId: pending.userMessageId,
-              expertMessageId: pending.expertMessageId,
-              request: nextData,
-              originalMessage: pending.originalMessage,
-              previousSelections: allRoundSelections,
-            },
+            [expertType]: s.activeSessions[expertType] === sessionId ? nextPending : s.pendingClarifications[expertType],
           },
         };
       });
-      setExpertStatus(set, expertType, "idle");
+      setExpertStatus(set, expertType, sessionId, "idle");
     } catch (e: unknown) {
       // 追问失败时降级：直接带已有选择进入 chat
       const errMsg = (e as Error).message;
       console.warn("多轮澄清追问失败，降级进入 chat:", errMsg);
       set((s) => ({
         pendingClarifications: { ...s.pendingClarifications, [expertType]: null },
+        sessionPendingClarifications: {
+          ...s.sessionPendingClarifications,
+          [sessionId]: null,
+        },
       }));
-      setExpertStatus(set, expertType, "thinking");
+      setExpertStatus(set, expertType, sessionId, "thinking");
 
       set((s) => {
-        const history = [...(s.chatHistories[expertType] ?? [])];
-        const idx = history.findIndex((m) => m.id === pending.expertMessageId);
-        if (idx !== -1) {
-          history[idx] = { ...history[idx], isStreaming: true };
-        }
-        return { chatHistories: { ...s.chatHistories, [expertType]: history } };
+        return updateSessionHistory({
+          expertType,
+          sessionId,
+          activeSessions: s.activeSessions,
+          chatHistories: s.chatHistories,
+          sessionHistories: s.sessionHistories,
+          updater: (history) => history.map((message) =>
+            message.id === pending.expertMessageId
+              ? { ...message, isStreaming: true }
+              : message,
+          ),
+        });
       });
 
       await streamExpertReply({
         expertType,
         expertMessageId: pending.expertMessageId,
-        sessionId: pending.sessionId,
+        sessionId,
         payload: {
           message: pending.originalMessage,
-          session_id: pending.sessionId,
+          session_id: sessionId,
           deep_think: deepThink,
           clarification_chain: allRoundSelections,
           clarification_selection: firstSel,
@@ -1107,7 +1439,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
   },
 
   submitFeedback: async (messageId: string, options: ExpertFeedbackSubmitOptions) => {
-    const { activeExpert, activeSessions, chatHistories, pendingClarifications, statusMap, errorMap } = get();
+    const { activeExpert, activeSessions, chatHistories, pendingClarifications, sessionStatusMap, sessionErrorMap } = get();
     const sessionId = activeSessions[activeExpert];
     if (!sessionId) return null;
 
@@ -1137,16 +1469,18 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         if (matchedMessage?.id) {
           message = { ...message, dbMessageId: matchedMessage.id };
           set((s) => {
-            const nextHistory = [...(s.chatHistories[activeExpert] ?? [])];
-            if (messageIndex >= 0 && nextHistory[messageIndex]) {
-              nextHistory[messageIndex] = {
-                ...nextHistory[messageIndex],
-                dbMessageId: matchedMessage.id,
-              };
-            }
-            return {
-              chatHistories: { ...s.chatHistories, [activeExpert]: nextHistory },
-            };
+            return updateSessionHistory({
+              expertType: activeExpert,
+              sessionId,
+              activeSessions: s.activeSessions,
+              chatHistories: s.chatHistories,
+              sessionHistories: s.sessionHistories,
+              updater: (history) => history.map((item, index) =>
+                index === messageIndex
+                  ? { ...item, dbMessageId: matchedMessage.id }
+                  : item,
+              ),
+            });
           });
         }
       }
@@ -1164,8 +1498,8 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
       message,
       history,
       pendingClarification: pendingClarifications[activeExpert],
-      expertStatus: statusMap[activeExpert],
-      error: errorMap[activeExpert],
+      expertStatus: sessionStatusMap[sessionId] ?? "idle",
+      error: sessionErrorMap[sessionId] ?? null,
     });
 
     const response = await apiFetch(`${getApiBase()}/api/v1/expert/feedback`, {
@@ -1242,17 +1576,34 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
     if (!dbMsgId) return;
 
     // 设置为 streaming 状态
-    setExpertStatus(set, expertType, "thinking");
-    set((s) => {
-      const h = [...(s.chatHistories[expertType] ?? [])];
-      if (h[msgIdx]) {
-        h[msgIdx] = { ...h[msgIdx], isStreaming: true };
-      }
-      return { chatHistories: { ...s.chatHistories, [expertType]: h } };
-    });
+    setExpertStatus(set, expertType, sessionId, "thinking");
+    set((s) => updateSessionHistory({
+      expertType,
+      sessionId,
+      activeSessions: s.activeSessions,
+      chatHistories: s.chatHistories,
+      sessionHistories: s.sessionHistories,
+      updater: (history) => history.map((message, index) =>
+        index === msgIdx
+          ? { ...message, isStreaming: true }
+          : message,
+      ),
+    }));
 
     const ac = new AbortController();
-    _abortMap.set(expertType, ac);
+    _abortMap.set(sessionId, ac);
+    _streamSessionMap.set(expertType, sessionId);
+
+    const applyHistoryUpdate = (updater: (history: ExpertMessage[]) => ExpertMessage[]) => {
+      set((s) => updateSessionHistory({
+        expertType,
+        sessionId,
+        activeSessions: s.activeSessions,
+        chatHistories: s.chatHistories,
+        sessionHistories: s.sessionHistories,
+        updater,
+      }));
+    };
 
     try {
       const res = await fetch(`${getSseBase()}/api/v1/expert/chat/resume`, {
@@ -1295,83 +1646,85 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
 
             if (eventType === "resume_token") {
               // 追加 token 到已有 content
-              set((s) => {
-                const h = [...(s.chatHistories[expertType] ?? [])];
-                const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
-                if (idx !== -1) {
-                  h[idx] = {
-                    ...h[idx],
-                    content: h[idx].content + ((data.token as string) ?? ""),
-                  };
-                }
-                return { chatHistories: { ...s.chatHistories, [expertType]: h } };
-              });
+              applyHistoryUpdate((history) => history.map((message) =>
+                message.id === messageId || message.dbMessageId === messageId
+                  ? {
+                      ...message,
+                      content: message.content + ((data.token as string) ?? ""),
+                    }
+                  : message,
+              ));
             } else if (eventType === "resume_complete") {
               // 续写完成
-              set((s) => {
-                const h = [...(s.chatHistories[expertType] ?? [])];
-                const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
-                if (idx !== -1) {
-                  h[idx] = {
-                    ...h[idx],
-                    isStreaming: false,
-                    status: "completed",
-                  };
-                }
-                return { chatHistories: { ...s.chatHistories, [expertType]: h } };
-              });
+              applyHistoryUpdate((history) => history.map((message) =>
+                message.id === messageId || message.dbMessageId === messageId
+                  ? {
+                      ...message,
+                      isStreaming: false,
+                      status: "completed",
+                      interruptionReason: undefined,
+                      interruptionDetail: undefined,
+                    }
+                  : message,
+              ));
             } else if (eventType === "error") {
-              set((s) => {
-                const h = [...(s.chatHistories[expertType] ?? [])];
-                const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
-                if (idx !== -1) {
-                  h[idx] = { ...h[idx], isStreaming: false };
-                }
-                return { chatHistories: { ...s.chatHistories, [expertType]: h } };
-              });
+              applyHistoryUpdate((history) => history.map((message) =>
+                message.id === messageId || message.dbMessageId === messageId
+                  ? { ...message, isStreaming: false }
+                  : message,
+              ));
             }
           }
         }
       }
 
       // 流结束后确保 isStreaming=false
-      set((s) => {
-        const h = [...(s.chatHistories[expertType] ?? [])];
-        const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
-        if (idx !== -1 && h[idx].isStreaming) {
-          h[idx] = { ...h[idx], isStreaming: false, status: "completed" };
-        }
-        return { chatHistories: { ...s.chatHistories, [expertType]: h } };
-      });
+      applyHistoryUpdate((history) => history.map((message) =>
+        (message.id === messageId || message.dbMessageId === messageId) && message.isStreaming
+          ? { ...message, isStreaming: false, status: "completed" }
+          : message,
+      ));
     } catch (e: unknown) {
       if ((e as Error).name === "AbortError") {
-        set((s) => {
-          const h = [...(s.chatHistories[expertType] ?? [])];
-          const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
-          if (idx !== -1) {
-            h[idx] = { ...h[idx], isStreaming: false };
-          }
-          return { chatHistories: { ...s.chatHistories, [expertType]: h } };
-        });
+        applyHistoryUpdate((history) => history.map((message) =>
+          message.id === messageId || message.dbMessageId === messageId
+            ? {
+                ...message,
+                isStreaming: false,
+                interruptionReason: "user_cancelled",
+              }
+            : message,
+        ));
         return;
       }
       console.error("resumeReply error:", (e as Error).message);
-      set((s) => {
-        const h = [...(s.chatHistories[expertType] ?? [])];
-        const idx = h.findIndex((m) => m.id === messageId || m.dbMessageId === messageId);
-        if (idx !== -1) {
-          h[idx] = { ...h[idx], isStreaming: false };
-        }
-        return { chatHistories: { ...s.chatHistories, [expertType]: h } };
-      });
+      const errMsg = (e as Error).message;
+      applyHistoryUpdate((history) => history.map((message) =>
+        message.id === messageId || message.dbMessageId === messageId
+          ? {
+              ...message,
+              isStreaming: false,
+              interruptionReason: "server_error",
+              interruptionDetail: errMsg,
+            }
+          : message,
+      ));
+      setExpertStatus(set, expertType, sessionId, "error", errMsg);
     } finally {
-      _abortMap.delete(expertType);
+      _abortMap.delete(sessionId);
+      if (_streamSessionMap.get(expertType) === sessionId) {
+        _streamSessionMap.delete(expertType);
+      }
       set((s) => {
-        if (s.statusMap[expertType] !== "error") {
+        if (s.sessionStatusMap[sessionId] !== "error") {
           const newStatusMap = { ...s.statusMap, [expertType]: "idle" as ExpertStatus };
+          const newSessionStatusMap = { ...s.sessionStatusMap, [sessionId]: "idle" as ExpertStatus };
           return {
             statusMap: newStatusMap,
-            ...(s.activeExpert === expertType ? { status: "idle" as ExpertStatus } : {}),
+            sessionStatusMap: newSessionStatusMap,
+            ...(s.activeExpert === expertType && s.activeSessions[expertType] === sessionId
+              ? { status: "idle" as ExpertStatus }
+              : {}),
           };
         }
         return s;

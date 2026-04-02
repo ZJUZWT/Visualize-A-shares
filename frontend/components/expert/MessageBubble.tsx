@@ -14,7 +14,11 @@ import {
 } from "@/lib/clarificationSelection";
 import { buildExpertTradePlanPayload } from "@/lib/expertTradePlan";
 import { splitByTradePlan, hasTradePlan } from "@/lib/parseTradePlan";
-import { FEEDBACK_ISSUE_LABELS, shouldOfferResumeCheck } from "@/lib/expertFeedback";
+import {
+  FEEDBACK_ISSUE_LABELS,
+  defaultFeedbackIssueTypeForMessage,
+  shouldOfferResumeCheck,
+} from "@/lib/expertFeedback";
 import TradePlanCard from "@/components/plans/TradePlanCard";
 import { getApiBase, apiFetch } from "@/lib/api-base";
 
@@ -372,21 +376,26 @@ function MarkdownContent({ content }: { content: string }) {
 
 /** partial 消息提示条 + 续写按钮 */
 function PartialBanner({
-  messageId,
+  message,
   expertColor,
 }: {
-  messageId: string;
+  message: ExpertMessage;
   expertColor: string;
 }) {
-  const { resumeReply, statusMap, activeExpert } = useExpertStore();
-  const isResuming = statusMap[activeExpert] === "thinking";
+  const { resumeReply, status } = useExpertStore();
+  const isResuming = status === "thinking";
+  const label = message.interruptionReason === "user_cancelled"
+    ? "已停止生成"
+    : message.interruptionReason === "provider_error" || message.interruptionReason === "server_error"
+      ? "生成中断，可继续补全"
+      : "回复未完成";
 
   return (
     <div className="mt-2 flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2">
       <AlertTriangle size={14} className="shrink-0 text-amber-500" />
-      <span className="text-xs text-amber-600 dark:text-amber-400">回复未完成</span>
+      <span className="text-xs text-amber-600 dark:text-amber-400">{label}</span>
       <button
-        onClick={() => !isResuming && resumeReply(messageId)}
+        onClick={() => !isResuming && resumeReply(message.dbMessageId || message.id)}
         disabled={isResuming}
         className="ml-auto flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-all
                    border-[var(--border)] hover:border-[var(--border-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
@@ -409,7 +418,7 @@ function ExpertFeedbackPanel({
   const { submitFeedback } = useExpertStore();
   const [open, setOpen] = useState(false);
   const [issueType, setIssueType] = useState<ExpertFeedbackIssueType>(
-    message.status === "partial" ? "llm_truncated" : "other",
+    defaultFeedbackIssueTypeForMessage(message),
   );
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -647,7 +656,7 @@ export function MessageBubble({
         {/* partial 消息提示条 + 续写按钮 */}
         {message.status === "partial" && !message.isStreaming && (
           <PartialBanner
-            messageId={message.dbMessageId || message.id}
+            message={message}
             expertColor={expertColor}
           />
         )}

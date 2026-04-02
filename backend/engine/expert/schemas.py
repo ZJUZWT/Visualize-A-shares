@@ -209,6 +209,25 @@ class ExpertResumeRequest(BaseModel):
     check_completed: bool = False  # 可选：对已 completed 但疑似截断的消息也执行完整性检查
 
 
+InterruptionReason = Literal[
+    "user_cancelled",
+    "client_disconnected",
+    "server_error",
+    "provider_error",
+    "resume_interrupted",
+    "unknown_interrupted",
+]
+
+
+class ExpertCancelRequest(BaseModel):
+    """显式上报用户停止生成。"""
+    session_id: str
+    expert_type: str = "rag"
+    message_id: str | None = None
+    reason: InterruptionReason = "user_cancelled"
+    detail: str = ""
+
+
 class ResumeCompletionCheckResult(BaseModel):
     """resume 前的完整性检查结果"""
     is_complete: bool = False

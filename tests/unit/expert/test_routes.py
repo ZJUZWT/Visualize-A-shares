@@ -205,6 +205,9 @@ def _init_test_expert_db(
             content VARCHAR NOT NULL DEFAULT '',
             thinking JSON,
             status VARCHAR DEFAULT 'completed',
+            interruption_reason VARCHAR,
+            interruption_detail VARCHAR,
+            last_stream_event_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -278,12 +281,90 @@ async def test_expert_chat_persists_partial_message_when_stream_cancelled(tmp_pa
 
     con = duckdb.connect(str(db_path))
     rows = con.execute(
-        "SELECT role, content, status FROM expert.messages WHERE session_id = ? ORDER BY created_at",
+        "SELECT role, content, status, interruption_reason FROM expert.messages WHERE session_id = ? ORDER BY created_at",
         [session_id],
     ).fetchall()
     con.close()
 
-    assert rows == [("expert", "半截内容", "partial")]
+    assert rows == [("expert", "半截内容", "partial", "client_disconnected")]
+
+
+def test_cancel_endpoint_marks_message_as_user_cancelled(client, tmp_path):
+    from engine.expert import routes as routes_module
+
+    db_path = tmp_path / "expert_chat_cancel.duckdb"
+    session_id = "session-cancel-api"
+    message_id = "message-cancel-api"
+    _init_test_expert_db(db_path, session_id=session_id, expert_type="data")
+
+    con = duckdb.connect(str(db_path))
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'expert', ?, '[]', 'completed')
+        """,
+        [message_id, session_id, "还在生成中的内容"],
+    )
+    con.close()
+
+    with patch.object(routes_module, "_get_db", side_effect=lambda: duckdb.connect(str(db_path))):
+        response = client.post(
+            "/api/v1/expert/chat/cancel",
+            json={
+                "session_id": session_id,
+                "message_id": message_id,
+                "expert_type": "data",
+                "reason": "user_cancelled",
+            },
+        )
+
+    assert response.status_code == 200
+
+    con = duckdb.connect(str(db_path))
+    row = con.execute(
+        "SELECT status, interruption_reason FROM expert.messages WHERE id = ?",
+        [message_id],
+    ).fetchone()
+    con.close()
+
+    assert row == ("partial", "user_cancelled")
+
+
+@pytest.mark.asyncio
+async def test_expert_chat_cancelled_without_explicit_cancel_marks_client_disconnected(tmp_path):
+    from engine.expert import routes as routes_module
+
+    db_path = tmp_path / "expert_chat_disconnected.duckdb"
+    session_id = "session-disconnected"
+    _init_test_expert_db(db_path, session_id=session_id, expert_type="data")
+
+    mock_expert = Mock()
+
+    async def cancelled_stream(*args, **kwargs):
+        yield {"event": "reply_token", "data": {"token": "半截内容"}}
+        raise asyncio.CancelledError()
+
+    mock_expert.chat = cancelled_stream
+
+    with patch.object(routes_module, "_get_db", side_effect=lambda: duckdb.connect(str(db_path))):
+        with patch.dict(routes_module._engine_experts, {"data": mock_expert}, clear=True):
+            response = await routes_module.expert_chat_by_type(
+                "data",
+                ExpertChatRequest(message="测试断连保存", session_id=session_id),
+            )
+
+            with pytest.raises(asyncio.CancelledError):
+                async for _chunk in response.body_iterator:
+                    pass
+
+    con = duckdb.connect(str(db_path))
+    row = con.execute(
+        "SELECT role, content, status, interruption_reason FROM expert.messages WHERE session_id = ? ORDER BY created_at",
+        [session_id],
+    ).fetchone()
+    con.close()
+
+    assert row == ("expert", "半截内容", "partial", "client_disconnected")
 
 
 @pytest.mark.asyncio
@@ -1194,6 +1275,71 @@ async def test_resume_keeps_original_message_when_completion_check_failed(tmp_pa
     assert row == (original_content, "partial")
     mock_agent.check_resume_completion.assert_awaited_once()
     assert mock_agent.resume_reply.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_resume_interrupted_updates_existing_message_with_resume_reason(tmp_path):
+    from engine.expert import routes as routes_module
+
+    db_path = tmp_path / "expert_chat_resume_interrupted.duckdb"
+    session_id = "session-resume-interrupted"
+    message_id = "e-resume-interrupted"
+    partial_content = "结论：先观察量能变化，若"
+    _init_test_expert_db(
+        db_path,
+        session_id=session_id,
+        expert_type="rag",
+        session_user_id="alice",
+    )
+    con = duckdb.connect(str(db_path))
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'user', ?, '[]', 'completed')
+        """,
+        ["u-resume-interrupted", session_id, "帮我继续补全这条回复"],
+    )
+    con.execute(
+        """
+        INSERT INTO expert.messages (id, session_id, role, content, thinking, status)
+        VALUES (?, ?, 'expert', ?, '[]', 'partial')
+        """,
+        [message_id, session_id, partial_content],
+    )
+    con.close()
+
+    async def _resume_reply(*args, **kwargs):
+        yield {"event": "resume_token", "data": {"token": "继续放量"}}
+        raise asyncio.CancelledError()
+
+    mock_agent = Mock()
+    mock_agent.check_resume_completion = AsyncMock(return_value={
+        "is_complete": False,
+        "reason": "内容尚未结束",
+        "confidence": 0.91,
+        "check_failed": False,
+    })
+    mock_agent.resume_reply = Mock(side_effect=_resume_reply)
+
+    with patch.object(routes_module, "_get_db", side_effect=lambda: duckdb.connect(str(db_path))):
+        with patch.object(routes_module, "get_expert_agent", return_value=mock_agent):
+            response = await routes_module.expert_chat_resume(
+                ExpertResumeRequest(session_id=session_id, message_id=message_id)
+            )
+            with pytest.raises(asyncio.CancelledError):
+                async for _chunk in response.body_iterator:
+                    pass
+
+    con2 = duckdb.connect(str(db_path))
+    row = con2.execute(
+        "SELECT content, status, interruption_reason FROM expert.messages WHERE id = ?",
+        [message_id],
+    ).fetchone()
+    con2.close()
+
+    assert row == (partial_content + "继续放量", "partial", "resume_interrupted")
+    mock_agent.check_resume_completion.assert_awaited_once()
+    assert mock_agent.resume_reply.call_count == 1
 
 
 @pytest.mark.asyncio

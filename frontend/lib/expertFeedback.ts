@@ -35,10 +35,30 @@ function serializeMessage(message: ExpertMessage) {
     role: message.role,
     content: message.content,
     status: message.status,
+    interruption_reason: message.interruptionReason,
+    interruption_detail: message.interruptionDetail,
     send_status: message.sendStatus,
     is_streaming: message.isStreaming,
     thinking: message.thinking,
   };
+}
+
+export function defaultFeedbackIssueTypeForMessage(
+  message: ExpertMessage,
+): ExpertFeedbackIssueType {
+  if (message.interruptionReason === "provider_error" || message.interruptionReason === "server_error") {
+    return "load_failed";
+  }
+  if (
+    message.interruptionReason === "client_disconnected"
+    || message.interruptionReason === "resume_interrupted"
+    || message.interruptionReason === "unknown_interrupted"
+    || message.interruptionReason === "user_cancelled"
+    || message.status === "partial"
+  ) {
+    return "llm_truncated";
+  }
+  return "other";
 }
 
 function findPreviousUserMessage(message: ExpertMessage, history: ExpertMessage[]) {

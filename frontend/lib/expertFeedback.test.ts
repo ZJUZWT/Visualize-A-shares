@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildExpertFeedbackPayload } from "./expertFeedback.ts";
+import {
+  buildExpertFeedbackPayload,
+  defaultFeedbackIssueTypeForMessage,
+} from "./expertFeedback.ts";
 import type { ExpertMessage, PendingClarification } from "../types/expert.ts";
 
 test("builds expert feedback payload with full message context", () => {
@@ -75,4 +78,28 @@ test("builds expert feedback payload with full message context", () => {
   assert.equal(payload.context.message.status, "partial");
   assert.equal(payload.context.pending_clarification?.originalMessage, "继续看看这只票");
   assert.equal(payload.context.latest_error, "load failed");
+});
+
+test("feedback helper maps interruption reasons to default issue types", () => {
+  const providerErrorMessage: ExpertMessage = {
+    id: "e-provider",
+    role: "expert",
+    content: "生成被上游中断",
+    thinking: [],
+    isStreaming: false,
+    status: "partial",
+    interruptionReason: "provider_error",
+  };
+  const disconnectedMessage: ExpertMessage = {
+    id: "e-disconnected",
+    role: "expert",
+    content: "回复可能断了",
+    thinking: [],
+    isStreaming: false,
+    status: "partial",
+    interruptionReason: "client_disconnected",
+  };
+
+  assert.equal(defaultFeedbackIssueTypeForMessage(providerErrorMessage), "load_failed");
+  assert.equal(defaultFeedbackIssueTypeForMessage(disconnectedMessage), "llm_truncated");
 });
