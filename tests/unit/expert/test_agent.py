@@ -336,6 +336,77 @@ async def test_clarify_true_without_options_falls_back_to_safe_options(tmp_path)
     assert result.options[0].id == "valuation"
 
 
+def test_fallback_think_parse_batches_multi_stock_comprehensive_by_expert(expert_agent, monkeypatch):
+    """多股票综合分析应按专家批量提问，而不是按股票逐只扇出"""
+    monkeypatch.setattr(
+        expert_agent,
+        "_get_stock_name_map",
+        lambda: {
+            "贵州茅台": "600519",
+            "宁德时代": "300750",
+            "比亚迪": "002594",
+            "招商银行": "600036",
+            "美的集团": "000333",
+        },
+    )
+
+    result = expert_agent._fallback_think_parse(
+        text="",
+        user_message="帮我看看贵州茅台、宁德时代、比亚迪、招商银行、美的集团怎么样",
+    )
+
+    expected_stock_hints = [
+        "贵州茅台(600519)",
+        "宁德时代(300750)",
+        "比亚迪(002594)",
+        "招商银行(600036)",
+        "美的集团(000333)",
+    ]
+
+    assert result.needs_data is True
+    assert [call.action for call in result.tool_calls] == ["data", "quant", "info", "industry"]
+    assert len(result.tool_calls) == 4
+    for call in result.tool_calls:
+        question = call.params["question"]
+        for stock_hint in expected_stock_hints:
+            assert stock_hint in question
+
+
+def test_fallback_think_parse_batches_multi_stock_detected_experts_by_expert(expert_agent, monkeypatch):
+    """多股票定向专家分析应只按检测到的专家数生成调用"""
+    monkeypatch.setattr(
+        expert_agent,
+        "_get_stock_name_map",
+        lambda: {
+            "贵州茅台": "600519",
+            "宁德时代": "300750",
+            "比亚迪": "002594",
+        },
+    )
+
+    result = expert_agent._fallback_think_parse(
+        text="量化专家和资讯专家都需要参与",
+        user_message="贵州茅台、宁德时代、比亚迪的技术指标、新闻公告和为什么跌分别是什么原因",
+    )
+
+    expected_stock_hints = [
+        "贵州茅台(600519)",
+        "宁德时代(300750)",
+        "比亚迪(002594)",
+    ]
+
+    assert result.needs_data is True
+    assert sorted(call.action for call in result.tool_calls) == ["info", "quant"]
+    assert len(result.tool_calls) == 2
+
+    questions_by_action = {call.action: call.params["question"] for call in result.tool_calls}
+    assert "技术指标" in questions_by_action["quant"]
+    assert "新闻" in questions_by_action["info"]
+    for question in questions_by_action.values():
+        for stock_hint in expected_stock_hints:
+            assert stock_hint in question
+
+
 async def _async_gen(items):
     for item in items:
         yield item

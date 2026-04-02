@@ -1314,19 +1314,6 @@ class ExpertAgent:
         if len(unique_codes) > 1:
             logger.info(f"容错解析检测到多只股票: {stock_hints}")
 
-        # ── 为不同专家生成精准问题的辅助函数 ──
-        def _make_single_stock_question(expert_type: str, single_hint: str) -> str:
-            """为单只股票生成精准问题"""
-            if expert_type == "data":
-                return f"查询{single_hint}最近30天行情走势、成交量变化和涨跌幅"
-            elif expert_type == "quant":
-                return f"分析{single_hint}的技术指标(RSI/MACD/KDJ)，给出支撑位和阻力位"
-            elif expert_type == "info":
-                return f"查询{single_hint}最近的新闻和公告，评估消息面利好利空"
-            elif expert_type == "industry":
-                return f"分析{single_hint}所在行业的产业链位置和行业周期阶段"
-            return user_message
-
         def make_question(expert_type: str) -> str:
             base = user_message
             if stock_hint:
@@ -1355,6 +1342,8 @@ class ExpertAgent:
                             "推荐最具投资价值的2-3个板块，给出每个板块的龙头股")
             return base
 
+        ordered_experts = ["data", "quant", "info", "industry"]
+
         # ── 先检测是否是"综合分析"型问题 → 直接调全部 4 个专家 ──
         comprehensive_patterns = [
             r"分析一下", r"怎么样", r"值不值得买", r"帮我看看",
@@ -1366,32 +1355,28 @@ class ExpertAgent:
             re.search(p, user_message, re.IGNORECASE) for p in comprehensive_patterns
         )
         if is_comprehensive:
-            # 多只股票时：为每只股票分别创建独立的专家调用
+            for expert_type in ordered_experts:
+                tool_calls.append({
+                    "engine": "expert",
+                    "action": expert_type,
+                    "params": {"question": make_question(expert_type)},
+                })
+
             if len(stock_hints) > 1:
-                for single_hint in stock_hints:
-                    for expert_type in ["data", "quant", "info", "industry"]:
-                        q = _make_single_stock_question(expert_type, single_hint)
-                        tool_calls.append({
-                            "engine": "expert",
-                            "action": expert_type,
-                            "params": {"question": q},
-                        })
                 logger.info(
-                    f"think 容错解析: 综合分析问题，{len(stock_hints)}只股票 × 4个专家"
-                    f" = {len(tool_calls)}个调用 ({stock_hints})"
+                    f"think 容错解析: 综合分析问题，{len(stock_hints)}只股票按专家批量调用"
+                    f" {len(tool_calls)}个专家 ({stock_hints})"
                 )
             else:
-                for expert_type in ["data", "quant", "info", "industry"]:
-                    tool_calls.append({
-                        "engine": "expert",
-                        "action": expert_type,
-                        "params": {"question": make_question(expert_type)},
-                    })
                 logger.info("think 容错解析: 综合分析问题，调用全部4个专家（精准子问题）")
             return ThinkOutput(
                 needs_data=True,
                 tool_calls=[ToolCall(**tc) for tc in tool_calls],
-                reasoning=f"容错解析: 综合分析问题，{len(stock_hints)}只股票×4个专家",
+                reasoning=(
+                    f"容错解析: 综合分析问题，{len(stock_hints)}只股票按专家批量调用"
+                    if len(stock_hints) > 1
+                    else "容错解析: 综合分析问题，调用全部4个专家"
+                ),
             )
 
         # ── 细粒度匹配：同时扫描 LLM 输出和用户消息 ──
@@ -1415,32 +1400,26 @@ class ExpertAgent:
                     break
 
         if detected_experts:
-            # 多只股票时：为每只股票分别创建独立的专家调用
-            if len(stock_hints) > 1:
-                for single_hint in stock_hints:
-                    for expert_type in detected_experts:
-                        q = _make_single_stock_question(expert_type, single_hint)
-                        tool_calls.append({
-                            "engine": "expert",
-                            "action": expert_type,
-                            "params": {"question": q},
-                        })
-            else:
-                for expert_type in detected_experts:
-                    tool_calls.append({
-                        "engine": "expert",
-                        "action": expert_type,
-                        "params": {"question": make_question(expert_type)},
-                    })
+            selected_experts = [expert_type for expert_type in ordered_experts if expert_type in detected_experts]
+            for expert_type in selected_experts:
+                tool_calls.append({
+                    "engine": "expert",
+                    "action": expert_type,
+                    "params": {"question": make_question(expert_type)},
+                })
 
             logger.info(
-                f"think 容错解析: 检测到需要咨询 {list(detected_experts)}"
-                f"{'，' + str(len(stock_hints)) + '只股票' if len(stock_hints) > 1 else ''}（精准子问题）"
+                f"think 容错解析: 检测到需要咨询 {selected_experts}"
+                f"{'，' + str(len(stock_hints)) + '只股票按专家批量调用' if len(stock_hints) > 1 else ''}（精准子问题）"
             )
             return ThinkOutput(
                 needs_data=True,
                 tool_calls=[ToolCall(**tc) for tc in tool_calls],
-                reasoning=f"容错解析: 检测到需要咨询{','.join(detected_experts)}",
+                reasoning=(
+                    f"容错解析: 检测到需要咨询{','.join(selected_experts)}，按专家批量调用"
+                    if len(stock_hints) > 1
+                    else f"容错解析: 检测到需要咨询{','.join(selected_experts)}"
+                ),
             )
 
         # ── 检测直接数据查询（仅用于非常简单的请求）──

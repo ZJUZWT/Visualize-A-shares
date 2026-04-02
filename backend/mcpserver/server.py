@@ -17,8 +17,12 @@ Claude Code 配置 (.mcp.json):
     }
 """
 
+import asyncio
+import contextlib
 import json
+import re
 import sys
+import time
 from pathlib import Path
 
 # 确保 backend 目录在 Python 路径中（用于 import config, engine 等模块）
@@ -48,6 +52,104 @@ server = FastMCP(
 
 # 全局 DataAccess 实例
 _da = DataAccess()
+_EXPERT_MCP_HEARTBEAT_SECONDS = 15.0
+_RAG_REASON_QUERY_PATTERNS = (
+    r"为什么.*涨",
+    r"为什么.*跌",
+    r"上涨.*原因",
+    r"下跌.*原因",
+    r"一直在涨",
+    r"一直在跌",
+)
+_REASON_QUERY_SUBJECT_PATTERNS = (
+    re.compile(r"为什么(?P<subject>[\u4e00-\u9fffA-Za-z0-9()（）·\-]{2,20}?)(?:一直)?在[涨跌]"),
+    re.compile(r"(?P<subject>[\u4e00-\u9fffA-Za-z0-9()（）·\-]{2,20}?)(?:上涨|下跌).*原因"),
+)
+_GENERIC_MARKET_SUBJECT_KEYWORDS = (
+    "大盘",
+    "A股",
+    "a股",
+    "市场",
+    "板块",
+    "行业",
+    "指数",
+    "港股",
+    "美股",
+    "基金",
+    "ETF",
+    "etf",
+    "题材",
+    "概念",
+    "情绪",
+    "盘面",
+    "行情",
+    "赛道",
+    "沪深",
+    "上证",
+    "深证",
+    "创业板",
+    "科创板",
+    "中证",
+    "沪指",
+    "深成指",
+)
+
+
+def _extract_reason_query_subjects(question: str) -> list[str]:
+    subjects: list[str] = []
+    text = (question or "").strip()
+    for pattern in _REASON_QUERY_SUBJECT_PATTERNS:
+        for match in pattern.finditer(text):
+            subject = match.group("subject").strip("，。！？；：、 ")
+            if not subject:
+                continue
+            for prefix in ("这只", "那只", "这个", "那个", "个股", "股票"):
+                if subject.startswith(prefix):
+                    subject = subject[len(prefix):]
+            subject = subject.strip("，。！？；：、 ")
+            if subject and subject not in subjects:
+                subjects.append(subject)
+    return subjects
+
+
+def _looks_like_specific_stock_subject(subject: str) -> bool:
+    normalized = re.sub(r"[()（）\s]+", "", subject or "")
+    if re.fullmatch(r"\d{6}", normalized):
+        return True
+    if len(re.findall(r"[\u4e00-\u9fff]", normalized)) < 2:
+        return False
+    lowered = normalized.lower()
+    if any(keyword.lower() in lowered for keyword in _GENERIC_MARKET_SUBJECT_KEYWORDS):
+        return False
+    if normalized.endswith(("板块", "行业", "指数", "市场", "行情", "题材", "概念", "赛道")):
+        return False
+    return True
+
+
+def _question_mentions_known_stock(question: str) -> bool:
+    if re.search(r"\b\d{6}\b", question):
+        return True
+    try:
+        from engine.expert.agent import ExpertAgent
+
+        name_map = ExpertAgent._get_stock_name_map()
+    except Exception:
+        name_map = {}
+    if any(len(name) >= 2 and name in question for name in sorted(name_map, key=len, reverse=True)):
+        return True
+    return any(_looks_like_specific_stock_subject(subject) for subject in _extract_reason_query_subjects(question))
+
+
+def _resolve_mcp_expert_route(expert_type: str, question: str) -> str:
+    if expert_type != "rag":
+        return expert_type
+    text = (question or "").strip()
+    if not text:
+        return expert_type
+    looks_like_reason_query = any(re.search(pattern, text) for pattern in _RAG_REASON_QUERY_PATTERNS)
+    if looks_like_reason_query and _question_mentions_known_stock(text):
+        return "info"
+    return expert_type
 
 
 # ─── 注册 22 个 Tool ──────────────────────────────────
@@ -372,6 +474,22 @@ async def ask_expert(
     - rag: 自由对话、知识图谱、信念系统、综合分析"""
     import httpx
 
+    async def _heartbeat():
+        if not ctx:
+            return
+        started_at = time.monotonic()
+        try:
+            await ctx.log("info", f"⏳ {expert_type} 专家处理中，等待流式结果...")
+        except Exception:
+            return
+        while True:
+            await asyncio.sleep(_EXPERT_MCP_HEARTBEAT_SECONDS)
+            try:
+                elapsed = int(time.monotonic() - started_at)
+                await ctx.log("info", f"⏳ {expert_type} 专家仍在分析中 ({elapsed}s)")
+            except Exception:
+                return
+
     valid_types = ("data", "quant", "info", "industry", "rag")
     if expert_type not in valid_types:
         return json.dumps(
@@ -385,12 +503,24 @@ async def ask_expert(
             ensure_ascii=False,
         )
 
+    request_expert_type = _resolve_mcp_expert_route(expert_type, question)
+    heartbeat_task = asyncio.create_task(_heartbeat()) if ctx else None
     try:
         lines = []
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+        if ctx:
+            await ctx.log("info", f"🧠 已向 {request_expert_type} 专家发起提问")
+            if request_expert_type != expert_type:
+                await ctx.log(
+                    "info",
+                    f"⚡ 已将 {expert_type} 问题切换到 {request_expert_type} 快速链路，优先回答个股涨跌原因",
+                )
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=None, write=30.0, pool=30.0)
+        ) as client:
             async with client.stream(
                 "POST",
-                f"{_da._api_base}/api/v1/expert/chat/{expert_type}",
+                f"{_da._api_base}/api/v1/expert/chat/{request_expert_type}",
                 json={"message": question},
             ) as resp:
                 resp.raise_for_status()
@@ -433,12 +563,17 @@ async def ask_expert(
                         event_type = None
                         data_buf = ""
 
-        return "\n".join(lines) if lines else "专家未返回回复"
-
     except httpx.HTTPStatusError as e:
         return json.dumps({"error": f"请求失败: {e}"}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": f"专家对话失败: {e}"}, ensure_ascii=False)
+    finally:
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat_task
+
+    return "\n".join(lines) if lines else "专家未返回回复"
 
 
 @server.tool()
