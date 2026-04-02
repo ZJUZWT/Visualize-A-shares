@@ -35,6 +35,7 @@ from engine.expert.routes import router as expert_router, _init_db as expert_ini
 from engine.industry.routes import router as industry_router
 from engine.sector.routes import router as sector_router
 from engine.agent.routes import create_agent_router
+from engine.study.routes import router as study_router
 
 # ─── 配置日志 ──────────────────────────────────────────
 logger.remove()
@@ -127,6 +128,14 @@ async def _startup() -> None:
             except Exception as e:
                 logger.debug(f"Responses API 探测异常: {e}")
         asyncio.create_task(_probe())
+
+    # 初始化 Study Engine
+    try:
+        from engine.study import get_study_engine
+        get_study_engine()
+        logger.info("   Study Engine: 已初始化")
+    except Exception as e:
+        logger.warning(f"⚠️ Study Engine 初始化失败: {e}")
 
 
 async def _shutdown() -> None:
@@ -227,6 +236,7 @@ app.include_router(expert_router)
 app.include_router(industry_router)
 app.include_router(sector_router)
 app.include_router(create_agent_router(), prefix="/api/v1/agent")
+app.include_router(study_router)
 
 
 # ─── 健康检查 ──────────────────────────────────────────

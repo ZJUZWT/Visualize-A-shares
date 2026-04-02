@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Mountain, Scale, BrainCircuit, TrendingUp, ClipboardList, GitBranch, FileText, Bot, LogOut, User, AlertTriangle } from "lucide-react";
+import { Mountain, Scale, BrainCircuit, TrendingUp, ClipboardList, GitBranch, FileText, Bot, LogOut, User, AlertTriangle, BookOpen } from "lucide-react";
 import { useConnectionStore } from "@/stores/useConnectionStore";
 
 const NAV_ITEMS = [
@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { href: "/admin/feedback", icon: AlertTriangle, label: "反馈后台", feature: "expert", adminOnly: true },
   { href: "/plans", icon: FileText, label: "交易计划", feature: "plans" },
   { href: "/agent", icon: Bot, label: "Agent", feature: "agent" },
+  { href: "/study", icon: BookOpen, label: "学习中心", feature: "study" },
   { href: "/tasks", icon: ClipboardList, label: "事务管理", feature: "tasks" },
   { href: "/sector", icon: TrendingUp, label: "板块研究", feature: "sector" },
   { href: "/chain", icon: GitBranch, label: "产业链图谱", feature: "chain" },
