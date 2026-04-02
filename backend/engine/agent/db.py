@@ -229,8 +229,32 @@ class AgentDB:
                 status VARCHAR DEFAULT 'pending',
                 source_type VARCHAR DEFAULT 'expert',
                 source_conversation_id VARCHAR,
+                source_message_id VARCHAR,
                 created_at TIMESTAMP DEFAULT now(),
                 updated_at TIMESTAMP DEFAULT now()
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent.plan_reviews (
+                id VARCHAR PRIMARY KEY,
+                plan_id VARCHAR NOT NULL,
+                source_type VARCHAR DEFAULT 'expert',
+                source_conversation_id VARCHAR,
+                source_message_id VARCHAR,
+                review_date DATE NOT NULL,
+                review_window INTEGER DEFAULT 5,
+                entry_hit BOOLEAN DEFAULT false,
+                take_profit_hit BOOLEAN DEFAULT false,
+                stop_loss_hit BOOLEAN DEFAULT false,
+                invalidation_hit BOOLEAN DEFAULT false,
+                max_gain_pct DOUBLE,
+                max_drawdown_pct DOUBLE,
+                close_price DOUBLE,
+                outcome_label VARCHAR DEFAULT 'pending',
+                summary TEXT,
+                lesson_summary TEXT,
+                evidence_json JSON,
+                created_at TIMESTAMP DEFAULT now()
             )
         """)
         self._conn.execute("""
@@ -321,6 +345,10 @@ class AgentDB:
         self._conn.execute("""
             ALTER TABLE agent.trade_plans
             ADD COLUMN IF NOT EXISTS source_run_id VARCHAR
+        """)
+        self._conn.execute("""
+            ALTER TABLE agent.trade_plans
+            ADD COLUMN IF NOT EXISTS source_message_id VARCHAR
         """)
         self._conn.execute("""
             ALTER TABLE agent.position_strategies

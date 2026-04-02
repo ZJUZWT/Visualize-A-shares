@@ -112,6 +112,13 @@ class ThinkOutput(BaseModel):
     reasoning: str = ""
 
 
+class ImageGroundingSummary(BaseModel):
+    image_kind: str = "other"
+    detected_entities: list[str] = Field(default_factory=list)
+    user_focus: str = ""
+    summary: str = ""
+
+
 class ClarificationSubChoice(BaseModel):
     """选项内的互斥子选项（适合"你是 X 还是 Y？"型问题）"""
     id: str          # "short_term"
@@ -166,6 +173,7 @@ class ClarificationRoundSelection(BaseModel):
 class ClarifyRequest(BaseModel):
     """多轮澄清请求体"""
     message: str
+    images: list[str] = Field(default_factory=list)
     session_id: str | None = None
     previous_selections: list[ClarificationRoundSelection] = Field(default_factory=list)
 

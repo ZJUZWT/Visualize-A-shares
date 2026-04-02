@@ -71,3 +71,37 @@ test("normalizeExpertLearningProfile builds empty state when evidence is missing
   assert.equal(view.isEmpty, true);
   assert.match(view.emptyMessage, /还没有足够复盘数据/);
 });
+
+test("normalizeExpertLearningProfile keeps non-empty state when recent plan lessons already exist", () => {
+  const view = normalizeExpertLearningProfile(
+    {
+      portfolio_id: "paper-1",
+      expert_type: "data",
+      score_cards: [],
+      verified_knowledge: [],
+      recent_lessons: [
+        {
+          id: "plan-review-1",
+          title: "回踩确认后再分批低吸，这次节奏是成立的。",
+          category: "plan_review:useful",
+          date: "2026-04-02",
+        },
+      ],
+      common_mistakes: [],
+      applicability_boundaries: [],
+      source_summary: {
+        review_count: 0,
+        memory_count: 0,
+        reflection_count: 0,
+        win_rate: 0,
+      },
+      pending_plan_summary: {
+        expert_plan_count: 0,
+      },
+    },
+    "data",
+  );
+
+  assert.equal(view.isEmpty, false);
+  assert.equal(view.recentLessons[0]?.id, "plan-review-1");
+});

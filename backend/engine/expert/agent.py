@@ -31,6 +31,7 @@ from engine.expert.schemas import (
     ClarificationSelection,
     ClarificationSubChoice,
     GraphEdge,
+    ImageGroundingSummary,
     MaterialNode,
     RegionNode,
     ResumeCompletionCheckResult,
@@ -138,6 +139,104 @@ class ExpertAgent:
 
     def _get_quality_llm(self):
         return self._model_router.get("quality") if self._model_router else self._llm
+
+    @staticmethod
+    def _chat_message_to_dict(message) -> dict:
+        payload = {
+            "role": message.role,
+            "content": message.content,
+        }
+        if getattr(message, "images", None):
+            payload["images"] = list(message.images)
+        if getattr(message, "tool_calls", None):
+            payload["tool_calls"] = message.tool_calls
+        if getattr(message, "tool_call_id", None):
+            payload["tool_call_id"] = message.tool_call_id
+        if getattr(message, "name", None):
+            payload["name"] = message.name
+        return payload
+
+    @staticmethod
+    def _chat_message_from_dict(payload: dict):
+        from llm.providers import ChatMessage
+
+        return ChatMessage(
+            payload["role"],
+            payload.get("content", ""),
+            images=payload.get("images") or [],
+            tool_calls=payload.get("tool_calls"),
+            tool_call_id=payload.get("tool_call_id"),
+            name=payload.get("name"),
+        )
+
+    def _guard_chat_messages(self, messages: list) -> list:
+        msg_dicts = [self._chat_message_to_dict(message) for message in messages]
+        msg_dicts = self._context_guard.guard_messages(msg_dicts)
+        return [self._chat_message_from_dict(message) for message in msg_dicts]
+
+    @staticmethod
+    def _format_image_grounding_note(summary: ImageGroundingSummary) -> str:
+        lines = ["## 用户上传图片的结构化说明"]
+        if summary.image_kind:
+            lines.append(f"- 图片类型: {summary.image_kind}")
+        if summary.detected_entities:
+            lines.append(f"- 识别到的关键信息: {'、'.join(summary.detected_entities)}")
+        if summary.user_focus:
+            lines.append(f"- 用户关注点: {summary.user_focus}")
+        if summary.summary:
+            lines.append(f"- 图片摘要: {summary.summary}")
+        return "\n".join(lines)
+
+    async def _summarize_images(
+        self,
+        message: str,
+        images: list[str] | None = None,
+    ) -> ImageGroundingSummary | None:
+        if not images:
+            return None
+
+        llm = self._get_fast_llm() or self._get_quality_llm()
+        if not llm:
+            return None
+
+        from llm.providers import ChatMessage
+
+        started_at = time.monotonic()
+        system = (
+            "你是A股投研图片理解助手。请阅读用户问题并结合图片，输出严格 JSON："
+            '{"image_kind":"kline_chart|intraday_chart|portfolio_screenshot|announcement_or_report|chat_screenshot|other",'
+            '"detected_entities":["..."],"user_focus":"...","summary":"..."}。'
+            "不要输出 markdown，不要输出任何额外说明。"
+        )
+        messages = [
+            ChatMessage("system", system),
+            ChatMessage("user", f"用户问题：{message}", images=images),
+        ]
+        messages = self._guard_chat_messages(messages)
+
+        try:
+            chunks: list[str] = []
+            async for token in llm.chat_stream(messages):
+                chunks.append(token)
+            raw_text = "".join(chunks).strip()
+            if not raw_text:
+                return None
+
+            json_text = self._extract_outermost_json(raw_text) or raw_text
+            payload = json.loads(json_text)
+            result = ImageGroundingSummary(**payload)
+
+            elapsed = (time.monotonic() - started_at) * 1000
+            logger.info(
+                f"⏱️ image_grounding 耗时 {elapsed:.1f}ms "
+                f"(images={len(images)}, summary_len={len(result.summary)})"
+            )
+            return result
+        except Exception as e:
+            elapsed = (time.monotonic() - started_at) * 1000
+            logger.warning(f"图片结构化摘要失败: {e}")
+            logger.info(f"⏱️ image_grounding 耗时 {elapsed:.1f}ms (failed)")
+            return None
 
     def _seed_initial_beliefs(self) -> None:
         """将初始信念写入图谱（投资顾问 + 短线专家各自独立）"""
@@ -309,12 +408,14 @@ class ExpertAgent:
         persona: str = "rag",
         enable_trade_plan: bool = False,
         images: list[str] | None = None,
+        learning_context: str = "",
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复，yield (token, full_text)"""
         async for token, full_text in self._reply_stream(
             message, nodes, memories, tool_results, history or [],
             persona=persona, enable_trade_plan=enable_trade_plan,
             images=images,
+            learning_context=learning_context,
         ):
             yield token, full_text
 
@@ -395,6 +496,7 @@ class ExpertAgent:
         history: list[dict] | None = None,
         persona: str = "rag",
         previous_selections: list[ClarificationRoundSelection | dict] | None = None,
+        images: list[str] | None = None,
     ) -> ClarificationOutput:
         """为深度思考模式生成 clarification 选项 — 经 LLM 动态生成。
 
@@ -549,12 +651,18 @@ class ExpertAgent:
             "}\n"
             "```"
         )
+        grounded_prompt = prompt
+        image_grounding = await self._summarize_images(clean_message, images)
+        if image_grounding:
+            grounded_prompt = f"{prompt}\n\n{self._format_image_grounding_note(image_grounding)}"
 
         try:
             from llm.providers import ChatMessage
             t0 = time.monotonic()
             chunks: list[str] = []
-            async for token in self._llm.chat_stream([ChatMessage("user", prompt)]):
+            messages = [ChatMessage("user", grounded_prompt, images=images or [])]
+            messages = self._guard_chat_messages(messages)
+            async for token in self._llm.chat_stream(messages):
                 chunks.append(token)
             raw = "".join(chunks)
             elapsed = time.monotonic() - t0
@@ -717,6 +825,7 @@ class ExpertAgent:
         clarification_chain: list[ClarificationRoundSelection | dict] | None = None,
         enable_trade_plan: bool = False,
         images: list[str] | None = None,
+        learning_context: str = "",
     ) -> AsyncGenerator[dict, None]:
         """完整对话流程，yield 结构化事件 dict
 
@@ -900,6 +1009,7 @@ class ExpertAgent:
                 analysis_message, recalled_nodes, memories, tool_results, conv_history,
                 persona=persona, enable_trade_plan=enable_trade_plan,
                 images=images,
+                learning_context=learning_context,
             ):
                 expert_reply = full_text
                 yield {"event": "reply_token", "data": {"token": token}}
@@ -1192,9 +1302,7 @@ class ExpertAgent:
             messages.append(ChatMessage("user", message))
 
             # 上下文窗口保护
-            msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
-            msg_dicts = self._context_guard.guard_messages(msg_dicts)
-            messages = [ChatMessage(m["role"], m["content"]) for m in msg_dicts]
+            messages = self._guard_chat_messages(messages)
 
             # 流式收集
             chunks: list[str] = []
@@ -1719,6 +1827,7 @@ class ExpertAgent:
         persona: str = "rag",
         enable_trade_plan: bool = False,
         images: list[str] | None = None,
+        learning_context: str = "",
     ) -> AsyncGenerator[tuple[str, str], None]:
         """流式生成回复（含 <think> 标签过滤），yield (token, accumulated_text)"""
         from llm.providers import ChatMessage
@@ -1777,6 +1886,8 @@ class ExpertAgent:
             persona,
             current_date=get_current_date_context(),
         ) + "\n\n" + "\n\n".join(context_parts) + data_ready_notice
+        if learning_context:
+            system += "\n\n" + learning_context
 
         # 注入用户偏好（借鉴 OpenClaw USER 层）
         try:
@@ -1804,18 +1915,21 @@ class ExpertAgent:
                 "请务必在回复末尾用【交易计划】...【/交易计划】格式输出交易计划卡片。"
             )
 
+        image_grounding = await self._summarize_images(message, images)
+        grounded_message = message
+        if image_grounding:
+            grounded_message = f"{message}\n\n{self._format_image_grounding_note(image_grounding)}"
+
         # 构建消息列表（含对话历史）
         messages = [ChatMessage("system", system)]
         for h in (history or []):
             role = "assistant" if h["role"] == "expert" else h["role"]
             content = h.get("content", "")
             messages.append(ChatMessage(role, content))
-        messages.append(ChatMessage("user", message + trade_plan_reminder, images=images or []))
+        messages.append(ChatMessage("user", grounded_message + trade_plan_reminder, images=images or []))
 
         # 上下文窗口保护
-        msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
-        msg_dicts = self._context_guard.guard_messages(msg_dicts)
-        messages = [ChatMessage(m["role"], m["content"]) for m in msg_dicts]
+        messages = self._guard_chat_messages(messages)
 
         accumulated = ""
         in_skip = False          # 跳过区域（内容被丢弃）
@@ -1973,6 +2087,7 @@ class ExpertAgent:
         history: list[dict] | None = None,
         persona: str = "rag",
         images: list[str] | None = None,
+        learning_context: str = "",
     ) -> AsyncGenerator[dict, None]:
         """概念解释 / 教学类问题的无工具直答。"""
         from llm.providers import ChatMessage
@@ -1995,16 +2110,26 @@ class ExpertAgent:
             "如果合适，可以结合 A 股举一个简短例子，但不要扩展成完整个股分析流程。"
             "不要调用工具，不要生成交易计划卡片。"
         )
+        if learning_context:
+            system += (
+                "\n\n"
+                f"{learning_context}\n"
+                "以上复盘经验只有在用户明确讨论投资判断时才参考。"
+                "当前如果是概念解释或教学，请优先把概念讲清楚，不要被这些经验带偏到选股流程。"
+            )
+
+        image_grounding = await self._summarize_images(message, images)
+        grounded_message = message
+        if image_grounding:
+            grounded_message = f"{message}\n\n{self._format_image_grounding_note(image_grounding)}"
 
         messages = [ChatMessage("system", system)]
         for item in history or []:
             role = "assistant" if item["role"] == "expert" else item["role"]
             messages.append(ChatMessage(role, item.get("content", "")))
-        messages.append(ChatMessage("user", message, images=images or []))
+        messages.append(ChatMessage("user", grounded_message, images=images or []))
 
-        msg_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
-        msg_dicts = self._context_guard.guard_messages(msg_dicts)
-        messages = [ChatMessage(msg["role"], msg["content"]) for msg in msg_dicts]
+        messages = self._guard_chat_messages(messages)
 
         full_text = ""
         async for token in llm.chat_stream(messages):

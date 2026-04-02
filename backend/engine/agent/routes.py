@@ -84,6 +84,11 @@ class VerifyDemoAgentRequest(BaseModel):
     timeout_seconds: int = 30
 
 
+class ReviewPlanRequest(BaseModel):
+    review_date: str | None = None
+    review_window: int = 5
+
+
 def _http_status_for_value_error(error: ValueError) -> int:
     return 404 if "不存在" in str(error) else 400
 
@@ -272,17 +277,8 @@ def create_agent_router() -> APIRouter:
         stock_code: str | None = None,
         user_id: str = Depends(get_current_user),
     ):
-        db = AgentDB.get_instance()
-        sql = "SELECT * FROM agent.trade_plans WHERE user_id = ?"
-        params: list = [user_id]
-        if status:
-            sql += " AND status = ?"
-            params.append(status)
-        if stock_code:
-            sql += " AND stock_code = ?"
-            params.append(stock_code)
-        sql += " ORDER BY created_at DESC"
-        return await db.execute_read(sql, params)
+        svc = _get_service()
+        return await svc.list_plans(status=status, stock_code=stock_code, user_id=user_id)
 
     @router.get("/plans/{plan_id}")
     async def get_plan(plan_id: str, user_id: str = Depends(get_current_user)):
@@ -310,6 +306,25 @@ def create_agent_router() -> APIRouter:
             return await svc.update_plan(plan_id, req.model_dump(exclude_none=True))
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
+
+    @router.post("/plans/{plan_id}/review")
+    async def review_plan(plan_id: str, req: ReviewPlanRequest, user_id: str = Depends(get_current_user)):
+        db = AgentDB.get_instance()
+        rows = await db.execute_read("SELECT user_id FROM agent.trade_plans WHERE id = ?", [plan_id])
+        if not rows:
+            raise HTTPException(status_code=404, detail="交易计划不存在")
+        if rows[0].get("user_id", "anonymous") != user_id:
+            raise HTTPException(status_code=403, detail="无权复盘此交易计划")
+
+        svc = _get_service()
+        try:
+            return await svc.review_plan(
+                plan_id,
+                review_date=req.review_date,
+                review_window=req.review_window,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=_http_status_for_value_error(e), detail=str(e))
 
     @router.delete("/plans/{plan_id}")
     async def delete_plan(plan_id: str, user_id: str = Depends(get_current_user)):

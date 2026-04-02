@@ -108,6 +108,13 @@ def _normalize_trade_record(row: dict) -> dict:
     return normalized
 
 
+def _normalize_plan_review(row: dict) -> dict:
+    normalized = _normalize_record(row)
+    normalized["evidence_json"] = _decode_json_value(normalized.get("evidence_json"))
+    normalized["evidence_json"] = _normalize_json_safe(normalized.get("evidence_json"))
+    return normalized
+
+
 def _build_info_review_payload(row: dict) -> dict | None:
     summary = row.get("info_review_summary")
     details = row.get("info_review_details")
@@ -308,6 +315,29 @@ def _build_plan_read_model(plan: dict) -> dict:
         "updated_at": plan["updated_at"],
         "source_run_id": plan.get("source_run_id"),
     }
+
+
+def _parse_price_levels(raw: str | None) -> list[float]:
+    if raw is None:
+        return []
+    levels: list[float] = []
+    for chunk in _re.split(r"[/／,，]", str(raw)):
+        text = chunk.strip()
+        if not text:
+            continue
+        match = _re.search(r"-?\d+(?:\.\d+)?", text)
+        if match:
+            levels.append(float(match.group(0)))
+    return levels
+
+
+def _safe_parse_date(value) -> date | None:
+    if value in (None, ""):
+        return None
+    try:
+        return _coerce_to_date(value)
+    except ValueError:
+        return None
 
 
 def _build_strategy_history_item(run: dict) -> dict:
@@ -829,6 +859,73 @@ class AgentService:
 
     # ── Plans CRUD ────────────────────────────────────
 
+    async def _get_plan_row(self, plan_id: str) -> dict:
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.trade_plans WHERE id = ?",
+            [plan_id],
+        )
+        if not rows:
+            raise ValueError(f"交易计划 {plan_id} 不存在")
+        return rows[0]
+
+    async def get_latest_plan_review(self, plan_id: str) -> dict | None:
+        rows = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.plan_reviews
+            WHERE plan_id = ?
+            ORDER BY review_date DESC, created_at DESC, id DESC
+            LIMIT 1
+            """,
+            [plan_id],
+        )
+        if not rows:
+            return None
+        return _normalize_plan_review(rows[0])
+
+    async def list_plan_reviews(self, plan_id: str, limit: int = 10) -> list[dict]:
+        await self._get_plan_row(plan_id)
+        rows = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.plan_reviews
+            WHERE plan_id = ?
+            ORDER BY review_date DESC, created_at DESC, id DESC
+            LIMIT ?
+            """,
+            [plan_id, limit],
+        )
+        return [_normalize_plan_review(row) for row in rows]
+
+    async def list_plan_reviews_by_user(
+        self,
+        user_id: str,
+        *,
+        days: int = 60,
+        limit: int = 20,
+    ) -> list[dict]:
+        cutoff_date = (date.today() - timedelta(days=max(days - 1, 0))).isoformat()
+        rows = await self.db.execute_read(
+            """
+            SELECT pr.*, p.stock_code, p.stock_name, p.direction
+            FROM agent.plan_reviews pr
+            JOIN agent.trade_plans p
+              ON pr.plan_id = p.id
+            WHERE p.user_id = ?
+              AND p.source_type = 'expert'
+              AND pr.review_date >= ?
+            ORDER BY pr.review_date DESC, pr.created_at DESC, pr.id DESC
+            LIMIT ?
+            """,
+            [user_id, cutoff_date, limit],
+        )
+        return [_normalize_plan_review(row) for row in rows]
+
+    async def _hydrate_plan(self, row: dict) -> dict:
+        plan = _normalize_record(row)
+        plan["latest_review"] = await self.get_latest_plan_review(plan["id"])
+        return plan
+
     async def create_plan(self, plan_input, source_run_id: str | None = None) -> dict:
         """创建交易计划"""
         plan_id = str(uuid.uuid4())
@@ -840,9 +937,9 @@ class AgentService:
                 entry_price, entry_method, position_pct, win_odds,
                 take_profit, take_profit_method, stop_loss, stop_loss_method,
                 reasoning, risk_note, invalidation, valid_until,
-                status, source_type, source_conversation_id, source_run_id,
+                status, source_type, source_conversation_id, source_message_id, source_run_id,
                 created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)""",
             [plan_id, plan_input.stock_code, plan_input.stock_name,
              plan_input.current_price, plan_input.direction,
              plan_input.entry_price, plan_input.entry_method,
@@ -851,20 +948,24 @@ class AgentService:
              plan_input.stop_loss, plan_input.stop_loss_method,
              plan_input.reasoning, plan_input.risk_note, plan_input.invalidation,
              plan_input.valid_until,
-             plan_input.source_type, plan_input.source_conversation_id, source_run_id,
+             plan_input.source_type, plan_input.source_conversation_id,
+             plan_input.source_message_id, source_run_id,
              now, now],
         )
-        rows = await self.db.execute_read(
-            "SELECT * FROM agent.trade_plans WHERE id = ?", [plan_id]
-        )
-        return rows[0]
+        return await self.get_plan(plan_id)
 
     async def list_plans(
-        self, status: str | None = None, stock_code: str | None = None
+        self,
+        status: str | None = None,
+        stock_code: str | None = None,
+        user_id: str | None = None,
     ) -> list[dict]:
         """列出交易计划"""
         sql = "SELECT * FROM agent.trade_plans WHERE 1=1"
         params = []
+        if user_id:
+            sql += " AND user_id = ?"
+            params.append(user_id)
         if status:
             sql += " AND status = ?"
             params.append(status)
@@ -872,16 +973,13 @@ class AgentService:
             sql += " AND stock_code = ?"
             params.append(stock_code)
         sql += " ORDER BY created_at DESC"
-        return await self.db.execute_read(sql, params if params else None)
+        rows = await self.db.execute_read(sql, params if params else None)
+        return [await self._hydrate_plan(row) for row in rows]
 
     async def get_plan(self, plan_id: str) -> dict:
         """获取单个交易计划"""
-        rows = await self.db.execute_read(
-            "SELECT * FROM agent.trade_plans WHERE id = ?", [plan_id]
-        )
-        if not rows:
-            raise ValueError(f"交易计划 {plan_id} 不存在")
-        return rows[0]
+        row = await self._get_plan_row(plan_id)
+        return await self._hydrate_plan(row)
 
     async def update_plan(self, plan_id: str, updates: dict) -> dict:
         """更新交易计划"""
@@ -923,10 +1021,276 @@ class AgentService:
 
     async def delete_plan(self, plan_id: str):
         """删除交易计划"""
-        await self.get_plan(plan_id)  # 确认存在
+        await self._get_plan_row(plan_id)  # 确认存在
         await self.db.execute_write(
             "DELETE FROM agent.trade_plans WHERE id = ?", [plan_id]
         )
+
+    async def review_plan(
+        self,
+        plan_id: str,
+        review_date: str | None = None,
+        review_window: int = 5,
+    ) -> dict:
+        plan = _normalize_record(await self._get_plan_row(plan_id))
+        target_day = _coerce_to_date(review_date) if review_date else date.today()
+        created_day = _coerce_to_date(plan["created_at"])
+        if target_day < created_day:
+            raise ValueError("复盘日期不能早于计划创建日")
+
+        normalized_window = max(1, min(int(review_window), 120))
+        existing = await self.db.execute_read(
+            """
+            SELECT *
+            FROM agent.plan_reviews
+            WHERE plan_id = ?
+              AND review_date = ?
+              AND review_window = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            [plan_id, target_day.isoformat(), normalized_window],
+        )
+        if existing:
+            return _normalize_plan_review(existing[0])
+
+        price_history = await self._load_price_history(
+            [plan["stock_code"]],
+            created_day,
+            target_day,
+        )
+        code_history = price_history.get(plan["stock_code"], {})
+        review_payload = self._build_plan_review_payload(
+            plan,
+            code_history,
+            target_day=target_day,
+            review_window=normalized_window,
+        )
+
+        review_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        await self.db.execute_write(
+            """
+            INSERT INTO agent.plan_reviews (
+                id, plan_id, source_type, source_conversation_id, source_message_id,
+                review_date, review_window, entry_hit, take_profit_hit, stop_loss_hit,
+                invalidation_hit, max_gain_pct, max_drawdown_pct, close_price,
+                outcome_label, summary, lesson_summary, evidence_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                review_id,
+                plan_id,
+                plan.get("source_type") or "expert",
+                plan.get("source_conversation_id"),
+                plan.get("source_message_id"),
+                target_day.isoformat(),
+                normalized_window,
+                review_payload["entry_hit"],
+                review_payload["take_profit_hit"],
+                review_payload["stop_loss_hit"],
+                review_payload["invalidation_hit"],
+                review_payload["max_gain_pct"],
+                review_payload["max_drawdown_pct"],
+                review_payload["close_price"],
+                review_payload["outcome_label"],
+                review_payload["summary"],
+                review_payload["lesson_summary"],
+                json.dumps(review_payload["evidence_json"], ensure_ascii=False),
+                now,
+            ],
+        )
+        rows = await self.db.execute_read(
+            "SELECT * FROM agent.plan_reviews WHERE id = ?",
+            [review_id],
+        )
+        return _normalize_plan_review(rows[0])
+
+    def _build_plan_review_payload(
+        self,
+        plan: dict,
+        price_history: dict[str, float],
+        *,
+        target_day: date,
+        review_window: int,
+    ) -> dict:
+        created_day = _coerce_to_date(plan["created_at"])
+        ordered_days = sorted(
+            day for day in price_history.keys()
+            if created_day.isoformat() <= day <= target_day.isoformat()
+        )
+        default_close = None
+        if ordered_days:
+            default_close = _round_money(price_history[ordered_days[-1]])
+        fallback_reference = float(plan.get("current_price") or default_close or 0.0)
+
+        entry_levels = _parse_price_levels(plan.get("entry_price"))
+        take_profit_levels = _parse_price_levels(plan.get("take_profit"))
+        stop_loss = plan.get("stop_loss")
+        direction = str(plan.get("direction") or "buy")
+        is_buy = direction != "sell"
+        direction_factor = 1 if is_buy else -1
+
+        if not ordered_days:
+            return {
+                "entry_hit": False,
+                "take_profit_hit": False,
+                "stop_loss_hit": False,
+                "invalidation_hit": False,
+                "max_gain_pct": None,
+                "max_drawdown_pct": None,
+                "close_price": None,
+                "outcome_label": "pending",
+                "summary": "当前还没有可用于复盘的行情数据，这张策略卡先保持待验证状态。",
+                "lesson_summary": "先补齐后续行情，再判断这张策略卡是否真正有效。",
+                "evidence_json": {
+                    "stock_code": plan["stock_code"],
+                    "review_window": review_window,
+                    "review_end": target_day.isoformat(),
+                    "entry_levels": entry_levels,
+                    "take_profit_levels": take_profit_levels,
+                    "stop_loss": stop_loss,
+                    "timeline": [],
+                },
+            }
+
+        timeline = [
+            {
+                "date": day_key,
+                "close": _round_money(price_history[day_key]),
+            }
+            for day_key in ordered_days
+        ]
+
+        entry_hit = False
+        entry_day = ordered_days[0]
+        entry_reference_price = fallback_reference or float(price_history[ordered_days[0]])
+        if entry_levels:
+            for day_key in ordered_days:
+                close_price = float(price_history[day_key])
+                if is_buy and any(close_price <= level for level in entry_levels):
+                    entry_hit = True
+                    entry_day = day_key
+                    entry_reference_price = close_price
+                    break
+                if (not is_buy) and any(close_price >= level for level in entry_levels):
+                    entry_hit = True
+                    entry_day = day_key
+                    entry_reference_price = close_price
+                    break
+        else:
+            entry_hit = True
+
+        valid_until_day = _safe_parse_date(plan.get("valid_until"))
+        if not entry_hit:
+            outcome_label = "pending"
+            summary = "截至复盘日，价格还没有触发建议价，这张策略卡暂时仍在等待验证。"
+            lesson_summary = "未触发的策略卡不要提前当成已执行结论，先等触发条件成立。"
+            if valid_until_day and target_day > valid_until_day:
+                outcome_label = "incomplete"
+                summary = "截至复盘日，价格仍未触发建议价，而且已经超过有效期，这张策略卡没有完成验证。"
+                lesson_summary = "入场条件如果长期不触发，说明计划节奏或价位需要更明确。"
+            close_price = _round_money(price_history[ordered_days[-1]])
+            return {
+                "entry_hit": False,
+                "take_profit_hit": False,
+                "stop_loss_hit": False,
+                "invalidation_hit": False,
+                "max_gain_pct": None,
+                "max_drawdown_pct": None,
+                "close_price": close_price,
+                "outcome_label": outcome_label,
+                "summary": summary,
+                "lesson_summary": lesson_summary,
+                "evidence_json": {
+                    "stock_code": plan["stock_code"],
+                    "direction": direction,
+                    "review_window": review_window,
+                    "review_end": target_day.isoformat(),
+                    "entry_levels": entry_levels,
+                    "take_profit_levels": take_profit_levels,
+                    "stop_loss": stop_loss,
+                    "entry_day": None,
+                    "entry_reference_price": None,
+                    "timeline": timeline,
+                },
+            }
+
+        entry_index = ordered_days.index(entry_day)
+        active_days = ordered_days[entry_index:]
+        performance_points = []
+        take_profit_hit = False
+        stop_loss_hit = False
+        for day_key in active_days:
+            close_price = float(price_history[day_key])
+            performance = _round_money(
+                ((close_price - entry_reference_price) / entry_reference_price) * 100 * direction_factor
+            ) if entry_reference_price else 0.0
+            performance_points.append(performance)
+            if take_profit_levels:
+                if is_buy and any(close_price >= level for level in take_profit_levels):
+                    take_profit_hit = True
+                if (not is_buy) and any(close_price <= level for level in take_profit_levels):
+                    take_profit_hit = True
+            if stop_loss is not None:
+                if is_buy and close_price <= float(stop_loss):
+                    stop_loss_hit = True
+                if (not is_buy) and close_price >= float(stop_loss):
+                    stop_loss_hit = True
+
+        max_gain_pct = max(performance_points) if performance_points else None
+        max_drawdown_pct = min(performance_points) if performance_points else None
+        latest_close = _round_money(price_history[ordered_days[-1]])
+        close_return_pct = performance_points[-1] if performance_points else 0.0
+
+        if take_profit_hit and not stop_loss_hit:
+            outcome_label = "useful"
+            summary = "计划先触发建议价，随后命中止盈区间，说明这张策略卡的节奏与方向基本有效。"
+            lesson_summary = "先等入场价确认，再按止盈位兑现，是这张策略卡这次最有效的执行节奏。"
+        elif stop_loss_hit and not take_profit_hit:
+            outcome_label = "misleading"
+            summary = "计划虽然触发了建议价，但随后先碰到止损位，说明这张策略卡的风险边界判断偏弱。"
+            lesson_summary = "如果入场后先打到止损，说明原先的安全边际或催化判断还不够扎实。"
+        elif max_gain_pct is not None and max_gain_pct >= 3 and close_return_pct >= 0:
+            outcome_label = "useful"
+            summary = "计划触发后整体仍保持正向收益，虽然未必完全命中止盈，但方向判断是有效的。"
+            lesson_summary = "即使没有完整打到止盈，只要触发后持续跑赢，说明方向和节奏仍有参考价值。"
+        elif max_drawdown_pct is not None and max_drawdown_pct <= -3 and close_return_pct < 0:
+            outcome_label = "misleading"
+            summary = "计划触发后承受了较明显回撤，而且到复盘日仍偏弱，这张策略卡的执行价值不足。"
+            lesson_summary = "触发后持续弱于预期时，要更早承认判断失效，而不是继续等待自动修复。"
+        else:
+            outcome_label = "incomplete"
+            summary = "计划已经触发，但止盈止损都没有形成清晰验证结果，目前只能算部分成立。"
+            lesson_summary = "建议把止盈和失效边界写得更可执行，这样后续复盘才能更明确。"
+
+        return {
+            "entry_hit": True,
+            "take_profit_hit": take_profit_hit,
+            "stop_loss_hit": stop_loss_hit,
+            "invalidation_hit": False,
+            "max_gain_pct": max_gain_pct,
+            "max_drawdown_pct": max_drawdown_pct,
+            "close_price": latest_close,
+            "outcome_label": outcome_label,
+            "summary": summary,
+            "lesson_summary": lesson_summary,
+            "evidence_json": {
+                "stock_code": plan["stock_code"],
+                "stock_name": plan.get("stock_name"),
+                "direction": direction,
+                "review_window": review_window,
+                "review_end": target_day.isoformat(),
+                "entry_levels": entry_levels,
+                "take_profit_levels": take_profit_levels,
+                "stop_loss": stop_loss,
+                "entry_day": entry_day,
+                "entry_reference_price": _round_money(entry_reference_price),
+                "timeline": timeline,
+                "active_timeline": [item for item in timeline if item["date"] >= entry_day],
+            },
+        }
 
     # ── Watchlist CRUD ─────────────────────────────────
 

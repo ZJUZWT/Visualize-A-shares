@@ -864,6 +864,51 @@ async def _count_pending_expert_plans(user_id: str) -> int:
     return int(rows[0].get("total") or 0)
 
 
+async def _build_recent_plan_review_context(user_id: str) -> str:
+    if not user_id:
+        return ""
+    try:
+        svc = _get_agent_service()
+        plan_reviews = await svc.list_plan_reviews_by_user(user_id, days=90, limit=4)
+    except Exception as exc:
+        logger.debug(f"加载策略卡复盘上下文失败: {exc}")
+        return ""
+
+    if not plan_reviews:
+        return ""
+
+    lines = [
+        "## 最近策略卡复盘经验（仅在涉及投资判断时参考）",
+        "只有在用户明确讨论个股、仓位、买卖节奏时才参考这些经验；如果用户在问概念、方法或闲聊，不要硬套到选股流程里。",
+    ]
+    for item in plan_reviews:
+        label = item.get("outcome_label") or "pending"
+        date_text = item.get("review_date") or ""
+        summary = item.get("lesson_summary") or item.get("summary") or "最近有一条待吸收的策略卡复盘。"
+        stock_code = item.get("stock_code") or ""
+        stock_name = item.get("stock_name") or ""
+        title = f"{stock_code} {stock_name}".strip()
+        prefix = f"- [{label}]"
+        if date_text:
+            prefix += f" {date_text}"
+        if title:
+            prefix += f" {title}"
+        lines.append(f"{prefix}: {summary}")
+    return "\n".join(lines)
+
+
+async def _load_plan_reviews_for_user(svc: AgentService, user_id: str, days: int, limit: int) -> list[dict]:
+    getter = getattr(svc, "list_plan_reviews_by_user", None)
+    if getter is None:
+        return []
+    result = getter(user_id, days=days, limit=limit)
+    if asyncio.iscoroutine(result):
+        result = await result
+    if not isinstance(result, list):
+        return []
+    return result
+
+
 # ══════════════════════════════════════════════════════════
 # 多专家统一入口
 # ══════════════════════════════════════════════════════════
@@ -889,11 +934,13 @@ async def get_learning_profile(
     review_stats = await svc.get_review_stats(portfolio_id, days=days)
     memories = await svc.list_memories(status="all", portfolio_id=portfolio_id)
     reflections = await svc.list_reflections(limit=8, portfolio_id=portfolio_id)
+    plan_reviews = await _load_plan_reviews_for_user(svc, user_id, days=days, limit=8)
     pending_plan_count = await _count_pending_expert_plans(user_id)
     payload = build_expert_learning_profile(
         expert_type=expert_type,
         portfolio_id=portfolio_id,
         review_records=review_records,
+        plan_reviews=plan_reviews,
         review_stats=review_stats,
         memories=memories,
         reflections=reflections,
@@ -903,14 +950,18 @@ async def get_learning_profile(
 
 
 @router.post("/chat/{expert_type}")
-async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
+async def expert_chat_by_type(
+    expert_type: ExpertType,
+    req: ExpertChatRequest,
+    user_id: str = Depends(get_current_user),
+):
     """与指定类型的专家对话（SSE 流式）"""
     if expert_type == "rag":
-        return await _rag_chat(req)
+        return await _rag_chat(req, user_id=user_id)
 
     # 短线专家复用 RAG Agent，但使用 short_term 人格
     if expert_type == "short_term":
-        return await _rag_chat(req, persona="short_term")
+        return await _rag_chat(req, persona="short_term", user_id=user_id)
 
     expert = _engine_experts.get(expert_type)
     if not expert:
@@ -924,6 +975,7 @@ async def expert_chat_by_type(expert_type: ExpertType, req: ExpertChatRequest):
     history = _get_session_history(session_id) if session_id else []
     intent = classify_expert_intent(req.message)
     use_direct_reply = should_use_direct_reply(intent) and hasattr(expert, "direct_reply")
+    learning_context = await _build_recent_plan_review_context(user_id)
 
     async def event_stream():
         full_reply = ""
@@ -1022,6 +1074,7 @@ async def clarify_expert_question(expert_type: ExpertType, req: ClarifyRequest):
         history=history,
         persona=persona,
         previous_selections=req.previous_selections,
+        images=req.images,
     )
     if hasattr(result, "model_dump"):
         return result.model_dump()
@@ -1029,12 +1082,12 @@ async def clarify_expert_question(expert_type: ExpertType, req: ClarifyRequest):
 
 
 @router.post("/chat")
-async def expert_chat(req: ExpertChatRequest):
+async def expert_chat(req: ExpertChatRequest, user_id: str = Depends(get_current_user)):
     """与 RAG 专家 Agent 对话（SSE 流式）— 兼容旧接口"""
-    return await _rag_chat(req)
+    return await _rag_chat(req, user_id=user_id)
 
 
-async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
+async def _rag_chat(req: ExpertChatRequest, persona: str = "rag", user_id: str = "anonymous"):
     """RAG 专家对话"""
     logger.info(f"📋 _rag_chat: deep_think={req.deep_think}, enable_trade_plan={req.enable_trade_plan}, use_clarification={req.use_clarification}")
     agent = get_expert_agent()
@@ -1042,6 +1095,7 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
     history = _get_session_history(session_id) if session_id else []
     intent = classify_expert_intent(req.message)
     use_direct_reply = should_use_direct_reply(intent) and hasattr(agent, "direct_reply")
+    learning_context = await _build_recent_plan_review_context(user_id)
 
     async def event_stream():
         full_reply = ""
@@ -1050,21 +1104,28 @@ async def _rag_chat(req: ExpertChatRequest, persona: str = "rag"):
         thinking_items = []
         try:
             if use_direct_reply:
-                stream = agent.direct_reply(
-                    req.message,
-                    history=history,
-                    persona=persona,
-                    images=req.images,
-                )
+                direct_reply_kwargs = {
+                    "history": history,
+                    "persona": persona,
+                    "images": req.images,
+                }
+                if learning_context:
+                    direct_reply_kwargs["learning_context"] = learning_context
+                stream = agent.direct_reply(req.message, **direct_reply_kwargs)
             else:
-                stream = agent.chat(
-                    req.message, history=history, persona=persona,
-                    deep_think=req.deep_think, max_rounds=req.max_rounds,
-                    clarification_selection=req.clarification_selection,
-                    clarification_chain=req.clarification_chain,
-                    enable_trade_plan=req.enable_trade_plan,
-                    images=req.images,
-                )
+                chat_kwargs = {
+                    "history": history,
+                    "persona": persona,
+                    "deep_think": req.deep_think,
+                    "max_rounds": req.max_rounds,
+                    "clarification_selection": req.clarification_selection,
+                    "clarification_chain": req.clarification_chain,
+                    "enable_trade_plan": req.enable_trade_plan,
+                    "images": req.images,
+                }
+                if learning_context:
+                    chat_kwargs["learning_context"] = learning_context
+                stream = agent.chat(req.message, **chat_kwargs)
             async for event in stream:
                 evt_type = event["event"]
                 if evt_type == "reply_token":

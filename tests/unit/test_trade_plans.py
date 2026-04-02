@@ -8,7 +8,7 @@ import asyncio
 import tempfile
 import duckdb
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 def run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
@@ -37,6 +37,30 @@ class TestTradePlansTable:
         db.close()
 
         assert "trade_plans" in table_names
+
+    def test_trade_plans_has_source_message_id_and_plan_reviews_table(self, tmp_path):
+        db_path = tmp_path / "test_agent.duckdb"
+        with patch("engine.agent.db.AGENT_DB_PATH", db_path):
+            from engine.agent.db import AgentDB
+            AgentDB._instance = None
+            db = AgentDB.init_instance()
+
+        conn = duckdb.connect(str(db_path))
+        trade_plan_columns = conn.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema='agent' AND table_name='trade_plans'
+            """
+        ).fetchall()
+        tables = conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='agent'"
+        ).fetchall()
+        conn.close()
+        db.close()
+
+        assert "source_message_id" in {row[0] for row in trade_plan_columns}
+        assert "plan_reviews" in {row[0] for row in tables}
 
 
 class TestTradePlanModels:
@@ -67,6 +91,17 @@ class TestTradePlanModels:
         )
         assert ti.entry_price is None
         assert ti.stop_loss is None
+
+    def test_trade_plan_input_accepts_source_message_id(self):
+        from engine.agent.models import TradePlanInput
+        ti = TradePlanInput(
+            stock_code="600519",
+            stock_name="贵州茅台",
+            direction="buy",
+            reasoning="白酒龙头",
+            source_message_id="msg-123",
+        )
+        assert ti.source_message_id == "msg-123"
 
     def test_trade_plan_update(self):
         from engine.agent.models import TradePlanUpdate
@@ -124,11 +159,12 @@ class TestServicePlans:
         self.db.close()
 
     def test_create_plan(self):
-        pi = _make_plan_input()
+        pi = _make_plan_input(source_message_id="msg-abc")
         result = run(self.svc.create_plan(pi))
         assert result["stock_code"] == "600519"
         assert result["status"] == "pending"
         assert result["id"] is not None
+        assert result["source_message_id"] == "msg-abc"
 
     def test_list_plans(self):
         run(self.svc.create_plan(_make_plan_input()))
@@ -174,6 +210,67 @@ class TestServicePlans:
     def test_delete_plan_not_found(self):
         with pytest.raises(ValueError, match="不存在"):
             run(self.svc.delete_plan("nonexistent"))
+
+    def test_review_plan_generates_deterministic_plan_review(self):
+        created = run(
+            self.svc.create_plan(
+                _make_plan_input(
+                    current_price=102.0,
+                    entry_price="100 / 98",
+                    take_profit="110 / 115",
+                    stop_loss=95.0,
+                    valid_until="2026-04-10",
+                )
+            )
+        )
+        run(
+            self.db.execute_write(
+                "UPDATE agent.trade_plans SET created_at = ?, updated_at = ? WHERE id = ?",
+                ["2026-04-01T09:30:00", "2026-04-01T09:30:00", created["id"]],
+            )
+        )
+
+        with patch.object(
+            self.svc,
+            "_load_price_history",
+            AsyncMock(
+                return_value={
+                    "600519": {
+                        "2026-04-01": 102.0,
+                        "2026-04-02": 99.0,
+                        "2026-04-03": 108.0,
+                        "2026-04-04": 112.0,
+                    }
+                }
+            ),
+        ):
+            review = run(
+                self.svc.review_plan(
+                    created["id"],
+                    review_date="2026-04-04",
+                    review_window=5,
+                )
+            )
+
+        records = run(
+            self.db.execute_read(
+                "SELECT * FROM agent.plan_reviews WHERE plan_id = ?",
+                [created["id"]],
+            )
+        )
+
+        assert review["plan_id"] == created["id"]
+        assert review["entry_hit"] is True
+        assert review["take_profit_hit"] is True
+        assert review["stop_loss_hit"] is False
+        assert review["outcome_label"] == "useful"
+        assert review["summary"]
+        assert review["lesson_summary"]
+        assert review["max_gain_pct"] == pytest.approx(13.13, abs=0.01)
+        assert review["max_drawdown_pct"] == pytest.approx(0.0, abs=0.01)
+        assert len(records) == 1
+        assert records[0]["outcome_label"] == "useful"
+        assert records[0]["source_message_id"] is None or isinstance(records[0]["source_message_id"], str)
 
 
 # ═══════════════════════════════════════════════════════
@@ -266,3 +363,39 @@ class TestPlansRoutes:
     def test_delete_plan_404(self):
         resp = self.client.delete("/api/v1/agent/plans/nonexistent")
         assert resp.status_code == 404
+
+    def test_review_plan(self):
+        created = self._create_plan(
+            current_price=102.0,
+            entry_price="100 / 98",
+            take_profit="110 / 115",
+            stop_loss=95.0,
+        ).json()
+        run(
+            self.db.execute_write(
+                "UPDATE agent.trade_plans SET created_at = ?, updated_at = ? WHERE id = ?",
+                ["2026-04-01T09:30:00", "2026-04-01T09:30:00", created["id"]],
+            )
+        )
+
+        with patch(
+            "engine.agent.service.AgentService._load_price_history",
+            new=AsyncMock(
+                return_value={
+                    "600519": {
+                        "2026-04-01": 102.0,
+                        "2026-04-02": 99.0,
+                        "2026-04-03": 108.0,
+                        "2026-04-04": 112.0,
+                    }
+                }
+            ),
+        ):
+            resp = self.client.post(
+                f"/api/v1/agent/plans/{created['id']}/review",
+                json={"review_date": "2026-04-04", "review_window": 5},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["plan_id"] == created["id"]
+        assert resp.json()["outcome_label"] == "useful"

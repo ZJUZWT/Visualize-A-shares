@@ -1027,6 +1027,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: text,
+            images: msgImages || [],
             session_id: sessionId,
             previous_selections: [],
           }),
@@ -1088,6 +1089,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
             expertMessageId: expertMsg.id,
             request: data,
             originalMessage: text,
+            originalImages: msgImages || [],
             previousSelections: [],
           };
           return {
@@ -1258,6 +1260,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         sessionId,
         payload: {
           message: pending.originalMessage,
+          images: pending.originalImages || [],
           session_id: sessionId,
           deep_think: deepThink,
           enable_trade_plan: useTradePlan,
@@ -1294,6 +1297,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: pending.originalMessage,
+          images: pending.originalImages || [],
           session_id: sessionId,
           previous_selections: allRoundSelections,
         }),
@@ -1334,6 +1338,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           sessionId,
           payload: {
             message: pending.originalMessage,
+            images: pending.originalImages || [],
             session_id: sessionId,
             deep_think: deepThink,
             enable_trade_plan: useTradePlan,
@@ -1378,6 +1383,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
           expertMessageId: pending.expertMessageId,
           request: nextData,
           originalMessage: pending.originalMessage,
+          originalImages: pending.originalImages || [],
           previousSelections: allRoundSelections,
         };
         return {
@@ -1427,6 +1433,7 @@ export const useExpertStore = create<ExpertStore>((set, get) => ({
         sessionId,
         payload: {
           message: pending.originalMessage,
+          images: pending.originalImages || [],
           session_id: sessionId,
           deep_think: deepThink,
           clarification_chain: allRoundSelections,

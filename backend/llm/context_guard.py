@@ -35,7 +35,7 @@ class ContextGuard:
         return int(cn_chars * 0.7 + other_chars * 0.25)
 
     def _total_tokens(self, messages: list[dict]) -> int:
-        """估算消息列表的总 token 数（支持多模态 content）"""
+        """估算消息列表的总 token 数（支持 content 多模态或独立 images 字段）"""
         total = 0
         for m in messages:
             content = m.get("content", "")
@@ -49,6 +49,9 @@ class ContextGuard:
                             total += self.estimate_tokens(part.get("text", ""))
                         elif part.get("type") in ("image_url", "image"):
                             total += 170  # 图片固定 ~170 tokens（低分辨率模式）
+            images = m.get("images")
+            if isinstance(images, list):
+                total += 170 * len(images)
         return total
 
     def guard_messages(self, messages: list[dict]) -> list[dict]:
@@ -77,9 +80,9 @@ class ContextGuard:
 
         fixed_tokens = 0
         if system_msg:
-            fixed_tokens += self.estimate_tokens(system_msg.get("content", ""))
+            fixed_tokens += self._total_tokens([system_msg])
         if last_user_msg:
-            fixed_tokens += self.estimate_tokens(last_user_msg.get("content", ""))
+            fixed_tokens += self._total_tokens([last_user_msg])
 
         budget_for_history = self.max_input_tokens - fixed_tokens
 

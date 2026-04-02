@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import NavSidebar from "@/components/ui/NavSidebar";
 import TradePlanCard from "@/components/plans/TradePlanCard";
 import type { TradePlanData } from "@/lib/parseTradePlan";
+import { normalizeSavedTradePlanCard, type TradePlanCardSavedState } from "@/lib/planReview";
 import { getApiBase, apiFetch } from "@/lib/api-base";
 
 interface SavedPlan extends TradePlanData {
@@ -12,6 +13,51 @@ interface SavedPlan extends TradePlanData {
   created_at: string;
   updated_at: string;
   source_type: string;
+  latest_review: TradePlanCardSavedState["latestReview"];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeSavedPlans(raw: unknown): SavedPlan[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((item) => {
+      if (!isRecord(item) || typeof item.id !== "string") {
+        return null;
+      }
+      const savedState = normalizeSavedTradePlanCard(item);
+      if (!savedState) {
+        return null;
+      }
+      return {
+        stock_code: typeof item.stock_code === "string" ? item.stock_code : "",
+        stock_name: typeof item.stock_name === "string" ? item.stock_name : "",
+        current_price: typeof item.current_price === "number" ? item.current_price : null,
+        direction: item.direction === "sell" ? "sell" : "buy",
+        entry_price: typeof item.entry_price === "string" ? item.entry_price : null,
+        entry_method: typeof item.entry_method === "string" ? item.entry_method : null,
+        win_odds: typeof item.win_odds === "string" ? item.win_odds : null,
+        take_profit: typeof item.take_profit === "string" ? item.take_profit : null,
+        take_profit_method: typeof item.take_profit_method === "string" ? item.take_profit_method : null,
+        stop_loss: typeof item.stop_loss === "number" ? item.stop_loss : null,
+        stop_loss_method: typeof item.stop_loss_method === "string" ? item.stop_loss_method : null,
+        reasoning: typeof item.reasoning === "string" ? item.reasoning : "",
+        risk_note: typeof item.risk_note === "string" ? item.risk_note : null,
+        invalidation: typeof item.invalidation === "string" ? item.invalidation : null,
+        valid_until: typeof item.valid_until === "string" ? item.valid_until : null,
+        id: item.id,
+        status: savedState.status,
+        created_at: savedState.createdAt,
+        updated_at: typeof item.updated_at === "string" ? item.updated_at : savedState.createdAt,
+        source_type: typeof item.source_type === "string" ? item.source_type : "expert",
+        latest_review: savedState.latestReview,
+      } satisfies SavedPlan;
+    })
+    .filter((item): item is SavedPlan => item !== null);
 }
 
 const STATUS_TABS = [
@@ -47,7 +93,7 @@ export default function PlansPage() {
       clearTimeout(timeoutId);
 
       if (resp.ok) {
-        setPlans(await resp.json());
+        setPlans(normalizeSavedPlans(await resp.json()));
       } else {
         setError(`服务端错误 (${resp.status})`);
         setPlans([]);
@@ -81,6 +127,32 @@ export default function PlansPage() {
     if (!confirm("确定删除这个交易计划？")) return;
     await apiFetch(`${getApiBase()}/api/v1/agent/plans/${id}`, { method: "DELETE" });
     fetchPlans();
+  };
+
+  const handleReview = async (id: string) => {
+    const resp = await apiFetch(`${getApiBase()}/api/v1/agent/plans/${id}/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!resp.ok) {
+      throw new Error(`策略卡复盘失败 (${resp.status})`);
+    }
+    const updated = normalizeSavedTradePlanCard({
+      id,
+      status: "pending",
+      created_at: "",
+      latest_review: await resp.json(),
+    });
+    if (!updated) {
+      throw new Error("策略卡复盘结果解析失败");
+    }
+    setPlans((current) =>
+      current.map((plan) =>
+        plan.id === id ? { ...plan, latest_review: updated.latestReview } : plan
+      )
+    );
+    return updated.latestReview;
   };
 
   // 前端判断过期
@@ -164,10 +236,12 @@ export default function PlansPage() {
                 savedPlan={{
                   id: plan.id,
                   status: plan.status,
-                  created_at: plan.created_at,
+                  createdAt: plan.created_at,
+                  latestReview: plan.latest_review,
                 }}
                 onStatusChange={handleStatusChange}
                 onDelete={handleDelete}
+                onReview={handleReview}
               />
             ))
           )}

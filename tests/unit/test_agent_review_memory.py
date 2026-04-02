@@ -9,7 +9,7 @@ import asyncio
 import tempfile
 import duckdb
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 def run(coro):
@@ -551,3 +551,66 @@ class TestReviewEngine:
             invalidation="景气转弱",
             triggered_by="agent",
         )
+
+
+class TestPlanReviewIsolation:
+    def setup_method(self):
+        self._tmp = tempfile.mkdtemp()
+        self.db, self.svc = _make_service(self._tmp)
+
+    def teardown_method(self):
+        self.db.close()
+
+    def test_plan_review_does_not_write_review_records(self):
+        from engine.agent.models import TradePlanInput
+
+        created = run(
+            self.svc.create_plan(
+                TradePlanInput(
+                    stock_code="600519",
+                    stock_name="贵州茅台",
+                    current_price=102.0,
+                    direction="buy",
+                    entry_price="100 / 98",
+                    take_profit="110 / 115",
+                    stop_loss=95.0,
+                    reasoning="等待回踩后再看修复",
+                    valid_until="2026-04-10",
+                )
+            )
+        )
+        run(
+            self.db.execute_write(
+                "UPDATE agent.trade_plans SET created_at = ?, updated_at = ? WHERE id = ?",
+                ["2026-04-01T09:30:00", "2026-04-01T09:30:00", created["id"]],
+            )
+        )
+
+        with patch.object(
+            self.svc,
+            "_load_price_history",
+            AsyncMock(
+                return_value={
+                    "600519": {
+                        "2026-04-01": 102.0,
+                        "2026-04-02": 99.0,
+                        "2026-04-03": 108.0,
+                        "2026-04-04": 112.0,
+                    }
+                }
+            ),
+        ):
+            review = run(
+                self.svc.review_plan(
+                    created["id"],
+                    review_date="2026-04-04",
+                    review_window=5,
+                )
+            )
+
+        review_rows = run(self.db.execute_read("SELECT * FROM agent.review_records"))
+        plan_review_rows = run(self.db.execute_read("SELECT * FROM agent.plan_reviews"))
+
+        assert review["outcome_label"] == "useful"
+        assert review_rows == []
+        assert len(plan_review_rows) == 1

@@ -22,13 +22,14 @@ const SAMPLE_PLAN: TradePlanData = {
   valid_until: "2026-04-15",
 };
 
-test("buildExpertTradePlanPayload includes source conversation id when provided", () => {
-  assert.deepEqual(buildExpertTradePlanPayload(SAMPLE_PLAN, "session-123"), {
+test("buildExpertTradePlanPayload includes source conversation id and source message id when provided", () => {
+  assert.deepEqual(buildExpertTradePlanPayload(SAMPLE_PLAN, "session-123", "msg-456"), {
     ...SAMPLE_PLAN,
     source_conversation_id: "session-123",
+    source_message_id: "msg-456",
   });
 });
 
-test("buildExpertTradePlanPayload omits source conversation id when unavailable", () => {
-  assert.deepEqual(buildExpertTradePlanPayload(SAMPLE_PLAN, null), SAMPLE_PLAN);
+test("buildExpertTradePlanPayload omits source ids when unavailable", () => {
+  assert.deepEqual(buildExpertTradePlanPayload(SAMPLE_PLAN, null, null), SAMPLE_PLAN);
 });

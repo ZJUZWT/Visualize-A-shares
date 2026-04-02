@@ -19,6 +19,7 @@ import {
   defaultFeedbackIssueTypeForMessage,
   shouldOfferResumeCheck,
 } from "@/lib/expertFeedback";
+import { normalizePlanReview, normalizeSavedTradePlanCard } from "@/lib/planReview";
 import TradePlanCard from "@/components/plans/TradePlanCard";
 import { getApiBase, apiFetch } from "@/lib/api-base";
 
@@ -621,12 +622,28 @@ export function MessageBubble({
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify(
-                            buildExpertTradePlanPayload(plan, sourceConversationId),
+                            buildExpertTradePlanPayload(
+                              plan,
+                              sourceConversationId,
+                              message.dbMessageId || message.id,
+                            ),
                           ),
                         });
                         if (!resp.ok) {
-                          console.error("收藏失败:", resp.status, await resp.text());
+                          throw new Error(`收藏失败 (${resp.status})`);
                         }
+                        return normalizeSavedTradePlanCard(await resp.json()) ?? undefined;
+                      }}
+                      onReview={async (planId) => {
+                        const resp = await apiFetch(`${getApiBase()}/api/v1/agent/plans/${planId}/review`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({}),
+                        });
+                        if (!resp.ok) {
+                          throw new Error(`策略卡复盘失败 (${resp.status})`);
+                        }
+                        return normalizePlanReview(await resp.json());
                       }}
                     />
                   </div>

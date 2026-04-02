@@ -125,6 +125,47 @@ def test_clarify_short_term_uses_short_term_persona(client):
             history=[],
             persona="short_term",
             previous_selections=[],
+            images=[],
+        )
+
+
+def test_clarify_rag_passes_images_to_agent(client):
+    with patch("engine.expert.routes.get_expert_agent") as mock_get_agent:
+        mock_agent = Mock()
+        mock_agent.clarify = AsyncMock(return_value={
+            "should_clarify": False,
+            "question_summary": "图片已经补足上下文",
+            "reasoning": "图片里信息足够",
+            "options": [],
+            "skip_option": {
+                "id": "skip",
+                "label": "S",
+                "title": "跳过，直接分析",
+                "description": "直接进入完整分析。",
+                "focus": "完整分析",
+            },
+            "needs_more": False,
+            "round": 1,
+            "max_rounds": 3,
+            "multi_select": False,
+        })
+        mock_get_agent.return_value = mock_agent
+
+        response = client.post(
+            "/api/v1/expert/clarify/rag",
+            json={
+                "message": "我这个怎么办",
+                "images": ["data:image/png;base64,abc123"],
+            },
+        )
+
+        assert response.status_code == 200
+        mock_agent.clarify.assert_awaited_once_with(
+            "我这个怎么办",
+            history=[],
+            persona="rag",
+            previous_selections=[],
+            images=["data:image/png;base64,abc123"],
         )
 
 
@@ -174,6 +215,47 @@ def test_clarify_rag_empty_options_falls_back_to_safe_options(client, tmp_path):
     assert len(data["options"]) >= 3
     assert data["skip_option"]["id"] == "skip"
     assert data["multi_select"] is True
+
+
+def test_learning_profile_includes_recent_plan_review_lessons(client):
+    mock_service = Mock()
+    mock_service.list_review_records = AsyncMock(return_value=[])
+    mock_service.get_review_stats = AsyncMock(
+        return_value={
+            "total_reviews": 0,
+            "win_rate": 0.0,
+            "avg_pnl_pct": 0.0,
+            "loss_count": 0,
+        }
+    )
+    mock_service.list_memories = AsyncMock(return_value=[])
+    mock_service.list_reflections = AsyncMock(return_value=[])
+    mock_service.list_plan_reviews_by_user = AsyncMock(
+        return_value=[
+            {
+                "id": "plan-review-1",
+                "review_date": "2026-04-02",
+                "outcome_label": "useful",
+                "lesson_summary": "回踩到首档买点后，止盈位兑现说明分批低吸判断有效。",
+                "summary": "贵州茅台这张策略卡在 review window 内先命中建议价，再命中止盈。",
+            }
+        ]
+    )
+
+    with (
+        patch("engine.expert.routes._verify_learning_profile_portfolio_owner", new=AsyncMock()),
+        patch("engine.expert.routes._get_agent_service", return_value=mock_service),
+        patch("engine.expert.routes._count_pending_expert_plans", new=AsyncMock(return_value=2)),
+    ):
+        response = client.get(
+            "/api/v1/expert/learning/profile?expert_type=data&portfolio_id=paper-1"
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recent_lessons"][0]["id"] == "plan-review-1"
+    assert "低吸判断有效" in payload["recent_lessons"][0]["title"]
+    assert payload["pending_plan_summary"]["expert_plan_count"] == 2
 
 
 def _init_test_expert_db(

@@ -4,7 +4,7 @@ Main Agent 数据模型
 from __future__ import annotations
 
 from typing import Any, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 # ── 持仓 ──────────────────────────────────────────────
@@ -154,6 +154,7 @@ class TradePlan(BaseModel):
     status: Literal["pending", "executing", "completed", "expired", "ignored"] = "pending"
     source_type: Literal["expert", "agent", "manual"] = "expert"
     source_conversation_id: str | None = None
+    source_message_id: str | None = None
     source_run_id: str | None = None
     created_at: str
     updated_at: str
@@ -178,6 +179,16 @@ class TradePlanInput(BaseModel):
     valid_until: str | None = None
     source_type: Literal["expert", "agent", "manual"] = "expert"
     source_conversation_id: str | None = None
+    source_message_id: str | None = None
+
+    @field_validator("entry_price", "take_profit", mode="before")
+    @classmethod
+    def _coerce_price_text(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return str(value)
+        return value
 
 
 class TradePlanUpdate(BaseModel):

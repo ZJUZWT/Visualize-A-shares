@@ -122,16 +122,24 @@ export function normalizeExpertLearningProfile(
   const reviewCount = toNumber(sourceSummary.review_count) ?? 0;
   const memoryCount = toNumber(sourceSummary.memory_count) ?? 0;
   const reflectionCount = toNumber(sourceSummary.reflection_count) ?? 0;
-  const isEmpty = reviewCount === 0 && memoryCount === 0 && reflectionCount === 0;
+  const recentLessons = normalizeItems(data.recent_lessons);
+  const commonMistakes = normalizeItems(data.common_mistakes);
+  const applicabilityBoundaries = normalizeItems(data.applicability_boundaries);
+  const isEmpty = reviewCount === 0
+    && memoryCount === 0
+    && reflectionCount === 0
+    && recentLessons.length === 0
+    && commonMistakes.length === 0
+    && applicabilityBoundaries.length === 0;
 
   return {
     portfolioId: typeof data.portfolio_id === "string" ? data.portfolio_id : null,
     expertType,
     scoreCards: Array.isArray(data.score_cards) ? data.score_cards.filter(isRecord) : [],
     verifiedKnowledge,
-    recentLessons: normalizeItems(data.recent_lessons),
-    commonMistakes: normalizeItems(data.common_mistakes),
-    applicabilityBoundaries: normalizeItems(data.applicability_boundaries),
+    recentLessons,
+    commonMistakes,
+    applicabilityBoundaries,
     sourceSummary: {
       reviewCount,
       memoryCount,

@@ -1,18 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TradePlanData } from "@/lib/parseTradePlan";
+import {
+  normalizeSavedTradePlanCard,
+  PLAN_REVIEW_OUTCOME_LABELS,
+  type PlanReviewViewModel,
+  type TradePlanCardSavedState,
+} from "@/lib/planReview";
 
 interface TradePlanCardProps {
   plan: TradePlanData;
-  onSave?: (plan: TradePlanData) => Promise<void>;
-  savedPlan?: {
-    id: string;
-    status: string;
-    created_at: string;
-  };
+  onSave?: (plan: TradePlanData) => Promise<TradePlanCardSavedState | void>;
+  savedPlan?: TradePlanCardSavedState;
   onStatusChange?: (id: string, status: string) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
+  onReview?: (id: string) => Promise<PlanReviewViewModel | null>;
   /** "warm" = 暖色投顾风（plans 页面），"dark" = 暗色嵌入（专家对话） */
   variant?: "warm" | "dark";
 }
@@ -46,6 +49,7 @@ const palette = {
     btnDelete: "text-red-500 hover:bg-red-50",
     select: "border-black/10 bg-white text-slate-700 focus:ring-slate-950/10",
     date: "text-slate-400",
+    reviewPanel: "border-black/10 bg-slate-50/80",
   },
   dark: {
     card: "bg-white/[0.06] border-white/10 shadow-none hover:bg-white/[0.09]",
@@ -74,6 +78,7 @@ const palette = {
     btnDelete: "text-red-400 hover:bg-red-500/20",
     select: "border-white/20 bg-white/10 text-white focus:ring-white/20",
     date: "text-gray-500",
+    reviewPanel: "border-white/10 bg-white/[0.05]",
   },
 };
 
@@ -100,17 +105,54 @@ function parsePriceLevels(raw: string | null): string[] {
   return raw.split(/\s*[/／]\s*/).map(s => s.trim()).filter(Boolean);
 }
 
+function formatSignedPercent(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) {
+    return "--";
+  }
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function ReviewChip({
+  label,
+  active,
+  variant,
+}: {
+  label: string;
+  active: boolean;
+  variant: "warm" | "dark";
+}) {
+  const activeClass = variant === "warm"
+    ? "border-black/10 bg-white text-slate-700"
+    : "border-white/10 bg-white/10 text-white";
+  const inactiveClass = variant === "warm"
+    ? "border-black/5 bg-white/60 text-slate-400"
+    : "border-white/5 bg-white/[0.04] text-gray-500";
+  return (
+    <span className={`rounded-full border px-2 py-1 text-[11px] ${active ? activeClass : inactiveClass}`}>
+      {label}
+    </span>
+  );
+}
+
 export default function TradePlanCard({
   plan,
   onSave,
   savedPlan,
   onStatusChange,
   onDelete,
+  onReview,
   variant = "warm",
 }: TradePlanCardProps) {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [localSavedPlan, setLocalSavedPlan] = useState<TradePlanCardSavedState | null>(savedPlan ?? null);
+  const [review, setReview] = useState<PlanReviewViewModel | null>(savedPlan?.latestReview ?? null);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewExpanded, setReviewExpanded] = useState(Boolean(savedPlan?.latestReview));
   const t = palette[variant];
+  const effectiveSavedPlan = localSavedPlan ?? savedPlan ?? null;
 
   const isBuy = plan.direction === "buy";
   const dirLabel = isBuy ? "买入" : "卖出";
@@ -121,11 +163,42 @@ export default function TradePlanCard({
   const handleSave = async () => {
     if (!onSave || saved || saving) return;
     setSaving(true);
+    setSaveError(null);
     try {
-      await onSave(plan);
+      const result = await onSave(plan);
+      const normalized = normalizeSavedTradePlanCard(result ?? null);
+      if (normalized) {
+        setLocalSavedPlan(normalized);
+        setReview(normalized.latestReview);
+      }
       setSaved(true);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "收藏失败");
     } finally {
       setSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    setLocalSavedPlan(savedPlan ?? null);
+    setReview(savedPlan?.latestReview ?? null);
+    if (savedPlan?.latestReview) {
+      setReviewExpanded(true);
+    }
+  }, [savedPlan]);
+
+  const handleReview = async () => {
+    if (!effectiveSavedPlan || !onReview || reviewing) return;
+    setReviewing(true);
+    setReviewError(null);
+    try {
+      const nextReview = await onReview(effectiveSavedPlan.id);
+      setReview(nextReview);
+      setReviewExpanded(Boolean(nextReview));
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : "复盘失败");
+    } finally {
+      setReviewing(false);
     }
   };
 
@@ -145,9 +218,9 @@ export default function TradePlanCard({
             </span>
           )}
         </div>
-        {savedPlan && (
-          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(savedPlan.status, t)}`}>
-            {STATUS_LABEL[savedPlan.status] || savedPlan.status}
+        {effectiveSavedPlan && (
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${getStatusColor(effectiveSavedPlan.status, t)}`}>
+            {STATUS_LABEL[effectiveSavedPlan.status] || effectiveSavedPlan.status}
           </span>
         )}
       </div>
@@ -223,10 +296,10 @@ export default function TradePlanCard({
       <div className={`mt-3 flex items-center justify-between border-t ${t.divider} pt-3`}>
         <div className={`text-xs ${t.date}`}>
           {plan.valid_until && <span>有效期：{plan.valid_until}</span>}
-          {savedPlan?.created_at && <span className="ml-3">创建：{new Date(savedPlan.created_at).toLocaleDateString()}</span>}
+          {effectiveSavedPlan?.createdAt && <span className="ml-3">创建：{new Date(effectiveSavedPlan.createdAt).toLocaleDateString()}</span>}
         </div>
         <div className="flex items-center gap-2">
-          {onSave && !savedPlan && (
+          {onSave && !effectiveSavedPlan && (
             <button
               onClick={handleSave}
               disabled={saved || saving}
@@ -237,10 +310,19 @@ export default function TradePlanCard({
               {saved ? "已收藏 ✓" : saving ? "收藏中..." : "📋 收藏到备忘录"}
             </button>
           )}
-          {savedPlan && onStatusChange && (
+          {effectiveSavedPlan && onReview && (
+            <button
+              onClick={handleReview}
+              disabled={reviewing}
+              className={`rounded-xl px-3 py-1.5 text-xs font-medium transition-colors ${t.btnPrimary}`}
+            >
+              {reviewing ? "复盘中..." : review ? "重新复盘" : "复盘这张卡"}
+            </button>
+          )}
+          {effectiveSavedPlan && onStatusChange && (
             <select
-              value={savedPlan.status}
-              onChange={(e) => onStatusChange(savedPlan.id, e.target.value)}
+              value={effectiveSavedPlan.status}
+              onChange={(e) => onStatusChange(effectiveSavedPlan.id, e.target.value)}
               className={`rounded-xl border px-2 py-1.5 text-xs outline-none focus:ring-2 ${t.select}`}
             >
               <option value="pending">待执行</option>
@@ -250,9 +332,9 @@ export default function TradePlanCard({
               <option value="ignored">已忽略</option>
             </select>
           )}
-          {savedPlan && onDelete && (
+          {effectiveSavedPlan && onDelete && (
             <button
-              onClick={() => onDelete(savedPlan.id)}
+              onClick={() => onDelete(effectiveSavedPlan.id)}
               className={`rounded-xl px-2 py-1.5 text-xs transition ${t.btnDelete}`}
             >
               删除
@@ -260,6 +342,75 @@ export default function TradePlanCard({
           )}
         </div>
       </div>
+      {saveError && (
+        <div className={`mt-2 text-xs ${t.sl}`}>{saveError}</div>
+      )}
+
+      {(review || reviewError) && (
+        <div className={`mt-3 rounded-2xl border p-3 ${t.reviewPanel}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {review && (
+                <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                  review.outcomeLabel === "useful"
+                    ? isBuy ? t.dirBuy : t.statusCompleted
+                    : review.outcomeLabel === "misleading"
+                      ? t.dirSell
+                      : t.statusPending
+                }`}>
+                  {PLAN_REVIEW_OUTCOME_LABELS[review.outcomeLabel]}
+                </span>
+              )}
+              <span className={`text-xs ${t.subtitle}`}>
+                {review?.reviewDate ? `复盘日 ${review.reviewDate}` : "策略卡复盘"}
+              </span>
+            </div>
+            {review && (
+              <button
+                onClick={() => setReviewExpanded((value) => !value)}
+                className={`text-xs ${t.subtitle}`}
+              >
+                {reviewExpanded ? "收起" : "展开"}
+              </button>
+            )}
+          </div>
+          {reviewError && (
+            <div className={`mt-2 text-xs ${t.sl}`}>{reviewError}</div>
+          )}
+          {review && reviewExpanded && (
+            <div className="mt-3 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <ReviewChip label="入场触发" active={review.entryHit} variant={variant} />
+                <ReviewChip label="止盈命中" active={review.takeProfitHit} variant={variant} />
+                <ReviewChip label="止损命中" active={review.stopLossHit} variant={variant} />
+                <ReviewChip label="失效触发" active={review.invalidationHit} variant={variant} />
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className={`rounded-xl border p-2 ${t.reviewPanel}`}>
+                  <div className={t.detailLabel}>最大浮盈</div>
+                  <div className={`mt-1 font-mono ${t.tp}`}>{formatSignedPercent(review.maxGainPct)}</div>
+                </div>
+                <div className={`rounded-xl border p-2 ${t.reviewPanel}`}>
+                  <div className={t.detailLabel}>最大回撤</div>
+                  <div className={`mt-1 font-mono ${t.sl}`}>{formatSignedPercent(review.maxDrawdownPct)}</div>
+                </div>
+                <div className={`rounded-xl border p-2 ${t.reviewPanel}`}>
+                  <div className={t.detailLabel}>收盘价</div>
+                  <div className={`mt-1 font-mono ${t.price}`}>{review.closePrice ?? "--"}</div>
+                </div>
+              </div>
+              {review.summary && (
+                <div className={`text-sm leading-relaxed ${t.body}`}>{review.summary}</div>
+              )}
+              {review.lessonSummary && (
+                <div className={`rounded-xl border p-3 text-xs leading-6 ${t.detail} ${t.reviewPanel}`}>
+                  经验回流：{review.lessonSummary}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

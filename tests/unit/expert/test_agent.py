@@ -291,6 +291,115 @@ async def test_resume_completion_check_marks_failed_when_provider_exception(tmp_
 
 
 @pytest.mark.asyncio
+async def test_generate_reply_stream_preserves_user_images_after_context_guard(expert_agent):
+    captured_messages = []
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            captured_messages.append(messages)
+            if len(captured_messages) == 1:
+                yield (
+                    '{"image_kind":"other","detected_entities":[],"user_focus":"图像理解",'
+                    '"summary":"这是用户上传的一张走势图截图。"}'
+                )
+                return
+            yield "图像分析已收到"
+
+    expert_agent._model_router = None
+    expert_agent._llm = _MockLLM()
+
+    chunks = []
+    async for token, full_text in expert_agent.generate_reply_stream(
+        "帮我看看这张K线图",
+        nodes=[],
+        memories=[],
+        tool_results=[],
+        history=[],
+        persona="rag",
+        images=["data:image/png;base64,abc123"],
+    ):
+        chunks.append((token, full_text))
+
+    assert chunks[-1][1] == "图像分析已收到"
+    assert len(captured_messages) == 2
+    user_message = captured_messages[-1][-1]
+    assert user_message.role == "user"
+    assert user_message.images == ["data:image/png;base64,abc123"]
+
+
+@pytest.mark.asyncio
+async def test_direct_reply_preserves_user_images_after_context_guard(expert_agent):
+    captured_messages = []
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            captured_messages.append(messages)
+            if len(captured_messages) == 1:
+                yield (
+                    '{"image_kind":"other","detected_entities":[],"user_focus":"图像理解",'
+                    '"summary":"这是用户上传的一张图表截图。"}'
+                )
+                return
+            yield "这是图表解读"
+
+    expert_agent._model_router = None
+    expert_agent._llm = _MockLLM()
+
+    events = []
+    async for event in expert_agent.direct_reply(
+        "这张图怎么看？",
+        history=[],
+        persona="rag",
+        images=["data:image/png;base64,xyz456"],
+    ):
+        events.append(event)
+
+    assert events[-1]["data"]["full_text"] == "这是图表解读"
+    assert len(captured_messages) == 2
+    user_message = captured_messages[-1][-1]
+    assert user_message.role == "user"
+    assert user_message.images == ["data:image/png;base64,xyz456"]
+
+
+@pytest.mark.asyncio
+async def test_generate_reply_stream_injects_image_summary_when_images_exist(expert_agent):
+    captured_messages = []
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            captured_messages.append(messages)
+            if len(captured_messages) == 1:
+                yield (
+                    '{"image_kind":"kline_chart","detected_entities":["宁德时代(300750)","日线"],'
+                    '"user_focus":"支撑阻力","summary":"这是一张宁德时代日线K线图，用户想看支撑位和阻力位。"}'
+                )
+                return
+            yield "结合图片来看，趋势仍在震荡。"
+
+    expert_agent._model_router = None
+    expert_agent._llm = _MockLLM()
+
+    chunks = []
+    async for token, full_text in expert_agent.generate_reply_stream(
+        "帮我看看这张图的支撑位",
+        nodes=[],
+        memories=[],
+        tool_results=[],
+        history=[],
+        persona="rag",
+        images=["data:image/png;base64,summary001"],
+    ):
+        chunks.append((token, full_text))
+
+    assert chunks[-1][1] == "结合图片来看，趋势仍在震荡。"
+    assert len(captured_messages) == 2
+    final_user_message = captured_messages[1][-1]
+    assert final_user_message.role == "user"
+    assert final_user_message.images == ["data:image/png;base64,summary001"]
+    assert "这是一张宁德时代日线K线图" in final_user_message.content
+
+
+@pytest.mark.asyncio
 async def test_clarify_true_without_options_falls_back_to_safe_options(tmp_path):
     from engine.expert.agent import ExpertAgent
 
@@ -334,6 +443,47 @@ async def test_clarify_true_without_options_falls_back_to_safe_options(tmp_path)
     assert result.skip_option.id == "skip"
     assert result.multi_select is True
     assert result.options[0].id == "valuation"
+
+
+@pytest.mark.asyncio
+async def test_clarify_with_images_passes_images_and_grounding_note_to_llm(tmp_path):
+    from engine.expert.agent import ExpertAgent
+
+    captured_messages = []
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            captured_messages.append(messages)
+            if len(captured_messages) == 1:
+                yield (
+                    '{"image_kind":"kline_chart","detected_entities":["中泰化学","日K"],'
+                    '"user_focus":"下跌原因","summary":"这是中泰化学的K线截图，用户想知道为什么一直跌。"}'
+                )
+                return
+            yield (
+                '{"should_clarify": false, "question_summary": "图片里的股票走势已经很明确，直接进入分析",'
+                '"multi_select": false, "options": [], "reasoning": "图片已经补足上下文", "needs_more": false}'
+            )
+
+    mock_tools = Mock()
+    mock_tools.llm_engine = _MockLLM()
+    mock_tools.execute = AsyncMock(return_value="tool result")
+    agent = ExpertAgent(mock_tools, kg_path=str(tmp_path / "kg.json"))
+
+    result = await agent.clarify(
+        "我这个怎么办",
+        history=[],
+        persona="rag",
+        previous_selections=[],
+        images=["data:image/png;base64,abc123"],
+    )
+
+    assert result.should_clarify is False
+    assert len(captured_messages) == 2
+    grounding_prompt = captured_messages[1][-1]
+    assert grounding_prompt.images == ["data:image/png;base64,abc123"]
+    assert "用户上传图片的结构化说明" in grounding_prompt.content
+    assert "中泰化学" in grounding_prompt.content
 
 
 def test_fallback_think_parse_batches_multi_stock_comprehensive_by_expert(expert_agent, monkeypatch):

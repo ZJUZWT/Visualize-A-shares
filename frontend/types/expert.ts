@@ -209,6 +209,7 @@ export interface PendingClarification {
   expertMessageId: string;
   request: ClarificationRequestData;
   originalMessage: string;
+  originalImages: string[];
   /** 多轮澄清：之前所有轮次的用户选择 */
   previousSelections: ClarificationRoundSelection[];
 }
