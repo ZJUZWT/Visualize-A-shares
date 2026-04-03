@@ -16,7 +16,7 @@ import duckdb
 from loguru import logger
 from pathlib import Path
 
-from config import settings
+from config import DATA_DIR, DB_PATH, settings
 from llm.config import llm_settings
 from llm.providers import LLMProviderFactory, ChatMessage, BaseLLMProvider
 
@@ -44,7 +44,11 @@ CREATE TABLE IF NOT EXISTS study.tasks (
 
 
 def _get_db_path() -> Path:
-    return Path(settings.datasource.duckdb_path)
+    return DB_PATH
+
+
+def _get_knowledge_graph_path() -> Path:
+    return DATA_DIR / "expert_kg.json"
 
 
 def _ensure_tables(conn: duckdb.DuckDBPyConnection) -> None:
@@ -662,7 +666,7 @@ class StudyEngine:
                 StockNode, SectorNode, EventNode, BeliefNode, StanceNode, GraphEdge
             )
 
-            kg_path = str(Path(settings.datasource.data_dir) / "expert_kg.json")
+            kg_path = str(_get_knowledge_graph_path())
             graph = KnowledgeGraph(kg_path)
 
             # 添加/更新 StockNode

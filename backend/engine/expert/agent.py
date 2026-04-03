@@ -176,7 +176,11 @@ class ExpertAgent:
 
     @staticmethod
     def _format_image_grounding_note(summary: ImageGroundingSummary) -> str:
-        lines = ["## 用户上传图片的结构化说明"]
+        lines = [
+            "## 用户上传图片的结构化说明",
+            "- 系统确认：本轮请求包含用户上传图片，请结合图片内容继续分析。",
+            "- 严禁回答“没有检测到图片上传”“看不到图片”或类似表述。",
+        ]
         if summary.image_kind:
             lines.append(f"- 图片类型: {summary.image_kind}")
         if summary.detected_entities:

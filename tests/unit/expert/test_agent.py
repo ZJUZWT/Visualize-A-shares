@@ -483,7 +483,52 @@ async def test_clarify_with_images_passes_images_and_grounding_note_to_llm(tmp_p
     grounding_prompt = captured_messages[1][-1]
     assert grounding_prompt.images == ["data:image/png;base64,abc123"]
     assert "用户上传图片的结构化说明" in grounding_prompt.content
+    assert "系统确认：本轮请求包含用户上传图片" in grounding_prompt.content
+    assert "严禁回答“没有检测到图片上传”" in grounding_prompt.content
     assert "中泰化学" in grounding_prompt.content
+
+
+@pytest.mark.asyncio
+async def test_generate_reply_stream_with_images_explicitly_confirms_image_presence(tmp_path):
+    from engine.expert.agent import ExpertAgent
+
+    captured_messages = []
+
+    class _MockLLM:
+        async def chat_stream(self, messages):
+            captured_messages.append(messages)
+            if len(captured_messages) == 1:
+                yield (
+                    '{"image_kind":"portfolio_screenshot","detected_entities":["东方电气","豫能控股"],'
+                    '"user_focus":"持仓分析","summary":"这是包含多只股票的持仓截图。"}'
+                )
+                return
+            yield "已收到图片"
+
+    mock_tools = Mock()
+    mock_tools.llm_engine = _MockLLM()
+    mock_tools.execute = AsyncMock(return_value="tool result")
+    agent = ExpertAgent(mock_tools, kg_path=str(tmp_path / "kg.json"))
+
+    outputs = []
+    async for token, full_text in agent.generate_reply_stream(
+        "看下这几个票",
+        nodes=[],
+        memories=[],
+        tool_results=[],
+        history=[],
+        persona="rag",
+        images=["data:image/png;base64,abc123"],
+    ):
+        outputs.append((token, full_text))
+
+    assert outputs[-1][1] == "已收到图片"
+    assert len(captured_messages) == 2
+    grounded_prompt = captured_messages[1][-1]
+    assert grounded_prompt.images == ["data:image/png;base64,abc123"]
+    assert "系统确认：本轮请求包含用户上传图片" in grounded_prompt.content
+    assert "严禁回答“没有检测到图片上传”" in grounded_prompt.content
+    assert "东方电气" in grounded_prompt.content
 
 
 def test_fallback_think_parse_batches_multi_stock_comprehensive_by_expert(expert_agent, monkeypatch):
